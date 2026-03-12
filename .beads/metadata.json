@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "rusty_adb",
+  "project_id": "07916f79-272e-45d7-80e9-d08f1a0d9687"
+}
