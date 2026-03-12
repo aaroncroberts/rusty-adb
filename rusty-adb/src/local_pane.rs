@@ -47,9 +47,8 @@ impl FileEntry {
     }
 }
 
-/// Field to sort entries by
+/// Field to sort entries by (Name/Size/Modified — all now active via sort header clicks)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Size and Modified used in task 3.2 sort controls
 pub enum SortField {
     Name,
     Size,
@@ -71,6 +70,8 @@ pub struct LocalPane {
     pub show_hidden: bool,
     /// Active sort field (always dirs-first within sort)
     pub sort_by: SortField,
+    /// True = ascending (A→Z, small→large); false = descending
+    pub sort_ascending: bool,
     /// Last error loading directory (displayed in body)
     pub error: Option<String>,
 }
@@ -84,6 +85,7 @@ impl LocalPane {
             selected: None,
             show_hidden: false,
             sort_by: SortField::Name,
+            sort_ascending: true,
             error: None,
         };
         pane.reload();
@@ -95,7 +97,7 @@ impl LocalPane {
         self.selected = None;
         self.error = None;
 
-        match load_entries(&self.current_path, self.show_hidden, self.sort_by) {
+        match load_entries(&self.current_path, self.show_hidden, self.sort_by, self.sort_ascending) {
             Ok(entries) => {
                 tracing::debug!(
                     path = %self.current_path.display(),
@@ -142,26 +144,38 @@ impl LocalPane {
         self.reload();
     }
 
-    /// Change sort field and reload.
+    /// Change sort field (or toggle direction if already active) and reload.
+    ///
+    /// - Same field clicked twice → toggle ascending/descending
+    /// - New field clicked → set field, reset to ascending
     pub fn sort_by(&mut self, field: SortField) {
-        tracing::debug!(sort = ?field, "local pane sort changed");
-        self.sort_by = field;
+        if self.sort_by == field {
+            self.sort_ascending = !self.sort_ascending;
+            tracing::debug!(sort = ?field, ascending = self.sort_ascending, "sort direction toggled");
+        } else {
+            self.sort_by = field;
+            self.sort_ascending = true;
+            tracing::debug!(sort = ?field, "sort field changed");
+        }
         self.reload();
     }
 
     // ─── View ─────────────────────────────────────────────────────────────
 
-    /// Render the local pane (header + scrollable file list).
+    /// Render the local pane (header + breadcrumb + scrollable file list).
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
         on_toggle_hidden: Message,
+        on_sort: impl Fn(SortField) -> Message + 'a,
     ) -> Element<'a, Message> {
         let header = self.view_header(theme, on_toggle_hidden);
-        let body = self.view_body(theme, on_navigate, on_select);
-        column![header, body].width(Fill).height(Fill).into()
+        // breadcrumb is a free function — its lifetime is independent of &'a self
+        let breadcrumb = view_breadcrumb(&self.current_path, theme, &on_navigate);
+        let body = self.view_body(theme, on_navigate, on_select, on_sort);
+        column![header, breadcrumb, body].width(Fill).height(Fill).into()
     }
 
     fn view_header<'a, Message: 'a + Clone>(
@@ -169,18 +183,6 @@ impl LocalPane {
         theme: ThemeColors,
         on_toggle_hidden: Message,
     ) -> Element<'a, Message> {
-        let path_text = self
-            .current_path
-            .to_string_lossy()
-            .into_owned();
-
-        // Truncate long paths from the left
-        let display_path = if path_text.len() > 40 {
-            format!("…{}", &path_text[path_text.len() - 40..])
-        } else {
-            path_text
-        };
-
         let hidden_label = if self.show_hidden { "Hide ." } else { "Show ." };
 
         let hidden_btn = button(text(hidden_label).size(11).color(theme.text_secondary))
@@ -191,8 +193,7 @@ impl LocalPane {
             .on_press(on_toggle_hidden);
 
         let content = row![
-            text("Local Files  ").size(12).color(theme.text_secondary),
-            text(display_path).size(11).color(theme.accent),
+            text("Local Files").size(12).color(theme.text_secondary),
             iced::widget::Space::with_width(Fill),
             hidden_btn,
         ]
@@ -202,7 +203,7 @@ impl LocalPane {
         container(content)
             .width(Fill)
             .height(28.0)
-            .padding([6, 8])
+            .padding([4, 8])
             .style(move |_t| container::Style {
                 background: Some(theme.background_secondary.into()),
                 border: Border {
@@ -220,6 +221,7 @@ impl LocalPane {
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
+        on_sort: impl Fn(SortField) -> Message + 'a,
     ) -> Element<'a, Message> {
         if let Some(err) = &self.error {
             let msg = text(format!("Error: {}", err))
@@ -236,13 +238,41 @@ impl LocalPane {
                 .into();
         }
 
-        // Column header row
+        // ── Sort indicator helper ────────────────────────────────────────────
+        let sort_indicator = |field: SortField| -> &'static str {
+            if self.sort_by == field {
+                if self.sort_ascending { " ▲" } else { " ▼" }
+            } else {
+                ""
+            }
+        };
+
+        // ── Clickable column headers ─────────────────────────────────────────
+        let name_hdr_label = format!("Name{}", sort_indicator(SortField::Name));
+        let size_hdr_label = format!("Size{}", sort_indicator(SortField::Size));
+        let date_hdr_label = format!("Modified{}", sort_indicator(SortField::Modified));
+
+        let mk_hdr_btn = |label: String,
+                          _field: SortField,
+                          width: Length,
+                          msg: Message|
+         -> Element<'a, Message> {
+            button(text(label).size(11).color(theme.text_secondary).width(width))
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+                .padding([2, 4])
+                .on_press(msg)
+                .into()
+        };
+
         let col_header = row![
-            text("Name").size(11).color(theme.text_secondary).width(Length::Fill),
-            text("Size").size(11).color(theme.text_secondary).width(80),
-            text("Modified").size(11).color(theme.text_secondary).width(90),
+            mk_hdr_btn(name_hdr_label, SortField::Name, Length::Fill, on_sort(SortField::Name)),
+            mk_hdr_btn(size_hdr_label, SortField::Size, Length::Fixed(80.0), on_sort(SortField::Size)),
+            mk_hdr_btn(date_hdr_label, SortField::Modified, Length::Fixed(90.0), on_sort(SortField::Modified)),
         ]
-        .padding([2, 12])
+        .padding([2, 8])
         .spacing(4);
 
         let col_header_container = container(col_header)
@@ -351,6 +381,82 @@ impl LocalPane {
     }
 }
 
+// ─── Breadcrumb ───────────────────────────────────────────────────────────────
+
+/// Render a clickable breadcrumb bar for `current_path`.
+///
+/// e.g.  `/` › `Users` › `aaron` › `Documents`
+///
+/// Each segment (except the last) emits `on_navigate(ancestor_path)` when clicked.
+/// The buttons store computed `Message` values (not closure references), so this
+/// function's lifetime is independent of the caller's `&'a self`.
+fn view_breadcrumb<'a, Message: 'a + Clone>(
+    current_path: &std::path::Path,
+    theme: ThemeColors,
+    on_navigate: &impl Fn(PathBuf) -> Message,
+) -> Element<'a, Message> {
+    // Collect ancestors in root-first order
+    let mut segments: Vec<(String, PathBuf)> = current_path
+        .ancestors()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| {
+            let label = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "/".to_string());
+            (label, p.to_path_buf())
+        })
+        .collect();
+
+    if segments.first().map(|(l, _)| l.as_str()) != Some("/") {
+        segments.insert(0, ("/".to_string(), PathBuf::from("/")));
+    }
+
+    let last_idx = segments.len().saturating_sub(1);
+    let mut crumb_row: Vec<Element<Message>> = Vec::new();
+
+    for (i, (label, path)) in segments.into_iter().enumerate() {
+        let is_last = i == last_idx;
+        if is_last {
+            crumb_row.push(text(label).size(11).color(theme.accent).into());
+        } else {
+            // Compute the Message value eagerly — the button owns it, not a closure ref.
+            let nav_msg = on_navigate(path);
+            let btn = button(text(label).size(11).color(theme.text_secondary))
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+                .padding([0, 2])
+                .on_press(nav_msg);
+            crumb_row.push(btn.into());
+            crumb_row.push(text("›").size(11).color(theme.text_secondary).into());
+        }
+    }
+
+    let content = row(crumb_row)
+        .align_y(iced::Alignment::Center)
+        .spacing(2)
+        .padding([2, 8]);
+
+    container(content)
+        .width(Fill)
+        .height(22.0)
+        .style(move |_t| container::Style {
+            background: Some(theme.background.into()),
+            border: Border {
+                color: theme.border,
+                width: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
 // ─── Filesystem Loading ────────────────────────────────────────────────────────
 
 /// Read directory entries, filter hidden files, and sort.
@@ -358,6 +464,7 @@ fn load_entries(
     path: &PathBuf,
     show_hidden: bool,
     sort: SortField,
+    ascending: bool,
 ) -> Result<Vec<FileEntry>, String> {
     let read = std::fs::read_dir(path).map_err(|e| e.to_string())?;
 
@@ -381,16 +488,19 @@ fn load_entries(
         })
         .collect();
 
-    // Dirs first, then sort within groups
+    // Dirs first, then sort within groups (with direction)
     entries.sort_by(|a, b| {
         match (a.is_dir, b.is_dir) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => match sort {
-                SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                SortField::Size => a.size.cmp(&b.size),
-                SortField::Modified => a.modified.cmp(&b.modified),
-            },
+            _ => {
+                let base = match sort {
+                    SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    SortField::Size => a.size.cmp(&b.size),
+                    SortField::Modified => a.modified.cmp(&b.modified),
+                };
+                if ascending { base } else { base.reverse() }
+            }
         }
     });
 
@@ -485,15 +595,14 @@ mod tests {
     #[test]
     fn load_entries_valid_path() {
         let path = std::env::temp_dir();
-        // Should not error on the temp dir
-        let result = load_entries(&path, true, SortField::Name);
+        let result = load_entries(&path, true, SortField::Name, true);
         assert!(result.is_ok());
     }
 
     #[test]
     fn load_entries_invalid_path() {
         let path = PathBuf::from("/nonexistent/path/xyz");
-        let result = load_entries(&path, true, SortField::Name);
+        let result = load_entries(&path, true, SortField::Name, true);
         assert!(result.is_err());
     }
 
@@ -506,7 +615,7 @@ mod tests {
         fs::write(tmp.join("aaa_file.txt"), b"x").unwrap();
         fs::create_dir_all(tmp.join("zzz_dir")).unwrap();
 
-        let entries = load_entries(&tmp, false, SortField::Name).unwrap();
+        let entries = load_entries(&tmp, false, SortField::Name, true).unwrap();
         assert!(entries[0].is_dir, "first entry should be a directory");
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -520,8 +629,8 @@ mod tests {
         fs::write(tmp.join(".hidden"), b"x").unwrap();
         fs::write(tmp.join("visible.txt"), b"x").unwrap();
 
-        let without = load_entries(&tmp, false, SortField::Name).unwrap();
-        let with = load_entries(&tmp, true, SortField::Name).unwrap();
+        let without = load_entries(&tmp, false, SortField::Name, true).unwrap();
+        let with = load_entries(&tmp, true, SortField::Name, true).unwrap();
 
         assert_eq!(without.len(), 1);
         assert_eq!(with.len(), 2);
@@ -558,13 +667,13 @@ mod tests {
 
     #[test]
     fn local_pane_new_starts_at_given_path() {
-        // Use a guaranteed-readable path (temp dir)
         let path = std::env::temp_dir();
         let pane = LocalPane::new(path.clone());
         assert_eq!(pane.current_path, path);
         assert!(pane.error.is_none(), "should have no error on temp dir");
         assert!(pane.selected.is_none());
         assert!(!pane.show_hidden);
+        assert!(pane.sort_ascending, "default sort should be ascending");
     }
 
     #[test]
@@ -596,12 +705,25 @@ mod tests {
     }
 
     #[test]
-    fn sort_by_size_reloads() {
+    fn sort_by_new_field_sets_ascending() {
         let tmp = std::env::temp_dir();
         let mut pane = LocalPane::new(tmp);
         pane.sort_by(SortField::Size);
         assert_eq!(pane.sort_by, SortField::Size);
-        assert!(pane.error.is_none());
+        assert!(pane.sort_ascending);
+    }
+
+    #[test]
+    fn sort_by_same_field_toggles_direction() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        assert_eq!(pane.sort_by, SortField::Name);
+        assert!(pane.sort_ascending);
+        pane.sort_by(SortField::Name); // click same field → descending
+        assert_eq!(pane.sort_by, SortField::Name);
+        assert!(!pane.sort_ascending);
+        pane.sort_by(SortField::Name); // click again → ascending
+        assert!(pane.sort_ascending);
     }
 
     #[test]
@@ -610,6 +732,24 @@ mod tests {
         let mut pane = LocalPane::new(tmp);
         pane.sort_by(SortField::Modified);
         assert_eq!(pane.sort_by, SortField::Modified);
+        assert!(pane.error.is_none());
+    }
+
+    #[test]
+    fn sort_descending_reverses_order() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join("rusty_adb_test_desc");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("aaa.txt"), b"a").unwrap();
+        fs::write(tmp.join("zzz.txt"), b"z").unwrap();
+
+        let asc = load_entries(&tmp, false, SortField::Name, true).unwrap();
+        let desc = load_entries(&tmp, false, SortField::Name, false).unwrap();
+
+        assert_eq!(asc[0].name, "aaa.txt");
+        assert_eq!(desc[0].name, "zzz.txt");
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

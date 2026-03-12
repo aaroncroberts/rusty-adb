@@ -48,7 +48,6 @@ enum Message {
     LocalNavigateTo(PathBuf),
     LocalSelectEntry(usize),
     LocalToggleHidden,
-    #[allow(dead_code)] // used in task 3.2
     LocalSortBy(SortField),
 
     // ── Android Pane ──────────────────────────────────────────────────────────
@@ -622,6 +621,7 @@ impl App {
             Message::LocalNavigateTo,
             Message::LocalSelectEntry,
             Message::LocalToggleHidden,
+            Message::LocalSortBy,
         );
 
         let right = self.android_pane.view(
