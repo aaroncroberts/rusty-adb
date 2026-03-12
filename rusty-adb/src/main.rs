@@ -1,8 +1,5 @@
 //! rusty-adb — Android File Manager
 //!
-//! A fast, modern dual-pane file manager for transferring files between
-//! a macOS host and Android devices via ADB.
-//!
 //! Layout:
 //!   ┌─────────────────────────────────────────┐
 //!   │              Toolbar (40px)              │
@@ -15,6 +12,7 @@
 #![allow(mismatched_lifetime_syntaxes)]
 
 mod adb;
+mod android_pane;
 mod local_pane;
 mod status_bar;
 mod theme;
@@ -23,7 +21,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use adb::{AdbClient, AdbDevice, DeviceState};
+use adb::{AdbClient, AdbDevice, AndroidEntry, DeviceState};
+use android_pane::{AndroidPane, AndroidPaneState};
 use local_pane::{LocalPane, SortField};
 use status_bar::{AdbStatus, StatusBar};
 use theme::ThemeColors;
@@ -38,25 +37,29 @@ const TOOLBAR_HEIGHT: f32 = 40.0;
 #[derive(Debug, Clone)]
 enum Message {
     // ── ADB ──────────────────────────────────────────────────────────────────
-    /// ADB binary located and daemon started — client is ready to use
     AdbReady(Arc<AdbClient>),
-    /// Fired every 2 s by the Iced time subscription to trigger a device poll
     PollDevices,
-    /// Result of `adb devices -l` — replaces the current device list
     DevicesLoaded(Arc<Vec<AdbDevice>>),
-    /// ADB binary was not found or an error occurred during polling
     AdbError(String),
 
     // ── Local Pane ────────────────────────────────────────────────────────────
-    /// Navigate the local pane to a new directory (or into one by clicking)
     LocalNavigateTo(PathBuf),
-    /// Select a file entry by index
     LocalSelectEntry(usize),
-    /// Toggle hidden-file visibility
     LocalToggleHidden,
-    /// Change the sort field (used by 3.2 sort controls)
-    #[allow(dead_code)]
+    #[allow(dead_code)] // used in task 3.2
     LocalSortBy(SortField),
+
+    // ── Android Pane ──────────────────────────────────────────────────────────
+    AndroidNavigateTo(PathBuf),
+    AndroidEntriesLoaded {
+        path: PathBuf,
+        entries: Arc<Vec<AndroidEntry>>,
+        roots: Arc<Vec<PathBuf>>,
+    },
+    AndroidLoadError(String),
+    AndroidSelectEntry(usize),
+    /// Drives the loading spinner animation
+    SpinnerTick,
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -65,12 +68,13 @@ struct App {
     theme: ThemeColors,
     status_bar: StatusBar,
     adb_status: AdbStatus,
-    /// Resolved ADB client; None if binary not found
     adb_client: Option<AdbClient>,
-    /// Last known device list
     devices: Vec<AdbDevice>,
-    /// Left pane — local filesystem browser
+    /// Serial of the currently active (authorized) device
+    active_serial: Option<String>,
+
     local_pane: LocalPane,
+    android_pane: AndroidPane,
 }
 
 impl Default for App {
@@ -82,7 +86,9 @@ impl Default for App {
             adb_status: AdbStatus::Disconnected,
             adb_client: None,
             devices: Vec::new(),
+            active_serial: None,
             local_pane: LocalPane::new(start_path),
+            android_pane: AndroidPane::default(),
             theme,
         }
     }
@@ -108,7 +114,6 @@ pub fn main() -> iced::Result {
         .theme(|_| Theme::TokyoNightStorm)
         .window_size((1280.0, 800.0))
         .run_with(|| {
-            // On startup: locate adb and warm the daemon in the background.
             let init_task = Task::perform(
                 async {
                     let client = AdbClient::find().await.map_err(|e| e.to_string())?;
@@ -123,7 +128,6 @@ pub fn main() -> iced::Result {
                     Err(e) => Message::AdbError(e),
                 },
             );
-
             (App::default(), init_task)
         })
 }
@@ -132,7 +136,17 @@ pub fn main() -> iced::Result {
 
 impl App {
     fn subscription(&self) -> Subscription<Message> {
-        iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices)
+        let device_poll =
+            iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices);
+
+        // Only run the fast spinner subscription while the Android pane is loading
+        if self.android_pane.state == AndroidPaneState::Loading {
+            let spinner =
+                iced::time::every(Duration::from_millis(120)).map(|_| Message::SpinnerTick);
+            Subscription::batch([device_poll, spinner])
+        } else {
+            device_poll
+        }
     }
 }
 
@@ -144,14 +158,13 @@ impl App {
             // ── ADB ──────────────────────────────────────────────────────────
             Message::AdbReady(client) => {
                 self.adb_client = Some((*client).clone());
-                return self.update(Message::PollDevices);
+                self.update(Message::PollDevices)
             }
 
             Message::PollDevices => {
                 let Some(client) = self.adb_client.clone() else {
                     return Task::none();
                 };
-
                 Task::perform(
                     async move {
                         client
@@ -161,7 +174,7 @@ impl App {
                             .map_err(|e| e.to_string())
                     },
                     |result| match result {
-                        Ok(devices) => Message::DevicesLoaded(devices),
+                        Ok(d) => Message::DevicesLoaded(d),
                         Err(e) => Message::AdbError(e),
                     },
                 )
@@ -171,6 +184,31 @@ impl App {
                 self.devices = (*devices).clone();
                 self.adb_status = derive_status(&self.devices);
                 tracing::debug!(count = self.devices.len(), "devices refreshed");
+
+                // Detect newly-connected authorized device
+                let new_serial = self
+                    .devices
+                    .iter()
+                    .find(|d| d.state == DeviceState::Device)
+                    .map(|d| d.serial.clone());
+
+                match (&self.active_serial, &new_serial) {
+                    (None, Some(serial)) => {
+                        // Device just appeared — start loading /sdcard
+                        tracing::info!(serial = %serial, "device connected, loading /sdcard");
+                        self.active_serial = Some(serial.clone());
+                        self.android_pane.on_device_connected();
+                        return self.update(Message::AndroidNavigateTo(PathBuf::from("/sdcard")));
+                    }
+                    (Some(_), None) => {
+                        // Device disconnected
+                        tracing::info!("device disconnected");
+                        self.active_serial = None;
+                        self.android_pane.on_device_disconnected();
+                    }
+                    _ => {}
+                }
+
                 Task::none()
             }
 
@@ -185,19 +223,74 @@ impl App {
                 self.local_pane.navigate_to(path);
                 Task::none()
             }
-
-            Message::LocalSelectEntry(index) => {
-                self.local_pane.select(index);
+            Message::LocalSelectEntry(i) => {
+                self.local_pane.select(i);
                 Task::none()
             }
-
             Message::LocalToggleHidden => {
                 self.local_pane.toggle_hidden();
                 Task::none()
             }
-
             Message::LocalSortBy(field) => {
                 self.local_pane.sort_by(field);
+                Task::none()
+            }
+
+            // ── Android Pane ──────────────────────────────────────────────────
+            Message::AndroidNavigateTo(path) => {
+                let Some(client) = self.adb_client.clone() else {
+                    return Task::none();
+                };
+                let Some(serial) = self.active_serial.clone() else {
+                    return Task::none();
+                };
+
+                self.android_pane.begin_navigate(path.clone());
+
+                Task::perform(
+                    async move {
+                        // Fetch directory entries and storage roots in parallel
+                        let entries_fut = client.list_dir(&serial, &path);
+                        let roots_fut = client.list_storage_roots(&serial);
+                        let (entries_res, roots) =
+                            tokio::join!(entries_fut, roots_fut);
+                        entries_res
+                            .map(|e| (path, e, roots))
+                            .map_err(|e| e.to_string())
+                    },
+                    |result| match result {
+                        Ok((path, entries, roots)) => Message::AndroidEntriesLoaded {
+                            path,
+                            entries: Arc::new(entries),
+                            roots: Arc::new(roots),
+                        },
+                        Err(e) => Message::AndroidLoadError(e),
+                    },
+                )
+            }
+
+            Message::AndroidEntriesLoaded { path, entries, roots } => {
+                self.android_pane.on_entries_loaded(
+                    path,
+                    (*entries).clone(),
+                    (*roots).clone(),
+                );
+                Task::none()
+            }
+
+            Message::AndroidLoadError(msg) => {
+                tracing::warn!(error = %msg, "android directory load error");
+                self.android_pane.on_error(msg);
+                Task::none()
+            }
+
+            Message::AndroidSelectEntry(i) => {
+                self.android_pane.select(i);
+                Task::none()
+            }
+
+            Message::SpinnerTick => {
+                self.android_pane.tick_spinner();
                 Task::none()
             }
         }
@@ -235,7 +328,6 @@ impl App {
 
     fn view_toolbar(&self) -> Element<Message> {
         let t = self.theme;
-
         let label = text("rusty-adb").size(14).color(t.accent);
         let actions = text("  ·  Connect  ·  Copy →  ·  Copy ←  ·  Refresh")
             .size(12)
@@ -269,7 +361,11 @@ impl App {
             Message::LocalToggleHidden,
         );
 
-        let right = self.view_right_pane();
+        let right = self.android_pane.view(
+            self.theme,
+            Message::AndroidNavigateTo,
+            Message::AndroidSelectEntry,
+        );
 
         let divider = container(vertical_rule(1))
             .height(Fill)
@@ -282,46 +378,5 @@ impl App {
             .width(Fill)
             .height(Fill)
             .into()
-    }
-
-    fn view_right_pane(&self) -> Element<Message> {
-        let t = self.theme;
-
-        let header_text = match &self.adb_status {
-            AdbStatus::Connected(name) => format!("Android Device — {}", name),
-            AdbStatus::Unauthorized => "Android Device — tap Allow on your phone".to_string(),
-            AdbStatus::Connecting(name) => format!("Android Device — connecting to {}…", name),
-            AdbStatus::Error(msg) => format!("Android Device — {}", msg),
-            AdbStatus::Disconnected => "Android Device — No device connected".to_string(),
-        };
-
-        let header = container(text(header_text).size(12).color(t.text_secondary))
-            .width(Fill)
-            .height(28.0)
-            .padding([6, 12])
-            .style(move |_theme| container::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-
-        let body = container(
-            text("→ Android file browser (task 4.2)")
-                .size(12)
-                .color(t.text_secondary),
-        )
-        .width(Fill)
-        .height(Fill)
-        .padding(16)
-        .style(move |_theme| container::Style {
-            background: Some(t.background.into()),
-            ..Default::default()
-        });
-
-        column![header, body].width(Fill).height(Fill).into()
     }
 }

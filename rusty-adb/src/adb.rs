@@ -5,7 +5,7 @@
 //!
 //! # Strategy
 //! - Device polling: `tokio::process::Command` running `adb devices -l` every 2s
-//! - File browsing: `adb_client` crate (typed API, no text parsing)
+//! - File browsing: `adb shell ls -la <path>` via subprocess (Toybox format)
 //! - File transfers: `adb push/pull --progress`, parsing `[ XX%]` from stderr
 //! - Startup: call `adb start-server` once at launch to warm the daemon
 
@@ -199,6 +199,200 @@ fn extract_kv<'a>(s: &'a str, key: &str) -> Option<String> {
         .map(|tok| tok[prefix.len()..].to_string())
 }
 
+// ─── Android Filesystem Entry ─────────────────────────────────────────────────
+
+/// A single entry returned by `adb shell ls -la`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AndroidEntry {
+    /// File or directory name (no path prefix)
+    pub name: String,
+    /// Full absolute path on the device
+    pub path: PathBuf,
+    /// Byte size (0 for directories — ls reports block size, not meaningful)
+    pub size: u64,
+    /// Pre-formatted modified date "YYYY-MM-DD" (or "--" if unknown)
+    pub modified: String,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub is_hidden: bool,
+}
+
+impl AndroidEntry {
+    /// Human-readable file size; directories always show "--".
+    pub fn size_display(&self) -> String {
+        if self.is_dir {
+            "--".to_string()
+        } else {
+            format_android_size(self.size)
+        }
+    }
+}
+
+fn format_android_size(bytes: u64) -> String {
+    const KB: u64 = 1_024;
+    const MB: u64 = 1_024 * KB;
+    const GB: u64 = 1_024 * MB;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+// ─── Directory Listing ────────────────────────────────────────────────────────
+
+impl AdbClient {
+    /// Run `adb -s <serial> shell ls -la <path>` and return parsed entries.
+    ///
+    /// Returns `Err` on permission denied or ADB errors.  `.` and `..` are
+    /// filtered out; the caller is responsible for adding a `..` navigation
+    /// entry when appropriate.
+    pub async fn list_dir(
+        &self,
+        serial: &str,
+        path: &std::path::Path,
+    ) -> Result<Vec<AndroidEntry>> {
+        let path_str = path.to_string_lossy();
+
+        let output = Command::new(&self.adb_path)
+            .args(["-s", serial, "shell", "ls", "-la", &*path_str])
+            .output()
+            .await
+            .context("failed to run adb shell ls -la")?;
+
+        let stdout = str::from_utf8(&output.stdout).context("adb output not UTF-8")?;
+        let stderr = str::from_utf8(&output.stderr).unwrap_or("");
+
+        // Permission denied can appear on either stdout or stderr
+        if stdout.contains("Permission denied") || stderr.contains("Permission denied") {
+            anyhow::bail!("Permission denied: {}", path_str);
+        }
+        if stdout.contains("No such file or directory") {
+            anyhow::bail!("No such file or directory: {}", path_str);
+        }
+
+        tracing::debug!(path = %path_str, "adb ls -la output:\n{}", stdout.trim());
+
+        Ok(parse_ls_output(stdout, path))
+    }
+
+    /// Discover Android storage roots: always includes `/sdcard`; also
+    /// returns any SD-card entries from `/storage/` that are not `emulated`
+    /// or `self`.
+    pub async fn list_storage_roots(&self, serial: &str) -> Vec<PathBuf> {
+        let mut roots = vec![PathBuf::from("/sdcard")];
+
+        let Ok(output) = Command::new(&self.adb_path)
+            .args(["-s", serial, "shell", "ls", "/storage/"])
+            .output()
+            .await
+        else {
+            return roots;
+        };
+
+        if let Ok(s) = str::from_utf8(&output.stdout) {
+            for name in s.lines().map(str::trim).filter(|n| !n.is_empty()) {
+                // SD cards have names like "ABCD-1234"; exclude known non-SD entries
+                if name != "emulated" && name != "self" {
+                    let candidate = PathBuf::from("/storage").join(name);
+                    if !roots.contains(&candidate) {
+                        roots.push(candidate);
+                    }
+                }
+            }
+        }
+
+        roots
+    }
+}
+
+// ─── Android ls parser ────────────────────────────────────────────────────────
+
+/// Parse the output of `adb shell ls -la <dir>` (Android Toybox format).
+///
+/// Example line:
+/// ```text
+/// drwxrwxrwx 17 root   sdcard_rw 3452 2024-01-15 12:00 DCIM
+/// lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulated/0
+/// ```
+pub fn parse_ls_output(output: &str, parent: &std::path::Path) -> Vec<AndroidEntry> {
+    output
+        .lines()
+        .filter_map(|line| parse_ls_line(line.trim(), parent))
+        .collect()
+}
+
+fn parse_ls_line(line: &str, parent: &std::path::Path) -> Option<AndroidEntry> {
+    // Skip blank lines and the "total N" header
+    if line.is_empty() || line.starts_with("total ") {
+        return None;
+    }
+    // Skip lines that are error messages
+    if line.contains("Permission denied") || line.contains("No such file") {
+        return None;
+    }
+
+    let perms_char = line.chars().next()?;
+    let is_dir = perms_char == 'd';
+    let is_symlink = perms_char == 'l';
+
+    // Tokenise: perms nlinks owner group size date time name...
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    if tokens.len() < 8 {
+        return None;
+    }
+
+    // Find the date token — always "YYYY-MM-DD" (10 chars, '-' at 4 and 7)
+    let date_idx = tokens.iter().position(|t| {
+        t.len() == 10
+            && t.as_bytes().get(4) == Some(&b'-')
+            && t.as_bytes().get(7) == Some(&b'-')
+    })?;
+
+    if date_idx < 1 || date_idx + 2 >= tokens.len() {
+        return None;
+    }
+
+    let size: u64 = tokens[date_idx - 1].parse().ok()?;
+    let date_str = tokens[date_idx];       // "2024-01-15"
+    let time_str = tokens[date_idx + 1];   // "12:00"
+    let modified = format!("{} {}", date_str, &time_str[..5]); // "2024-01-15 12:00"
+
+    // The name is everything after the time token in the original line.
+    // We find the time token's offset carefully (it appears after the date).
+    let date_offset = line.find(date_str)?;
+    let after_date = &line[date_offset + date_str.len()..];
+    let time_offset_in_after = after_date.find(time_str)?;
+    let after_time = after_date[time_offset_in_after + time_str.len()..].trim();
+
+    // Symlinks: "name -> /path/to/target" — strip the link target
+    let name_raw = if is_symlink {
+        after_time.split(" -> ").next().unwrap_or(after_time)
+    } else {
+        after_time
+    };
+    let name = name_raw.trim();
+
+    // Skip self and parent directory entries
+    if name == "." || name == ".." || name.is_empty() {
+        return None;
+    }
+
+    Some(AndroidEntry {
+        path: parent.join(name),
+        is_dir,
+        is_symlink,
+        is_hidden: name.starts_with('.'),
+        size,
+        modified: modified[..10].to_string(), // keep just "YYYY-MM-DD"
+        name: name.to_string(),
+    })
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -254,5 +448,91 @@ mod tests {
             product: None,
         };
         assert_eq!(d.display_name(), "emulator-5554");
+    }
+
+    // ── Android ls parser tests ───────────────────────────────────────────────
+
+    const SAMPLE_LS: &str = "\
+total 48
+drwxrwxrwx 17 root   sdcard_rw 3452 2024-01-15 12:00 .
+drwxr-x---  5 root   root      4096 2024-01-01 00:00 ..
+drwxrwxrwx  2 root   sdcard_rw 4096 2024-01-10 08:30 DCIM
+drwxrwxrwx  2 root   sdcard_rw 4096 2024-01-14 09:15 Download
+lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulated/0
+-rw-rw----  1 root   sdcard_rw 1234 2024-01-15 10:00 notes.txt
+";
+
+    #[test]
+    fn ls_parses_directories() {
+        let parent = std::path::Path::new("/sdcard");
+        let entries = parse_ls_output(SAMPLE_LS, parent);
+        let dcim = entries.iter().find(|e| e.name == "DCIM").unwrap();
+        assert!(dcim.is_dir);
+        assert_eq!(dcim.path, parent.join("DCIM"));
+        assert_eq!(dcim.modified, "2024-01-10");
+    }
+
+    #[test]
+    fn ls_parses_files() {
+        let parent = std::path::Path::new("/sdcard");
+        let entries = parse_ls_output(SAMPLE_LS, parent);
+        let f = entries.iter().find(|e| e.name == "notes.txt").unwrap();
+        assert!(!f.is_dir);
+        assert_eq!(f.size, 1234);
+        assert_eq!(f.size_display(), "1 KB");
+    }
+
+    #[test]
+    fn ls_parses_symlinks_strips_target() {
+        let parent = std::path::Path::new("/sdcard");
+        let entries = parse_ls_output(SAMPLE_LS, parent);
+        let link = entries.iter().find(|e| e.name == "sdcard0").unwrap();
+        assert!(link.is_symlink);
+        assert_eq!(link.name, "sdcard0");
+        // path should not include " -> /storage/emulated/0"
+        assert_eq!(link.path, parent.join("sdcard0"));
+    }
+
+    #[test]
+    fn ls_skips_dot_entries() {
+        let parent = std::path::Path::new("/sdcard");
+        let entries = parse_ls_output(SAMPLE_LS, parent);
+        assert!(entries.iter().all(|e| e.name != "." && e.name != ".."));
+    }
+
+    #[test]
+    fn ls_correct_entry_count() {
+        let parent = std::path::Path::new("/sdcard");
+        // Should have: DCIM, Download, sdcard0, notes.txt → 4
+        let entries = parse_ls_output(SAMPLE_LS, parent);
+        assert_eq!(entries.len(), 4);
+    }
+
+    #[test]
+    fn ls_hidden_file_flagged() {
+        let input = "-rw-rw----  1 root sdcard_rw 100 2024-01-15 10:00 .nomedia\n";
+        let entries = parse_ls_output(input, std::path::Path::new("/sdcard"));
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_hidden);
+    }
+
+    #[test]
+    fn ls_empty_output() {
+        let entries = parse_ls_output("total 0\n", std::path::Path::new("/sdcard"));
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn android_entry_dir_size_display() {
+        let e = AndroidEntry {
+            name: "DCIM".into(),
+            path: PathBuf::from("/sdcard/DCIM"),
+            size: 4096,
+            modified: "2024-01-10".into(),
+            is_dir: true,
+            is_symlink: false,
+            is_hidden: false,
+        };
+        assert_eq!(e.size_display(), "--");
     }
 }
