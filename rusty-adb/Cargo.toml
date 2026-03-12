@@ -1,0 +1,25 @@
+[package]
+name = "rusty-adb"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rusty-adb"
+path = "src/main.rs"
+
+[dependencies]
+rusty-logging = { path = "../rusty-logging" }
+
+# UI framework
+iced = { version = "0.13", features = ["tokio"] }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
