@@ -68,6 +68,7 @@ impl Default for AndroidPane {
 impl AndroidPane {
     /// Called when a device connects — begin loading /sdcard.
     pub fn on_device_connected(&mut self) {
+        tracing::info!("android pane: device connected, transitioning to Loading");
         self.current_path = PathBuf::from("/sdcard");
         self.entries.clear();
         self.selected = None;
@@ -76,6 +77,7 @@ impl AndroidPane {
 
     /// Called when the device disconnects.
     pub fn on_device_disconnected(&mut self) {
+        tracing::info!("android pane: device disconnected, transitioning to NoDevice");
         self.entries.clear();
         self.selected = None;
         self.storage_roots.clear();
@@ -84,6 +86,11 @@ impl AndroidPane {
 
     /// Called to start navigating to a new path.
     pub fn begin_navigate(&mut self, path: PathBuf) {
+        tracing::info!(
+            from = %self.current_path.display(),
+            to = %path.display(),
+            "android pane: navigating"
+        );
         self.current_path = path;
         self.selected = None;
         self.state = AndroidPaneState::Loading;
@@ -98,6 +105,11 @@ impl AndroidPane {
     ) {
         // Discard stale responses (user may have navigated elsewhere)
         if self.current_path != path {
+            tracing::debug!(
+                expected = %self.current_path.display(),
+                arrived = %path.display(),
+                "android pane: discarding stale directory response"
+            );
             return;
         }
         // Dirs first, then alphabetical
@@ -106,6 +118,12 @@ impl AndroidPane {
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
+        tracing::info!(
+            path = %path.display(),
+            count = entries.len(),
+            roots = roots.len(),
+            "android pane: directory loaded, transitioning to Browsing"
+        );
         self.entries = entries;
         self.storage_roots = roots;
         self.state = AndroidPaneState::Browsing;
@@ -113,6 +131,11 @@ impl AndroidPane {
 
     /// Called when ADB returns an error for the current path.
     pub fn on_error(&mut self, msg: String) {
+        tracing::warn!(
+            path = %self.current_path.display(),
+            error = %msg,
+            "android pane: directory load error, transitioning to Error"
+        );
         self.state = AndroidPaneState::Error(msg);
     }
 
@@ -413,5 +436,149 @@ impl AndroidPane {
             ..Default::default()
         })
         .into()
+    }
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adb::AndroidEntry;
+    use std::path::PathBuf;
+
+    fn make_entry(name: &str, is_dir: bool) -> AndroidEntry {
+        AndroidEntry {
+            name: name.to_string(),
+            path: PathBuf::from("/sdcard").join(name),
+            size: if is_dir { 0 } else { 1024 },
+            modified: "2024-01-15".to_string(),
+            is_dir,
+            is_symlink: false,
+            is_hidden: name.starts_with('.'),
+        }
+    }
+
+    #[test]
+    fn default_state_is_no_device() {
+        let pane = AndroidPane::default();
+        assert_eq!(pane.state, AndroidPaneState::NoDevice);
+        assert!(pane.entries.is_empty());
+    }
+
+    #[test]
+    fn on_device_connected_transitions_to_loading() {
+        let mut pane = AndroidPane::default();
+        pane.on_device_connected();
+        assert_eq!(pane.state, AndroidPaneState::Loading);
+        assert_eq!(pane.current_path, PathBuf::from("/sdcard"));
+    }
+
+    #[test]
+    fn on_device_disconnected_returns_to_no_device() {
+        let mut pane = AndroidPane::default();
+        pane.on_device_connected();
+        pane.on_device_disconnected();
+        assert_eq!(pane.state, AndroidPaneState::NoDevice);
+        assert!(pane.entries.is_empty());
+        assert!(pane.storage_roots.is_empty());
+    }
+
+    #[test]
+    fn begin_navigate_transitions_to_loading() {
+        let mut pane = AndroidPane::default();
+        pane.begin_navigate(PathBuf::from("/sdcard/DCIM"));
+        assert_eq!(pane.state, AndroidPaneState::Loading);
+        assert_eq!(pane.current_path, PathBuf::from("/sdcard/DCIM"));
+        assert!(pane.selected.is_none());
+    }
+
+    #[test]
+    fn on_entries_loaded_transitions_to_browsing() {
+        let mut pane = AndroidPane::default();
+        let path = PathBuf::from("/sdcard");
+        pane.begin_navigate(path.clone());
+
+        let entries = vec![make_entry("DCIM", true), make_entry("photo.jpg", false)];
+        let roots = vec![PathBuf::from("/sdcard")];
+        pane.on_entries_loaded(path, entries, roots);
+
+        assert_eq!(pane.state, AndroidPaneState::Browsing);
+        assert_eq!(pane.entries.len(), 2);
+        // dirs-first sort: DCIM before photo.jpg
+        assert!(pane.entries[0].is_dir);
+    }
+
+    #[test]
+    fn on_entries_loaded_stale_response_ignored() {
+        let mut pane = AndroidPane::default();
+        pane.begin_navigate(PathBuf::from("/sdcard/DCIM")); // navigated here
+
+        // Response arrives for /sdcard (old path)
+        let stale_entries = vec![make_entry("old.jpg", false)];
+        pane.on_entries_loaded(PathBuf::from("/sdcard"), stale_entries, vec![]);
+
+        // State should still be Loading (not Browsing), entries unchanged
+        assert_eq!(pane.state, AndroidPaneState::Loading);
+        assert!(pane.entries.is_empty());
+    }
+
+    #[test]
+    fn on_error_transitions_to_error() {
+        let mut pane = AndroidPane::default();
+        pane.begin_navigate(PathBuf::from("/sdcard/private"));
+        pane.on_error("Permission denied".to_string());
+        assert!(matches!(pane.state, AndroidPaneState::Error(_)));
+    }
+
+    #[test]
+    fn select_updates_index() {
+        let mut pane = AndroidPane::default();
+        let path = PathBuf::from("/sdcard");
+        pane.begin_navigate(path.clone());
+        pane.on_entries_loaded(
+            path,
+            vec![make_entry("DCIM", true), make_entry("Music", true)],
+            vec![],
+        );
+
+        pane.select(1);
+        assert_eq!(pane.selected, Some(1));
+    }
+
+    #[test]
+    fn select_out_of_bounds_ignored() {
+        let mut pane = AndroidPane::default();
+        pane.select(99);
+        assert!(pane.selected.is_none());
+    }
+
+    #[test]
+    fn tick_spinner_advances_and_wraps() {
+        let mut pane = AndroidPane::default();
+        assert_eq!(pane.spinner_frame, 0);
+        for _ in 0..255 {
+            pane.tick_spinner();
+        }
+        // After 255 ticks, wrapping_add(1) gives 0 on the next tick
+        pane.tick_spinner();
+        assert_eq!(pane.spinner_frame, 0);
+    }
+
+    #[test]
+    fn entries_sorted_dirs_first() {
+        let mut pane = AndroidPane::default();
+        let path = PathBuf::from("/sdcard");
+        pane.begin_navigate(path.clone());
+        let entries = vec![
+            make_entry("zebra.txt", false),
+            make_entry("alpha_dir", true),
+            make_entry("beta_dir", true),
+        ];
+        pane.on_entries_loaded(path, entries, vec![]);
+        assert!(pane.entries[0].is_dir);
+        assert!(pane.entries[1].is_dir);
+        assert!(!pane.entries[2].is_dir);
+        assert_eq!(pane.entries[0].name, "alpha_dir");
     }
 }

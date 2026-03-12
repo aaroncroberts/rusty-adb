@@ -275,9 +275,21 @@ impl AdbClient {
             anyhow::bail!("No such file or directory: {}", path_str);
         }
 
-        tracing::debug!(path = %path_str, "adb ls -la output:\n{}", stdout.trim());
+        tracing::debug!(
+            serial = %serial,
+            path = %path_str,
+            raw = %stdout.trim(),
+            "adb shell ls -la raw output"
+        );
 
-        Ok(parse_ls_output(stdout, path))
+        let entries = parse_ls_output(stdout, path);
+        tracing::info!(
+            serial = %serial,
+            path = %path_str,
+            count = entries.len(),
+            "directory listing loaded"
+        );
+        Ok(entries)
     }
 
     /// Discover Android storage roots: always includes `/sdcard`; also
@@ -296,16 +308,17 @@ impl AdbClient {
 
         if let Ok(s) = str::from_utf8(&output.stdout) {
             for name in s.lines().map(str::trim).filter(|n| !n.is_empty()) {
-                // SD cards have names like "ABCD-1234"; exclude known non-SD entries
                 if name != "emulated" && name != "self" {
                     let candidate = PathBuf::from("/storage").join(name);
                     if !roots.contains(&candidate) {
+                        tracing::info!(serial = %serial, volume = %name, "SD card volume detected");
                         roots.push(candidate);
                     }
                 }
             }
         }
 
+        tracing::debug!(serial = %serial, count = roots.len(), "storage roots discovered");
         roots
     }
 }
@@ -322,7 +335,31 @@ impl AdbClient {
 pub fn parse_ls_output(output: &str, parent: &std::path::Path) -> Vec<AndroidEntry> {
     output
         .lines()
-        .filter_map(|line| parse_ls_line(line.trim(), parent))
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let result = parse_ls_line(trimmed, parent);
+            // Warn on non-empty, non-header lines that we couldn't parse —
+            // this helps diagnose OEM-specific ls format variations.
+            if result.is_none()
+                && !trimmed.is_empty()
+                && !trimmed.starts_with("total ")
+                && !trimmed.contains("Permission denied")
+                && !trimmed.contains("No such file")
+                && trimmed != "."
+                && trimmed != ".."
+            {
+                // Only warn for lines that look like they should be entries
+                // (start with a permission character: -, d, l, c, b, p, s)
+                if matches!(trimmed.chars().next(), Some('-' | 'd' | 'l' | 'c' | 'b' | 'p' | 's')) {
+                    tracing::warn!(
+                        line = %trimmed,
+                        parent = %parent.display(),
+                        "unrecognised adb ls line — may be an OEM ls format variation"
+                    );
+                }
+            }
+            result
+        })
         .collect()
 }
 
@@ -534,5 +571,74 @@ lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulate
             is_hidden: false,
         };
         assert_eq!(e.size_display(), "--");
+    }
+
+    // ── DeviceState::from_str ─────────────────────────────────────────────────
+
+    #[test]
+    fn device_state_from_device() {
+        assert_eq!(DeviceState::from_str("device"), DeviceState::Device);
+    }
+
+    #[test]
+    fn device_state_from_unauthorized() {
+        assert_eq!(DeviceState::from_str("unauthorized"), DeviceState::Unauthorized);
+    }
+
+    #[test]
+    fn device_state_from_offline() {
+        assert_eq!(DeviceState::from_str("offline"), DeviceState::Offline);
+    }
+
+    #[test]
+    fn device_state_from_unknown() {
+        assert_eq!(
+            DeviceState::from_str("fastboot"),
+            DeviceState::Other("fastboot".to_string())
+        );
+    }
+
+    // ── format_android_size ───────────────────────────────────────────────────
+
+    #[test]
+    fn android_size_bytes() {
+        assert_eq!(format_android_size(0), "0 B");
+        assert_eq!(format_android_size(999), "999 B");
+    }
+
+    #[test]
+    fn android_size_kb() {
+        assert_eq!(format_android_size(2048), "2 KB");
+    }
+
+    #[test]
+    fn android_size_mb() {
+        assert_eq!(format_android_size(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    #[test]
+    fn android_size_gb() {
+        assert_eq!(format_android_size(2 * 1024 * 1024 * 1024), "2.0 GB");
+    }
+
+    // ── parse_ls_output edge cases ────────────────────────────────────────────
+
+    #[test]
+    fn ls_permission_denied_line_skipped() {
+        let input = "ls: /sdcard/private: Permission denied\n\
+                     -rw-rw----  1 root sdcard_rw 100 2024-01-15 10:00 notes.txt\n";
+        let entries = parse_ls_output(input, std::path::Path::new("/sdcard"));
+        // Permission denied line skipped; notes.txt should still parse
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "notes.txt");
+    }
+
+    #[test]
+    fn ls_file_with_spaces_in_name() {
+        let input =
+            "-rw-rw----  1 root sdcard_rw 1234 2024-01-15 10:00 my vacation photos.jpg\n";
+        let entries = parse_ls_output(input, std::path::Path::new("/sdcard"));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "my vacation photos.jpg");
     }
 }

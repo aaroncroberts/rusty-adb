@@ -47,6 +47,39 @@ impl Default for AdbStatus {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_disconnected() {
+        assert_eq!(AdbStatus::Disconnected.text(), "No device connected");
+    }
+
+    #[test]
+    fn text_unauthorized() {
+        assert!(AdbStatus::Unauthorized.text().contains("Allow"));
+    }
+
+    #[test]
+    fn text_connecting() {
+        let s = AdbStatus::Connecting("Pixel 7".to_string()).text();
+        assert!(s.contains("Pixel 7"), "expected device name in: {}", s);
+    }
+
+    #[test]
+    fn text_connected() {
+        let s = AdbStatus::Connected("Pixel 7".to_string()).text();
+        assert!(s.contains("Pixel 7") && s.contains("Connected"));
+    }
+
+    #[test]
+    fn text_error() {
+        let s = AdbStatus::Error("timeout".to_string()).text();
+        assert!(s.contains("Error") && s.contains("timeout"));
+    }
+}
+
 /// Status bar rendered at the bottom of the application window
 #[derive(Debug, Clone)]
 pub struct StatusBar {

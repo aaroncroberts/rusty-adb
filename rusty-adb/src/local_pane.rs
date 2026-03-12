@@ -96,8 +96,21 @@ impl LocalPane {
         self.error = None;
 
         match load_entries(&self.current_path, self.show_hidden, self.sort_by) {
-            Ok(entries) => self.entries = entries,
+            Ok(entries) => {
+                tracing::debug!(
+                    path = %self.current_path.display(),
+                    count = entries.len(),
+                    show_hidden = self.show_hidden,
+                    "local directory loaded"
+                );
+                self.entries = entries;
+            }
             Err(e) => {
+                tracing::warn!(
+                    path = %self.current_path.display(),
+                    error = %e,
+                    "failed to read local directory"
+                );
                 self.entries = Vec::new();
                 self.error = Some(e);
             }
@@ -106,6 +119,11 @@ impl LocalPane {
 
     /// Navigate into a subdirectory or handle ".." navigation.
     pub fn navigate_to(&mut self, path: PathBuf) {
+        tracing::info!(
+            from = %self.current_path.display(),
+            to = %path.display(),
+            "local pane navigating"
+        );
         self.current_path = path;
         self.reload();
     }
@@ -120,11 +138,13 @@ impl LocalPane {
     /// Toggle hidden file visibility and reload.
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
+        tracing::debug!(show_hidden = self.show_hidden, "toggled hidden files");
         self.reload();
     }
 
     /// Change sort field and reload.
     pub fn sort_by(&mut self, field: SortField) {
+        tracing::debug!(sort = ?field, "local pane sort changed");
         self.sort_by = field;
         self.reload();
     }
@@ -532,5 +552,81 @@ mod tests {
             is_hidden: false,
         };
         assert_eq!(entry.size_display(), "2 KB");
+    }
+
+    // ── LocalPane state method tests ──────────────────────────────────────────
+
+    #[test]
+    fn local_pane_new_starts_at_given_path() {
+        // Use a guaranteed-readable path (temp dir)
+        let path = std::env::temp_dir();
+        let pane = LocalPane::new(path.clone());
+        assert_eq!(pane.current_path, path);
+        assert!(pane.error.is_none(), "should have no error on temp dir");
+        assert!(pane.selected.is_none());
+        assert!(!pane.show_hidden);
+    }
+
+    #[test]
+    fn local_pane_new_invalid_path_sets_error() {
+        let pane = LocalPane::new(PathBuf::from("/this/path/does/not/exist/xyz"));
+        assert!(pane.error.is_some());
+        assert!(pane.entries.is_empty());
+    }
+
+    #[test]
+    fn navigate_to_updates_path() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp.clone());
+        let new_path = tmp.join("..").canonicalize().unwrap_or(tmp.clone());
+        pane.navigate_to(new_path.clone());
+        assert_eq!(pane.current_path, new_path);
+        assert!(pane.selected.is_none(), "selection should clear on navigation");
+    }
+
+    #[test]
+    fn toggle_hidden_flips_flag_and_reloads() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        assert!(!pane.show_hidden);
+        pane.toggle_hidden();
+        assert!(pane.show_hidden);
+        pane.toggle_hidden();
+        assert!(!pane.show_hidden);
+    }
+
+    #[test]
+    fn sort_by_size_reloads() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        pane.sort_by(SortField::Size);
+        assert_eq!(pane.sort_by, SortField::Size);
+        assert!(pane.error.is_none());
+    }
+
+    #[test]
+    fn sort_by_modified_reloads() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        pane.sort_by(SortField::Modified);
+        assert_eq!(pane.sort_by, SortField::Modified);
+    }
+
+    #[test]
+    fn select_updates_index() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        if !pane.entries.is_empty() {
+            pane.select(0);
+            assert_eq!(pane.selected, Some(0));
+        }
+    }
+
+    #[test]
+    fn select_out_of_bounds_is_ignored() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        pane.select(usize::MAX);
+        assert!(pane.selected.is_none());
     }
 }

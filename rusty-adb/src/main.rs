@@ -380,3 +380,66 @@ impl App {
             .into()
     }
 }
+
+// ─── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(serial: &str, state: DeviceState, model: Option<&str>) -> AdbDevice {
+        AdbDevice {
+            serial: serial.to_string(),
+            state,
+            model: model.map(str::to_string),
+            product: None,
+        }
+    }
+
+    #[test]
+    fn derive_status_empty() {
+        assert_eq!(derive_status(&[]), AdbStatus::Disconnected);
+    }
+
+    #[test]
+    fn derive_status_authorized_device() {
+        let devices = vec![device("ABC123", DeviceState::Device, Some("Pixel 7"))];
+        assert_eq!(
+            derive_status(&devices),
+            AdbStatus::Connected("Pixel 7".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_status_authorized_no_model_uses_serial() {
+        let devices = vec![device("ABC123", DeviceState::Device, None)];
+        assert_eq!(
+            derive_status(&devices),
+            AdbStatus::Connected("ABC123".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_status_unauthorized() {
+        let devices = vec![device("ABC123", DeviceState::Unauthorized, None)];
+        assert_eq!(derive_status(&devices), AdbStatus::Unauthorized);
+    }
+
+    #[test]
+    fn derive_status_prefers_authorized_over_unauthorized() {
+        let devices = vec![
+            device("ABC123", DeviceState::Unauthorized, None),
+            device("DEF456", DeviceState::Device, Some("Galaxy S24")),
+        ];
+        assert_eq!(
+            derive_status(&devices),
+            AdbStatus::Connected("Galaxy S24".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_status_offline_is_disconnected() {
+        let devices = vec![device("ABC123", DeviceState::Offline, None)];
+        assert_eq!(derive_status(&devices), AdbStatus::Disconnected);
+    }
+}
