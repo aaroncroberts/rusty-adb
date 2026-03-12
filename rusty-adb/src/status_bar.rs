@@ -1,10 +1,11 @@
 //! Status bar component for rusty-adb
 //!
-//! Renders a horizontal bar at the bottom of the window showing ADB
-//! connection state and (later) file transfer progress.
+//! Renders a horizontal bar at the bottom of the window showing:
+//! - ADB connection state (when idle)
+//! - File transfer progress bar + speed (when a transfer is active)
 
 use crate::theme::ThemeColors;
-use iced::widget::{container, row, text};
+use iced::widget::{container, progress_bar, row, text};
 use iced::{Border, Element, Fill};
 
 /// Height of the status bar in pixels
@@ -12,13 +13,13 @@ pub const STATUS_BAR_HEIGHT: f32 = 30.0;
 
 /// ADB device connection status
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // variants used when Android pane is implemented (task 4.1)
 pub enum AdbStatus {
     /// No device connected
     Disconnected,
     /// Device found but user hasn't authorized USB debugging yet
     Unauthorized,
-    /// ADB daemon is starting / device handshake in progress
+    /// ADB daemon is starting / device handshake in progress (reserved for future use)
+    #[allow(dead_code)]
     Connecting(String),
     /// Device connected and authorized — shows device model
     Connected(String),
@@ -46,6 +47,21 @@ impl Default for AdbStatus {
         AdbStatus::Disconnected
     }
 }
+
+// ─── Transfer status ───────────────────────────────────────────────────────────
+
+/// Live transfer state shown in the status bar during an active copy
+#[derive(Debug, Clone)]
+pub struct TransferStatus {
+    /// Display name of the file being transferred
+    pub filename: String,
+    /// Progress 0–100
+    pub percent: u8,
+    /// Human-readable speed e.g. "12.3 MB/s" (empty until adb reports it)
+    pub speed_display: String,
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -80,6 +96,8 @@ mod tests {
     }
 }
 
+// ─── Widget ────────────────────────────────────────────────────────────────────
+
 /// Status bar rendered at the bottom of the application window
 #[derive(Debug, Clone)]
 pub struct StatusBar {
@@ -91,21 +109,50 @@ impl StatusBar {
         Self { theme }
     }
 
-    /// Render the status bar, coloring the status text based on connection state.
-    pub fn view<'a, Message: 'a + Clone>(&'a self, status: &AdbStatus) -> Element<'a, Message> {
+    /// Render the status bar.
+    ///
+    /// When `transfer` is `Some`, shows a progress bar + speed instead of
+    /// the connection status text.
+    pub fn view<'a, Message: 'a + Clone>(
+        &'a self,
+        status: &AdbStatus,
+        transfer: Option<&TransferStatus>,
+    ) -> Element<'a, Message> {
         let theme = self.theme;
 
-        let status_color = match status {
-            AdbStatus::Disconnected => theme.text_secondary,
-            AdbStatus::Unauthorized => theme.warning,
-            AdbStatus::Connecting(_) => theme.accent,
-            AdbStatus::Connected(_) => theme.success,
-            AdbStatus::Error(_) => theme.error,
+        let inner: Element<Message> = if let Some(xfer) = transfer {
+            // ── Transfer in progress ──────────────────────────────────────────
+            let bar = progress_bar(0.0..=100.0, xfer.percent as f32)
+                .height(8)
+                .style(move |_theme| iced::widget::progress_bar::Style {
+                    background: theme.border.into(),
+                    bar: theme.accent.into(),
+                    border: iced::Border::default(),
+                });
+
+            let label = if xfer.speed_display.is_empty() {
+                format!("  {}  {}%", xfer.filename, xfer.percent)
+            } else {
+                format!("  {}  {}%  {}", xfer.filename, xfer.percent, xfer.speed_display)
+            };
+
+            row![bar, text(label).size(12).color(theme.text_secondary)]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+        } else {
+            // ── Connection status ─────────────────────────────────────────────
+            let status_color = match status {
+                AdbStatus::Disconnected => theme.text_secondary,
+                AdbStatus::Unauthorized => theme.warning,
+                AdbStatus::Connecting(_) => theme.accent,
+                AdbStatus::Connected(_) => theme.success,
+                AdbStatus::Error(_) => theme.error,
+            };
+            text(status.text()).size(12).color(status_color).into()
         };
 
-        let content = row![text(status.text()).size(12).color(status_color)]
-            .padding([6, 15])
-            .spacing(20);
+        let content = row![inner].padding([6, 15]).spacing(20);
 
         container(content)
             .width(Fill)

@@ -16,6 +16,7 @@ mod android_pane;
 mod local_pane;
 mod status_bar;
 mod theme;
+mod transfer;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,10 +25,11 @@ use std::time::Duration;
 use adb::{AdbClient, AdbDevice, AndroidEntry, DeviceState};
 use android_pane::{AndroidPane, AndroidPaneState};
 use local_pane::{LocalPane, SortField};
-use status_bar::{AdbStatus, StatusBar};
+use status_bar::{AdbStatus, StatusBar, TransferStatus};
 use theme::ThemeColors;
+use transfer::{TransferDirection, TransferEvent, TransferJob};
 
-use iced::widget::{column, container, row, text, vertical_rule};
+use iced::widget::{button, column, container, row, text, vertical_rule};
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 40.0;
@@ -60,6 +62,18 @@ enum Message {
     AndroidSelectEntry(usize),
     /// Drives the loading spinner animation
     SpinnerTick,
+
+    // ── Transfer ──────────────────────────────────────────────────────────────
+    /// User pressed "Copy →" (local → android)
+    CopyToAndroid,
+    /// User pressed "Copy ←" (android → local)
+    CopyToLocal,
+    /// Progress event from the active transfer subscription
+    TransferProgress { percent: u8 },
+    /// Transfer completed — carries final speed for display
+    TransferComplete { speed_display: String },
+    /// Transfer failed
+    TransferFailed(String),
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -75,6 +89,13 @@ struct App {
 
     local_pane: LocalPane,
     android_pane: AndroidPane,
+
+    /// Currently active transfer (drives the streaming subscription)
+    active_transfer: Option<TransferJob>,
+    /// Monotonic counter used to give each transfer a unique subscription ID
+    transfer_id: u64,
+    /// Live progress shown in the status bar
+    transfer_status: Option<TransferStatus>,
 }
 
 impl Default for App {
@@ -89,6 +110,9 @@ impl Default for App {
             active_serial: None,
             local_pane: LocalPane::new(start_path),
             android_pane: AndroidPane::default(),
+            active_transfer: None,
+            transfer_id: 0,
+            transfer_status: None,
             theme,
         }
     }
@@ -139,13 +163,59 @@ impl App {
         let device_poll =
             iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices);
 
-        // Only run the fast spinner subscription while the Android pane is loading
-        if self.android_pane.state == AndroidPaneState::Loading {
+        // Spinner — only while the Android pane is loading
+        let maybe_spinner = if self.android_pane.state == AndroidPaneState::Loading {
             let spinner =
                 iced::time::every(Duration::from_millis(120)).map(|_| Message::SpinnerTick);
-            Subscription::batch([device_poll, spinner])
+            Some(spinner)
         } else {
-            device_poll
+            None
+        };
+
+        // Transfer — stream stderr from the active adb push/pull process.
+        // `iced::stream::channel` produces a Stream<Item=Message>; we wrap it
+        // with `Subscription::run_with_id` keyed on `job.id` so Iced keeps the
+        // same stream alive rather than restarting it on every view pass.
+        let maybe_transfer = self.active_transfer.as_ref().map(|job| {
+            let job = job.clone();
+            Subscription::run_with_id(
+                job.id,
+                iced::stream::channel(32, move |mut sender| async move {
+                    let result = transfer::run_transfer(&job, |event| {
+                        let msg = match &event {
+                            TransferEvent::Progress { percent } => {
+                                Message::TransferProgress { percent: *percent }
+                            }
+                            TransferEvent::Complete { speed_display } => {
+                                Message::TransferComplete {
+                                    speed_display: speed_display.clone(),
+                                }
+                            }
+                            TransferEvent::Failed(e) => Message::TransferFailed(e.clone()),
+                        };
+                        // try_send: channel has capacity 32, ample for ≤100 progress ticks
+                        let _ = sender.try_send(msg);
+                    })
+                    .await;
+
+                    if let Err(e) = result {
+                        let _ = sender.try_send(Message::TransferFailed(e.to_string()));
+                    }
+
+                    // Park forever — Iced keeps the subscription alive until the
+                    // next subscription() call omits this id (i.e., transfer done).
+                    std::future::pending::<()>().await;
+                    unreachable!()
+                }),
+            )
+        });
+
+        // Combine all active subscriptions
+        match (maybe_spinner, maybe_transfer) {
+            (Some(s), Some(t)) => Subscription::batch([device_poll, s, t]),
+            (Some(s), None) => Subscription::batch([device_poll, s]),
+            (None, Some(t)) => Subscription::batch([device_poll, t]),
+            (None, None) => device_poll,
         }
     }
 }
@@ -201,9 +271,11 @@ impl App {
                         return self.update(Message::AndroidNavigateTo(PathBuf::from("/sdcard")));
                     }
                     (Some(_), None) => {
-                        // Device disconnected
+                        // Device disconnected — cancel any active transfer
                         tracing::info!("device disconnected");
                         self.active_serial = None;
+                        self.active_transfer = None;
+                        self.transfer_status = None;
                         self.android_pane.on_device_disconnected();
                     }
                     _ => {}
@@ -293,6 +365,142 @@ impl App {
                 self.android_pane.tick_spinner();
                 Task::none()
             }
+
+            // ── Transfer ──────────────────────────────────────────────────────
+            Message::CopyToAndroid => {
+                let Some(client) = &self.adb_client else {
+                    return Task::none();
+                };
+                let Some(serial) = &self.active_serial else {
+                    return Task::none();
+                };
+                let Some(idx) = self.local_pane.selected else {
+                    tracing::warn!("CopyToAndroid: no local file selected");
+                    return Task::none();
+                };
+                let local_entry = &self.local_pane.entries[idx];
+                if local_entry.is_dir {
+                    tracing::warn!("CopyToAndroid: directory copy not yet supported");
+                    return Task::none();
+                }
+
+                self.transfer_id += 1;
+                let android_dir = self.android_pane.current_path.clone();
+                let filename = local_entry.name.clone();
+
+                tracing::info!(
+                    file = %local_entry.path.display(),
+                    dest = %android_dir.display(),
+                    "queuing copy → android"
+                );
+
+                let job = TransferJob {
+                    id: self.transfer_id,
+                    adb_path: client.adb_path.clone(),
+                    serial: serial.clone(),
+                    source: local_entry.path.clone(),
+                    destination: android_dir,
+                    direction: TransferDirection::ToAndroid,
+                    filename: filename.clone(),
+                };
+
+                self.active_transfer = Some(job);
+                self.transfer_status = Some(TransferStatus {
+                    filename,
+                    percent: 0,
+                    speed_display: String::new(),
+                });
+
+                Task::none()
+            }
+
+            Message::CopyToLocal => {
+                let Some(client) = &self.adb_client else {
+                    return Task::none();
+                };
+                let Some(serial) = &self.active_serial else {
+                    return Task::none();
+                };
+                let Some(idx) = self.android_pane.selected else {
+                    tracing::warn!("CopyToLocal: no android file selected");
+                    return Task::none();
+                };
+                let android_entry = &self.android_pane.entries[idx];
+                if android_entry.is_dir {
+                    tracing::warn!("CopyToLocal: directory copy not yet supported");
+                    return Task::none();
+                }
+
+                self.transfer_id += 1;
+                let local_dir = self.local_pane.current_path.clone();
+                let filename = android_entry.name.clone();
+
+                tracing::info!(
+                    file = %android_entry.path.display(),
+                    dest = %local_dir.display(),
+                    "queuing copy ← android"
+                );
+
+                let job = TransferJob {
+                    id: self.transfer_id,
+                    adb_path: client.adb_path.clone(),
+                    serial: serial.clone(),
+                    source: android_entry.path.clone(),
+                    destination: local_dir,
+                    direction: TransferDirection::ToLocal,
+                    filename: filename.clone(),
+                };
+
+                self.active_transfer = Some(job);
+                self.transfer_status = Some(TransferStatus {
+                    filename,
+                    percent: 0,
+                    speed_display: String::new(),
+                });
+
+                Task::none()
+            }
+
+            Message::TransferProgress { percent } => {
+                if let Some(status) = &mut self.transfer_status {
+                    status.percent = percent;
+                }
+                Task::none()
+            }
+
+            Message::TransferComplete { speed_display } => {
+                tracing::info!(speed = %speed_display, "transfer complete");
+                let direction = self
+                    .active_transfer
+                    .as_ref()
+                    .map(|j| j.direction.clone());
+
+                self.active_transfer = None;
+                self.transfer_status = None;
+
+                // Refresh the destination pane so the new file is visible
+                match direction {
+                    Some(TransferDirection::ToAndroid) => {
+                        let path = self.android_pane.current_path.clone();
+                        return self.update(Message::AndroidNavigateTo(path));
+                    }
+                    Some(TransferDirection::ToLocal) => {
+                        let path = self.local_pane.current_path.clone();
+                        return self.update(Message::LocalNavigateTo(path));
+                    }
+                    None => {}
+                }
+
+                Task::none()
+            }
+
+            Message::TransferFailed(msg) => {
+                tracing::warn!(error = %msg, "transfer failed");
+                self.active_transfer = None;
+                self.transfer_status = None;
+                self.adb_status = AdbStatus::Error(format!("Transfer failed: {msg}"));
+                Task::none()
+            }
         }
     }
 }
@@ -321,7 +529,7 @@ impl App {
         column![
             self.view_toolbar(),
             self.view_panes(),
-            self.status_bar.view(&self.adb_status),
+            self.status_bar.view(&self.adb_status, self.transfer_status.as_ref()),
         ]
         .into()
     }
@@ -329,12 +537,67 @@ impl App {
     fn view_toolbar(&self) -> Element<Message> {
         let t = self.theme;
         let label = text("rusty-adb").size(14).color(t.accent);
-        let actions = text("  ·  Connect  ·  Copy →  ·  Copy ←  ·  Refresh")
-            .size(12)
-            .color(t.text_secondary);
 
-        let content = row![label, actions]
-            .spacing(8)
+        // Copy buttons — enabled only when there's an active device and a
+        // selected file on the appropriate side.
+        let can_copy_to_android = self.active_serial.is_some()
+            && self.active_transfer.is_none()
+            && self.local_pane.selected
+                .and_then(|i| self.local_pane.entries.get(i))
+                .map(|e| !e.is_dir)
+                .unwrap_or(false);
+
+        let can_copy_to_local = self.active_serial.is_some()
+            && self.active_transfer.is_none()
+            && self.android_pane.selected
+                .and_then(|i| self.android_pane.entries.get(i))
+                .map(|e| !e.is_dir)
+                .unwrap_or(false);
+
+        let copy_to_android_btn = {
+            let lbl = text("Copy →").size(12).color(if can_copy_to_android {
+                t.accent
+            } else {
+                t.text_secondary
+            });
+            if can_copy_to_android {
+                button(lbl).on_press(Message::CopyToAndroid).style(
+                    move |_theme, _status| button::Style {
+                        background: None,
+                        ..Default::default()
+                    },
+                )
+            } else {
+                button(lbl).style(move |_theme, _status| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+            }
+        };
+
+        let copy_to_local_btn = {
+            let lbl = text("Copy ←").size(12).color(if can_copy_to_local {
+                t.accent
+            } else {
+                t.text_secondary
+            });
+            if can_copy_to_local {
+                button(lbl).on_press(Message::CopyToLocal).style(
+                    move |_theme, _status| button::Style {
+                        background: None,
+                        ..Default::default()
+                    },
+                )
+            } else {
+                button(lbl).style(move |_theme, _status| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+            }
+        };
+
+        let content = row![label, copy_to_android_btn, copy_to_local_btn]
+            .spacing(12)
             .padding([0, 16])
             .align_y(iced::Alignment::Center);
 
