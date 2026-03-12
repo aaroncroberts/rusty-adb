@@ -23,3 +23,6 @@ tracing = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
+
+# Filesystem helpers
+dirs = "5"

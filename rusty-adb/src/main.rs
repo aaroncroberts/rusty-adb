@@ -14,14 +14,19 @@
 //!   └─────────────────────────────────────────┘
 #![allow(mismatched_lifetime_syntaxes)]
 
+mod adb;
 mod status_bar;
 mod theme;
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use adb::{AdbClient, AdbDevice, DeviceState};
 use status_bar::{AdbStatus, StatusBar};
 use theme::ThemeColors;
 
 use iced::widget::{column, container, row, text, vertical_rule};
-use iced::{Border, Element, Fill, Task, Theme};
+use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 40.0;
 
@@ -29,7 +34,14 @@ const TOOLBAR_HEIGHT: f32 = 40.0;
 
 #[derive(Debug, Clone)]
 enum Message {
-    // Placeholder — filled out as features are implemented
+    /// ADB binary located and daemon started — client is ready to use
+    AdbReady(Arc<AdbClient>),
+    /// Fired every 2 s by the Iced time subscription to trigger a device poll
+    PollDevices,
+    /// Result of `adb devices -l` — replaces the current device list
+    DevicesLoaded(Arc<Vec<AdbDevice>>),
+    /// ADB binary was not found or an error occurred during polling
+    AdbError(String),
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -38,6 +50,10 @@ struct App {
     theme: ThemeColors,
     status_bar: StatusBar,
     adb_status: AdbStatus,
+    /// Resolved ADB client; None if binary not found
+    adb_client: Option<AdbClient>,
+    /// Last known device list
+    devices: Vec<AdbDevice>,
 }
 
 impl Default for App {
@@ -46,6 +62,8 @@ impl Default for App {
         Self {
             status_bar: StatusBar::new(theme),
             adb_status: AdbStatus::Disconnected,
+            adb_client: None,
+            devices: Vec::new(),
             theme,
         }
     }
@@ -67,20 +85,110 @@ pub fn main() -> iced::Result {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "rusty-adb starting");
 
     iced::application("rusty-adb", App::update, App::view)
+        .subscription(App::subscription)
         .theme(|_| Theme::TokyoNightStorm)
         .window_size((1280.0, 800.0))
-        .run()
+        .run_with(|| {
+            // On startup: locate adb and warm the daemon in the background.
+            let init_task = Task::perform(
+                async {
+                    let client = AdbClient::find().await.map_err(|e| e.to_string())?;
+                    // Fire-and-forget: warm the ADB daemon
+                    let _ = client.start_server().await;
+                    Ok::<AdbClient, String>(client)
+                },
+                |result| match result {
+                    Ok(client) => {
+                        tracing::info!(adb = %client.adb_path.display(), "adb ready");
+                        Message::AdbReady(Arc::new(client))
+                    }
+                    Err(e) => Message::AdbError(e),
+                },
+            );
+
+            (App::default(), init_task)
+        })
+}
+
+// ─── Subscription ─────────────────────────────────────────────────────────────
+
+impl App {
+    fn subscription(&self) -> Subscription<Message> {
+        // Poll ADB every 2 seconds
+        iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices)
+    }
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 
 impl App {
-    fn update(&mut self, _message: Message) -> Task<Message> {
-        Task::none()
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::AdbReady(client) => {
+                self.adb_client = Some((*client).clone());
+                // Immediately poll so the right pane updates without waiting 2s
+                return self.update(Message::PollDevices);
+            }
+
+            Message::PollDevices => {
+                let Some(client) = self.adb_client.clone() else {
+                    // ADB not yet resolved — skip until AdbReady arrives
+                    return Task::none();
+                };
+
+                Task::perform(
+                    async move {
+                        client
+                            .list_devices()
+                            .await
+                            .map(|d| Arc::new(d))
+                            .map_err(|e| e.to_string())
+                    },
+                    |result| match result {
+                        Ok(devices) => Message::DevicesLoaded(devices),
+                        Err(e) => Message::AdbError(e),
+                    },
+                )
+            }
+
+            Message::DevicesLoaded(devices) => {
+                self.devices = (*devices).clone();
+                self.adb_status = derive_status(&self.devices);
+                tracing::debug!(count = self.devices.len(), "devices refreshed");
+                Task::none()
+            }
+
+            Message::AdbError(msg) => {
+                tracing::warn!(error = %msg, "adb error");
+                self.adb_status = AdbStatus::Error(msg);
+                Task::none()
+            }
+        }
     }
+}
 
-    // ─── View ─────────────────────────────────────────────────────────────────
+// ─── Status derivation ────────────────────────────────────────────────────────
 
+/// Derive the status bar state from the current device list.
+fn derive_status(devices: &[AdbDevice]) -> AdbStatus {
+    // Pick the "best" device: authorized first, then unauthorized
+    let authorized = devices.iter().find(|d| d.state == DeviceState::Device);
+    let unauthorized = devices
+        .iter()
+        .find(|d| d.state == DeviceState::Unauthorized);
+
+    if let Some(d) = authorized {
+        AdbStatus::Connected(d.display_name().to_string())
+    } else if unauthorized.is_some() {
+        AdbStatus::Unauthorized
+    } else {
+        AdbStatus::Disconnected
+    }
+}
+
+// ─── View ─────────────────────────────────────────────────────────────────────
+
+impl App {
     fn view(&self) -> Element<Message> {
         column![
             self.view_toolbar(),
@@ -176,8 +284,19 @@ impl App {
     fn view_right_pane(&self) -> Element<Message> {
         let t = self.theme;
 
+        // Header text reflects live connection state
+        let header_text = match &self.adb_status {
+            AdbStatus::Connected(name) => format!("Android Device — {}", name),
+            AdbStatus::Unauthorized => {
+                "Android Device — tap Allow on your phone".to_string()
+            }
+            AdbStatus::Connecting(name) => format!("Android Device — connecting to {}…", name),
+            AdbStatus::Error(msg) => format!("Android Device — {}", msg),
+            AdbStatus::Disconnected => "Android Device — No device connected".to_string(),
+        };
+
         let header = container(
-            text("Android Device — No device connected")
+            text(header_text)
                 .size(12)
                 .color(t.text_secondary),
         )
