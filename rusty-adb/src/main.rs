@@ -143,6 +143,8 @@ struct App {
     transfer_queue_total: usize,
     /// Transient error message shown in a dismissible banner (None = hidden)
     error_banner: Option<String>,
+    /// Consecutive ADB poll failures — triggers auto-restart at 3, error UI at 4+
+    daemon_error_count: u8,
 
     /// Lines of output from an in-progress package manager install
     install_log: Vec<String>,
@@ -172,6 +174,7 @@ impl Default for App {
             error_banner: None,
             install_log: Vec::new(),
             installing: false,
+            daemon_error_count: 0,
             theme,
         }
     }
@@ -374,6 +377,8 @@ impl App {
             }
 
             Message::DevicesLoaded(devices) => {
+                // Successful poll resets the watchdog counter
+                self.daemon_error_count = 0;
                 self.devices = (*devices).clone();
                 self.adb_status = derive_status(&self.devices);
                 tracing::debug!(count = self.devices.len(), "devices refreshed");
@@ -408,9 +413,29 @@ impl App {
             }
 
             Message::AdbError(msg) => {
-                tracing::warn!(error = %msg, "adb error");
-                self.adb_status = AdbStatus::Error(msg.clone());
-                self.update(Message::ShowError(msg))
+                self.daemon_error_count += 1;
+                tracing::warn!(
+                    error = %msg,
+                    count = self.daemon_error_count,
+                    "adb poll error"
+                );
+                if self.daemon_error_count == 3 {
+                    // Three consecutive failures — attempt auto-restart before surfacing to user
+                    tracing::warn!("3 consecutive poll errors — attempting daemon auto-restart");
+                    self.daemon_error_count = 0;
+                    return self.update(Message::RestartDaemon);
+                }
+                if self.daemon_error_count >= 4 {
+                    // Restart didn't help — surface a persistent, actionable error
+                    let msg = "ADB daemon unresponsive".to_string();
+                    self.adb_status = AdbStatus::Error(msg.clone());
+                    return self.update(Message::ShowError(
+                        "ADB daemon unresponsive. Use 'Restart Daemon' in the toolbar."
+                            .to_string(),
+                    ));
+                }
+                // Counts 1–2: transient failures — suppress to avoid spurious error toasts
+                Task::none()
             }
 
             // ── Local Pane ────────────────────────────────────────────────────
