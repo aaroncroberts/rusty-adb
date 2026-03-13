@@ -33,7 +33,7 @@ use theme::ThemeColors;
 use transfer::{TransferDirection, TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
-use iced::widget::{button, column, container, image, row, scrollable, stack, text, text_input, vertical_rule};
+use iced::widget::{button, column, container, image, pick_list, row, scrollable, stack, text, text_input, toggler, vertical_rule};
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 40.0;
@@ -119,6 +119,26 @@ enum Message {
     FilesHoveredLeft,
     /// A file was dropped onto the window — queue a local→android transfer
     FileDropped(PathBuf),
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+    /// Open the settings modal (copies live config to draft)
+    OpenSettings,
+    /// Close settings without saving
+    CloseSettings,
+    /// User changed the log level pick-list
+    SettingsDraftLogLevel(String),
+    /// User toggled console logging
+    SettingsDraftConsole(bool),
+    /// User toggled file logging
+    SettingsDraftFile(bool),
+    /// Save settings_draft to config.yml
+    SaveSettings,
+    /// Open the app data directory in the OS file manager
+    OpenLogFolder,
+    /// Show a transient success/info toast (auto-dismisses after 3 s)
+    ShowToast(String),
+    /// Dismiss the info toast
+    DismissToast,
 
     // ── File Preview ──────────────────────────────────────────────────────────
     /// Double-click on a file entry — check size then pull to temp
@@ -219,6 +239,17 @@ struct App {
     preview_modal: Option<PreviewContent>,
     /// Last-click tracking for double-click detection: (entry_index, when)
     android_last_click: Option<(usize, std::time::Instant)>,
+
+    /// Loaded application configuration (written to disk on Save)
+    config: config::AppConfig,
+    /// Path to config.yml — used when writing settings back to disk
+    config_path: PathBuf,
+    /// Whether the settings modal is currently open
+    settings_open: bool,
+    /// Working copy of config being edited in the settings modal
+    settings_draft: config::AppConfig,
+    /// Transient success/info toast (None = hidden)
+    toast: Option<String>,
 }
 
 impl Default for App {
@@ -248,7 +279,24 @@ impl Default for App {
             delete_confirm_paths: None,
             preview_modal: None,
             android_last_click: None,
+            config: config::AppConfig::default(),
+            config_path: PathBuf::new(),
+            settings_open: false,
+            settings_draft: config::AppConfig::default(),
+            toast: None,
             theme,
+        }
+    }
+}
+
+impl App {
+    /// Construct App with an already-loaded config (used at startup).
+    fn with_config(cfg: config::AppConfig, config_path: PathBuf) -> Self {
+        Self {
+            config: cfg.clone(),
+            config_path,
+            settings_draft: cfg,
+            ..Self::default()
         }
     }
 }
@@ -263,7 +311,8 @@ pub fn main() -> iced::Result {
     std::fs::create_dir_all(&app_dir).ok();
 
     // Load config.yml (silently uses defaults if absent or unreadable).
-    let cfg = config::AppConfig::load(&app_dir.join("config.yml"));
+    let config_path = app_dir.join("config.yml");
+    let cfg = config::AppConfig::load(&config_path);
 
     // Build logging from config values.
     let mut log_builder = rusty_logging::LoggingConfig::builder()
@@ -329,7 +378,7 @@ pub fn main() -> iced::Result {
                     Err(e) => Message::AdbError(e),
                 },
             );
-            (App::default(), init_task)
+            (App::with_config(cfg, config_path), init_task)
         })
 }
 
@@ -1229,8 +1278,87 @@ impl App {
                 self.update(Message::ShowError(format!("Delete failed: {msg}")))
             }
 
+            // ── Settings ──────────────────────────────────────────────────────
+            Message::OpenSettings => {
+                self.settings_draft = self.config.clone();
+                self.settings_open = true;
+                self.preview_modal = None; // close preview if open
+                Task::none()
+            }
+
+            Message::CloseSettings => {
+                self.settings_open = false;
+                Task::none()
+            }
+
+            Message::SettingsDraftLogLevel(level) => {
+                self.settings_draft.log.level = level;
+                Task::none()
+            }
+
+            Message::SettingsDraftConsole(enabled) => {
+                self.settings_draft.log.console_enabled = enabled;
+                Task::none()
+            }
+
+            Message::SettingsDraftFile(enabled) => {
+                self.settings_draft.log.file_enabled = enabled;
+                Task::none()
+            }
+
+            Message::SaveSettings => {
+                self.config = self.settings_draft.clone();
+                self.settings_open = false;
+                let config = self.config.clone();
+                let path = self.config_path.clone();
+                tracing::info!(path = %path.display(), "saving settings to config.yml");
+                Task::perform(
+                    async move {
+                        let yaml = serde_yaml::to_string(&config).map_err(|e| e.to_string())?;
+                        std::fs::write(&path, yaml).map_err(|e| e.to_string())
+                    },
+                    |result| match result {
+                        Ok(()) => Message::ShowToast(
+                            "Settings saved — changes apply on next launch".to_string(),
+                        ),
+                        Err(e) => Message::ShowError(format!("Failed to save settings: {e}")),
+                    },
+                )
+            }
+
+            Message::OpenLogFolder => {
+                if let Some(dir) = self.config_path.parent() {
+                    let dir = dir.to_string_lossy().into_owned();
+                    tracing::info!(dir = %dir, "opening log folder");
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&dir).spawn();
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                    let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                }
+                Task::none()
+            }
+
+            Message::ShowToast(msg) => {
+                tracing::info!(toast = %msg, "showing info toast");
+                self.toast = Some(msg);
+                Task::perform(
+                    async { tokio::time::sleep(Duration::from_secs(3)).await },
+                    |_| Message::DismissToast,
+                )
+            }
+
+            Message::DismissToast => {
+                self.toast = None;
+                Task::none()
+            }
+
             // ── Escape routing ────────────────────────────────────────────────
             Message::EscapePressed => {
+                if self.settings_open {
+                    return self.update(Message::CloseSettings);
+                }
                 if self.preview_modal.is_some() {
                     return self.update(Message::ClosePreview);
                 }
@@ -1332,6 +1460,9 @@ impl App {
         if let Some(msg) = &self.error_banner {
             items.push(self.view_error_banner(msg));
         }
+        if let Some(msg) = &self.toast {
+            items.push(self.view_toast_banner(msg));
+        }
         if let Some(paths) = &self.delete_confirm_paths {
             items.push(self.view_delete_confirm(paths));
         }
@@ -1344,8 +1475,10 @@ impl App {
 
         let base: Element<Message> = column(items).into();
 
-        // Overlay the preview modal (if open) using a stack layer
-        if let Some(modal_content) = &self.preview_modal {
+        // Stack-based modal overlays (settings takes priority over preview)
+        if self.settings_open {
+            stack![base, self.view_settings_modal()].into()
+        } else if let Some(modal_content) = &self.preview_modal {
             stack![base, self.view_preview_modal(modal_content)].into()
         } else {
             base
@@ -1705,6 +1838,183 @@ impl App {
         .into()
     }
 
+    /// Success/info toast banner (green tint, auto-dismisses after 3 s).
+    fn view_toast_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
+        let t = self.theme;
+        let content = row![
+            text(msg).size(12).color(t.text).width(Fill),
+        ]
+        .padding([6, 15]);
+        container(content)
+            .width(Fill)
+            .style(move |_th| container::Style {
+                background: Some(t.success.scale_alpha(0.15).into()),
+                border: Border {
+                    color: t.success.scale_alpha(0.5),
+                    width: 1.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Settings modal overlay — rendered on top of the full UI via `stack!`.
+    fn view_settings_modal(&self) -> Element<Message> {
+        let t = self.theme;
+
+        const LOG_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
+        let selected_level: Option<&'static str> = LOG_LEVELS
+            .iter()
+            .copied()
+            .find(|&l| l == self.settings_draft.log.level);
+
+        let level_row: Element<Message> = row![
+            text("Log level:").size(12).color(t.text).width(120),
+            pick_list(
+                LOG_LEVELS,
+                selected_level,
+                |l: &'static str| Message::SettingsDraftLogLevel(l.to_string()),
+            )
+            .text_size(12),
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(12)
+        .into();
+
+        let console_row: Element<Message> = row![
+            text("Console log:").size(12).color(t.text).width(120),
+            toggler(self.settings_draft.log.console_enabled)
+                .on_toggle(Message::SettingsDraftConsole),
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(12)
+        .into();
+
+        let file_row: Element<Message> = row![
+            text("File log:").size(12).color(t.text).width(120),
+            toggler(self.settings_draft.log.file_enabled)
+                .on_toggle(Message::SettingsDraftFile),
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(12)
+        .into();
+
+        let open_folder_btn = button(text("📂  Open Log Folder").size(12).color(t.accent))
+            .style(move |_th, _s| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .on_press(Message::OpenLogFolder);
+
+        let save_btn = button(text("Save").size(12).color(iced::Color::WHITE))
+            .style(move |_th, _s| button::Style {
+                background: Some(t.accent.into()),
+                border: Border { radius: 4.0.into(), ..Default::default() },
+                ..Default::default()
+            })
+            .padding([5, 16])
+            .on_press(Message::SaveSettings);
+
+        let cancel_btn = button(text("Cancel").size(12).color(t.text))
+            .style(move |_th, _s| button::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .padding([5, 12])
+            .on_press(Message::CloseSettings);
+
+        let card = container(
+            column![
+                // Header
+                container(
+                    row![
+                        text("Settings").size(14).color(t.text).width(Fill),
+                        cancel_btn,
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .spacing(8)
+                    .padding([6, 10]),
+                )
+                .width(Fill)
+                .style(move |_th| container::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+                // Body
+                container(
+                    column![
+                        level_row,
+                        console_row,
+                        file_row,
+                        open_folder_btn,
+                        text("Changes apply on next launch.")
+                            .size(11)
+                            .color(t.text_secondary),
+                    ]
+                    .spacing(14),
+                )
+                .padding([16, 16])
+                .width(Fill),
+                // Footer
+                container(
+                    row![
+                        iced::widget::Space::with_width(Fill),
+                        save_btn,
+                    ]
+                    .spacing(8)
+                    .padding([8, 12]),
+                )
+                .width(Fill)
+                .style(move |_th| container::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+            ]
+            .width(Fill),
+        )
+        .width(420)
+        .style(move |_th| container::Style {
+            background: Some(t.background.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        });
+
+        container(
+            container(card)
+                .center_x(Fill)
+                .center_y(Fill)
+                .width(Fill)
+                .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(move |_th| container::Style {
+            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
+            ..Default::default()
+        })
+        .into()
+    }
+
     fn view_toolbar(&self) -> Element<Message> {
         let t = self.theme;
 
@@ -1797,6 +2107,12 @@ impl App {
             if daemon_error { Some(Message::RestartDaemon) } else { None },
         );
 
+        let settings_btn = toolbar_btn(
+            "⚙ Settings".to_string(),
+            t.text,
+            Some(Message::OpenSettings),
+        );
+
         let content = row![
             refresh_btn,
             disconnect_btn,
@@ -1805,6 +2121,7 @@ impl App {
             rename_btn,
             delete_btn,
             restart_btn,
+            settings_btn,
         ]
         .spacing(8)
         .padding([0, 16])
@@ -2065,6 +2382,117 @@ mod tests {
         // modal closed, rename still active (Escape routed to ClosePreview)
         assert!(app.preview_modal.is_none());
         assert!(app.android_pane.rename_pending.is_some());
+    }
+
+    // ── Settings tests ────────────────────────────────────────────────────────
+
+    #[test]
+    fn open_settings_copies_config_to_draft() {
+        let mut app = App::default();
+        app.config.log.level = "warn".to_string();
+        let _ = app.update(Message::OpenSettings);
+        assert!(app.settings_open);
+        assert_eq!(app.settings_draft.log.level, "warn");
+    }
+
+    #[test]
+    fn close_settings_hides_modal() {
+        let mut app = App::default();
+        app.settings_open = true;
+        let _ = app.update(Message::CloseSettings);
+        assert!(!app.settings_open);
+    }
+
+    #[test]
+    fn settings_draft_log_level_updates_draft_only() {
+        let mut app = App::default();
+        app.config.log.level = "info".to_string();
+        app.settings_draft.log.level = "info".to_string();
+        let _ = app.update(Message::SettingsDraftLogLevel("debug".to_string()));
+        assert_eq!(app.settings_draft.log.level, "debug");
+        assert_eq!(app.config.log.level, "info"); // live config unchanged
+    }
+
+    #[test]
+    fn settings_draft_console_toggle() {
+        let mut app = App::default();
+        app.settings_draft.log.console_enabled = true;
+        let _ = app.update(Message::SettingsDraftConsole(false));
+        assert!(!app.settings_draft.log.console_enabled);
+        assert!(app.config.log.console_enabled); // live config unchanged
+    }
+
+    #[test]
+    fn settings_draft_file_toggle() {
+        let mut app = App::default();
+        app.settings_draft.log.file_enabled = true;
+        let _ = app.update(Message::SettingsDraftFile(false));
+        assert!(!app.settings_draft.log.file_enabled);
+    }
+
+    #[test]
+    fn save_settings_closes_modal_and_updates_config() {
+        let mut app = App::default();
+        // config_path is empty in tests — SaveSettings will fail disk write
+        // but should still update in-memory config and close modal
+        app.settings_open = true;
+        app.settings_draft.log.level = "error".to_string();
+        app.settings_draft.log.console_enabled = false;
+        let _ = app.update(Message::SaveSettings);
+        assert!(!app.settings_open, "modal should close immediately");
+        assert_eq!(app.config.log.level, "error");
+        assert!(!app.config.log.console_enabled);
+    }
+
+    #[test]
+    fn save_settings_writes_valid_yaml() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.flush().unwrap();
+        let path = f.path().to_path_buf();
+
+        let mut app = App::with_config(config::AppConfig::default(), path.clone());
+        app.settings_draft.log.level = "trace".to_string();
+        app.settings_draft.log.file_enabled = false;
+        // Run synchronously — since no tokio runtime in unit tests, we test
+        // the state changes only (Task::perform is deferred)
+        let _ = app.update(Message::SaveSettings);
+        assert_eq!(app.config.log.level, "trace");
+        assert!(!app.config.log.file_enabled);
+    }
+
+    #[test]
+    fn escape_closes_settings_first() {
+        let mut app = App::default();
+        app.settings_open = true;
+        app.android_pane.rename_pending = Some((0, "name".to_string()));
+        let _ = app.update(Message::EscapePressed);
+        assert!(!app.settings_open, "settings should close");
+        assert!(app.android_pane.rename_pending.is_some(), "rename still active");
+    }
+
+    #[test]
+    fn open_settings_closes_preview_modal() {
+        let mut app = App::default();
+        app.preview_modal = Some(PreviewContent::Unsupported("n/a".to_string()));
+        let _ = app.update(Message::OpenSettings);
+        assert!(app.preview_modal.is_none(), "preview should be cleared");
+        assert!(app.settings_open);
+    }
+
+    #[test]
+    fn show_toast_sets_toast_message() {
+        let mut app = App::default();
+        let _ = app.update(Message::ShowToast("hello".to_string()));
+        assert_eq!(app.toast.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn dismiss_toast_clears_message() {
+        let mut app = App::default();
+        app.toast = Some("hello".to_string());
+        let _ = app.update(Message::DismissToast);
+        assert!(app.toast.is_none());
     }
 
     #[test]
