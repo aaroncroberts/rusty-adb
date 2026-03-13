@@ -217,18 +217,18 @@ impl AndroidPane {
                     2 => "...",
                     _ => "",
                 };
-                format!("Android Device — Loading{}", dots)
+                format!("Android Device - Loading{}", dots)
             }
             AndroidPaneState::Browsing => {
                 let path = self.current_path.to_string_lossy();
                 let display = if path.len() > 35 {
-                    format!("…{}", &path[path.len() - 35..])
+                    format!("...{}", &path[path.len() - 35..])
                 } else {
                     path.into_owned()
                 };
                 format!("Android Device  {}", display)
             }
-            AndroidPaneState::Error(msg) => format!("Android Device — Error: {}", msg),
+            AndroidPaneState::Error(msg) => format!("Android Device - Error: {}", msg),
         };
 
         container(text(header_text).size(12).color(theme.text_secondary))
@@ -300,14 +300,14 @@ impl AndroidPane {
         theme: ThemeColors,
     ) -> Element<'a, Message> {
         let steps = column![
-            text("📱  No Android device connected")
+            text("No Android device connected")
                 .size(13)
                 .color(theme.text),
             text("To get started:").size(11).color(theme.text_secondary),
             text("  1.  Enable USB debugging on your device")
                 .size(11)
                 .color(theme.text_secondary),
-            text("      Settings → Developer Options → USB Debugging")
+            text("      Settings > Developer Options > USB Debugging")
                 .size(11)
                 .color(theme.text_secondary),
             text("  2.  Connect via USB cable")
@@ -331,12 +331,12 @@ impl AndroidPane {
     }
 
     fn view_loading<'a, Message: 'a + Clone>(&'a self, theme: ThemeColors) -> Element<'a, Message> {
-        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let spinner_chars = ["|", "/", "-", "\\"];
         let spinner = spinner_chars[(self.spinner_frame as usize) % spinner_chars.len()];
 
         let content = row![
             text(spinner).size(14).color(theme.accent),
-            text("  Fetching directory listing…")
+            text("  Fetching directory listing...")
                 .size(12)
                 .color(theme.text_secondary),
         ]

@@ -149,7 +149,7 @@ impl StatusBar {
             };
 
             let cancel_btn =
-                button(text("✕ Cancel").size(11).color(theme.error)).style(move |_t, _s| {
+                button(text("X Cancel").size(11).color(theme.error)).style(move |_t, _s| {
                     button::Style {
                         background: None,
                         ..Default::default()

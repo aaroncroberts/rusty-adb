@@ -39,7 +39,7 @@ use iced::widget::{
 };
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
-const TOOLBAR_HEIGHT: f32 = 40.0;
+const TOOLBAR_HEIGHT: f32 = 32.0;
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
@@ -1052,7 +1052,7 @@ impl App {
             Message::InstallComplete => {
                 tracing::info!("platform-tools install succeeded, retrying adb detection");
                 self.install_log
-                    .push("✓ Installation complete. Detecting adb…".to_string());
+                    .push("[OK] Installation complete. Detecting adb...".to_string());
                 self.installing = false;
                 self.update(Message::RetryAdbFind)
             }
@@ -1060,7 +1060,7 @@ impl App {
             Message::InstallFailed(err) => {
                 tracing::warn!(error = %err, "platform-tools install failed");
                 self.installing = false;
-                self.install_log.push(format!("✗ {err}"));
+                self.install_log.push(format!("[ERR] {err}"));
                 Task::none()
             }
 
@@ -1580,7 +1580,7 @@ impl App {
             .padding([8, 16])
             .on_press(Message::InstallAdb);
 
-        let retry_btn = button(text("↺  Retry Detection").size(13).color(t.text))
+        let retry_btn = button(text("Retry Detection").size(13).color(t.text))
             .style(move |_t, _s| button::Style {
                 background: Some(t.background_secondary.into()),
                 border: Border {
@@ -1593,7 +1593,7 @@ impl App {
             .padding([8, 16])
             .on_press(Message::RetryAdbFind);
 
-        let download_btn = button(text("⬇  Download Manually").size(13).color(t.accent))
+        let download_btn = button(text("Download Manually").size(13).color(t.accent))
             .style(move |_t, _s| button::Style {
                 background: None,
                 ..Default::default()
@@ -1729,9 +1729,9 @@ impl App {
     fn view_error_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
         let t = self.theme;
         let content = row![
-            text(format!("⚠  {msg}")).size(12).color(t.error),
+            text(format!("[!] {msg}")).size(12).color(t.error),
             iced::widget::Space::with_width(Fill),
-            button(text("✕").size(11).color(t.error))
+            button(text("X").size(11).color(t.error))
                 .style(move |_t, _s| button::Style {
                     background: None,
                     ..Default::default()
@@ -1837,7 +1837,7 @@ impl App {
     fn view_preview_modal<'a>(&'a self, content: &'a PreviewContent) -> Element<'a, Message> {
         let t = self.theme;
 
-        let close_btn = button(text("✕  Close").size(12).color(t.text))
+        let close_btn = button(text("X  Close").size(12).color(t.text))
             .style(move |_th, _s| button::Style {
                 background: Some(t.background_secondary.into()),
                 border: Border {
@@ -1936,7 +1936,7 @@ impl App {
         let t = self.theme;
         let version = env!("CARGO_PKG_VERSION");
 
-        let close_btn = button(text("✕  Close").size(12).color(t.text))
+        let close_btn = button(text("X  Close").size(12).color(t.text))
             .style(move |_th, _s| button::Style {
                 background: Some(t.background_secondary.into()),
                 border: Border {
@@ -2074,7 +2074,7 @@ impl App {
         .spacing(12)
         .into();
 
-        let open_folder_btn = button(text("📂  Open Log Folder").size(12).color(t.accent))
+        let open_folder_btn = button(text("Open Log Folder").size(12).color(t.accent))
             .style(move |_th, _s| button::Style {
                 background: None,
                 ..Default::default()
@@ -2181,35 +2181,18 @@ impl App {
 
         // ── Availability flags ───────────────────────────────────────────────
         let has_device = self.active_serial.is_some();
-        let no_transfer = self.active_transfer.is_none();
 
-        let can_copy_to_android = has_device
-            && no_transfer
-            && self.local_pane.selected.iter().any(|&i| {
-                self.local_pane
-                    .entries
-                    .get(i)
-                    .map(|e| !e.is_dir)
-                    .unwrap_or(false)
-            });
-
-        let can_copy_to_local = has_device
-            && no_transfer
-            && self.android_pane.selected.iter().any(|&i| {
-                self.android_pane
-                    .entries
-                    .get(i)
-                    .map(|e| !e.is_dir)
-                    .unwrap_or(false)
-            });
+        let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
 
         // ── Button builder helper ─────────────────────────────────────────────
         let toolbar_btn = move |label: String, color: iced::Color, msg: Option<Message>| {
             let lbl = text(label).size(12).color(color);
-            let btn = button(lbl).style(move |_t, _s| button::Style {
-                background: None,
-                ..Default::default()
-            });
+            let btn = button(lbl)
+                .padding([4, 10])
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                });
             if let Some(m) = msg {
                 btn.on_press(m)
             } else {
@@ -2217,127 +2200,28 @@ impl App {
             }
         };
 
-        // ── Buttons ───────────────────────────────────────────────────────────
-        let refresh_btn = toolbar_btn("⟳ Refresh".to_string(), t.text, Some(Message::RefreshPanes));
+        // ── Buttons (global actions only) ─────────────────────────────────────
+        let refresh_btn = toolbar_btn("Refresh".to_string(), t.text, Some(Message::RefreshPanes));
 
         let disconnect_btn = toolbar_btn(
             "Disconnect".to_string(),
-            if has_device {
-                t.warning
-            } else {
-                t.text_secondary
-            },
-            if has_device {
-                Some(Message::DisconnectDevice)
-            } else {
-                None
-            },
+            if has_device { t.warning } else { t.text_secondary },
+            if has_device { Some(Message::DisconnectDevice) } else { None },
         );
 
-        let copy_to_android_btn = toolbar_btn(
-            "Copy →".to_string(),
-            if can_copy_to_android {
-                t.accent
-            } else {
-                t.text_secondary
-            },
-            if can_copy_to_android {
-                Some(Message::CopyToAndroid)
-            } else {
-                None
-            },
-        );
-
-        let copy_to_local_btn = toolbar_btn(
-            "Copy ←".to_string(),
-            if can_copy_to_local {
-                t.accent
-            } else {
-                t.text_secondary
-            },
-            if can_copy_to_local {
-                Some(Message::CopyToLocal)
-            } else {
-                None
-            },
-        );
-
-        let can_rename = has_device
-            && self.android_pane.selected.len() == 1
-            && self.android_pane.rename_pending.is_none();
-        let can_delete = has_device
-            && !self.android_pane.selected.is_empty()
-            && self.android_pane.rename_pending.is_none();
-
-        let rename_btn = toolbar_btn(
-            "✏ Rename".to_string(),
-            if can_rename {
-                t.accent
-            } else {
-                t.text_secondary
-            },
-            if can_rename {
-                Some(Message::AndroidBeginRename)
-            } else {
-                None
-            },
-        );
-
-        let delete_btn = toolbar_btn(
-            "🗑 Delete".to_string(),
-            if can_delete {
-                t.error
-            } else {
-                t.text_secondary
-            },
-            if can_delete {
-                Some(Message::AndroidBeginDelete)
-            } else {
-                None
-            },
-        );
-
-        let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
         let restart_btn = toolbar_btn(
-            "↺ Restart Daemon".to_string(),
-            if daemon_error {
-                t.warning
-            } else {
-                t.text_secondary
-            },
-            if daemon_error {
-                Some(Message::RestartDaemon)
-            } else {
-                None
-            },
+            "Restart Daemon".to_string(),
+            if daemon_error { t.warning } else { t.text_secondary },
+            if daemon_error { Some(Message::RestartDaemon) } else { None },
         );
 
-        let settings_btn = toolbar_btn(
-            "⚙ Settings".to_string(),
-            t.text,
-            Some(Message::OpenSettings),
-        );
+        let settings_btn = toolbar_btn("Settings".to_string(), t.text, Some(Message::OpenSettings));
+        let about_btn = toolbar_btn("About".to_string(), t.text_secondary, Some(Message::OpenAbout));
 
-        let about_btn = toolbar_btn(
-            "? About".to_string(),
-            t.text_secondary,
-            Some(Message::OpenAbout),
-        );
-
-        let content = row![
-            refresh_btn,
-            disconnect_btn,
-            copy_to_android_btn,
-            copy_to_local_btn,
-            rename_btn,
-            delete_btn,
-            restart_btn,
-            settings_btn,
-            about_btn,
-        ]
-        .spacing(8)
-        .padding([0, 16])
-        .align_y(iced::Alignment::Center);
+        let content = row![refresh_btn, disconnect_btn, restart_btn, settings_btn, about_btn,]
+            .spacing(8)
+            .padding([0, 16])
+            .align_y(iced::Alignment::Center);
 
         container(content)
             .width(Fill)
@@ -2354,8 +2238,60 @@ impl App {
             .into()
     }
 
+    /// Slim contextual action bar rendered at the bottom of a pane.
+    fn view_action_bar<'a>(
+        &'a self,
+        actions: Vec<(&'static str, iced::Color, Option<Message>)>,
+    ) -> Element<'a, Message> {
+        let t = self.theme;
+        let btn = move |label: &'static str, color: iced::Color, msg: Option<Message>| {
+            let b = button(text(label).size(12).color(color))
+                .padding([3, 10])
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                });
+            if let Some(m) = msg { b.on_press(m) } else { b }
+        };
+
+        let mut row_items: Vec<Element<Message>> = Vec::new();
+        for (label, color, msg) in actions {
+            row_items.push(btn(label, color, msg).into());
+        }
+
+        let content = iced::widget::Row::from_vec(row_items)
+            .spacing(4)
+            .padding([0, 10])
+            .align_y(iced::Alignment::Center);
+
+        container(content)
+            .width(Fill)
+            .height(28)
+            .style(move |_theme| container::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.border,
+                    width: 1.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
     fn view_panes(&self) -> Element<Message> {
-        let left = self.local_pane.view(
+        let t = self.theme;
+        let has_device = self.active_serial.is_some();
+        let no_transfer = self.active_transfer.is_none();
+
+        // ── Local pane + optional "To Android" action bar ────────────────────
+        let can_copy_to_android = has_device
+            && no_transfer
+            && self.local_pane.selected.iter().any(|&i| {
+                self.local_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
+            });
+
+        let local_inner = self.local_pane.view(
             self.theme,
             Message::LocalNavigateTo,
             Message::LocalSelectEntry,
@@ -2363,7 +2299,36 @@ impl App {
             Message::LocalSortBy,
         );
 
-        let right_inner = self.android_pane.view(
+        let left: Element<Message> = if can_copy_to_android {
+            column![
+                local_inner,
+                self.view_action_bar(vec![(
+                    "Copy to Android",
+                    t.accent,
+                    Some(Message::CopyToAndroid),
+                )]),
+            ]
+            .width(Fill)
+            .height(Fill)
+            .into()
+        } else {
+            local_inner
+        };
+
+        // ── Android pane + optional contextual action bar ─────────────────────
+        let can_copy_to_local = has_device
+            && no_transfer
+            && self.android_pane.selected.iter().any(|&i| {
+                self.android_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
+            });
+        let can_rename = has_device
+            && self.android_pane.selected.len() == 1
+            && self.android_pane.rename_pending.is_none();
+        let can_delete = has_device
+            && !self.android_pane.selected.is_empty()
+            && self.android_pane.rename_pending.is_none();
+
+        let android_inner = self.android_pane.view(
             self.theme,
             Message::AndroidNavigateTo,
             Message::AndroidSelectEntry,
@@ -2371,25 +2336,41 @@ impl App {
             Message::AndroidRenameCommit,
         );
 
+        let android_has_actions = can_copy_to_local || can_rename || can_delete;
+
         // Wrap the android pane with a drop-zone highlight while a file hovers
-        let t = self.theme;
         let hover = self.file_hover_active;
-        let right: Element<Message> = container(right_inner)
+        let android_inner: Element<Message> = container(android_inner)
             .width(Fill)
             .height(Fill)
             .style(move |_theme| container::Style {
                 border: Border {
-                    color: if hover {
-                        t.accent.scale_alpha(0.8)
-                    } else {
-                        iced::Color::TRANSPARENT
-                    },
+                    color: if hover { t.accent.scale_alpha(0.8) } else { iced::Color::TRANSPARENT },
                     width: if hover { 2.0 } else { 0.0 },
                     ..Default::default()
                 },
                 ..Default::default()
             })
             .into();
+
+        let right: Element<Message> = if android_has_actions {
+            let mut actions = Vec::new();
+            if can_copy_to_local {
+                actions.push(("Copy to Local", t.accent, Some(Message::CopyToLocal)));
+            }
+            if can_rename {
+                actions.push(("Rename", t.accent, Some(Message::AndroidBeginRename)));
+            }
+            if can_delete {
+                actions.push(("Delete", t.error, Some(Message::AndroidBeginDelete)));
+            }
+            column![android_inner, self.view_action_bar(actions)]
+                .width(Fill)
+                .height(Fill)
+                .into()
+        } else {
+            android_inner
+        };
 
         let divider = container(vertical_rule(1))
             .height(Fill)
