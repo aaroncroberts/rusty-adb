@@ -111,6 +111,14 @@ enum Message {
     DaemonStartFailed(String),
     /// User clicked "Restart Daemon" — runs adb kill-server then start-server
     RestartDaemon,
+
+    // ── Drag-and-Drop ─────────────────────────────────────────────────────────
+    /// A file from the OS is being dragged over the window — show drop highlight
+    FileHovered,
+    /// The hovered file(s) left the window without being dropped
+    FilesHoveredLeft,
+    /// A file was dropped onto the window — queue a local→android transfer
+    FileDropped(PathBuf),
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -150,6 +158,9 @@ struct App {
     install_log: Vec<String>,
     /// Whether a package manager install is currently running
     installing: bool,
+
+    /// `true` while an OS file drag is hovering over the window — shows drop highlight
+    file_hover_active: bool,
 }
 
 impl Default for App {
@@ -175,6 +186,7 @@ impl Default for App {
             install_log: Vec::new(),
             installing: false,
             daemon_error_count: 0,
+            file_hover_active: false,
             theme,
         }
     }
@@ -334,8 +346,23 @@ impl App {
         // Keyboard shortcuts — F5 refresh, Backspace navigate up
         let keys = keyboard::on_key_press(handle_key_press);
 
+        // File drag-and-drop from the OS — FileHovered/FileDropped/FilesHoveredLeft
+        let file_drops =
+            iced::event::listen_with(|event, _status, _window| match event {
+                iced::Event::Window(iced::window::Event::FileHovered(_)) => {
+                    Some(Message::FileHovered)
+                }
+                iced::Event::Window(iced::window::Event::FilesHoveredLeft) => {
+                    Some(Message::FilesHoveredLeft)
+                }
+                iced::Event::Window(iced::window::Event::FileDropped(path)) => {
+                    Some(Message::FileDropped(path))
+                }
+                _ => None,
+            });
+
         // Combine all active subscriptions
-        let mut subs = vec![device_poll, keys];
+        let mut subs = vec![device_poll, keys, file_drops];
         if let Some(s) = maybe_spinner {
             subs.push(s);
         }
@@ -910,6 +937,80 @@ impl App {
                 let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
                 Task::none()
             }
+
+            // ── Drag-and-Drop ─────────────────────────────────────────────────
+            Message::FileHovered => {
+                self.file_hover_active = true;
+                Task::none()
+            }
+
+            Message::FilesHoveredLeft => {
+                self.file_hover_active = false;
+                Task::none()
+            }
+
+            Message::FileDropped(path) => {
+                self.file_hover_active = false;
+
+                // Guard: need a connected device and adb client
+                let (Some(client), Some(serial)) =
+                    (&self.adb_client, &self.active_serial)
+                else {
+                    tracing::warn!(path = %path.display(), "file dropped but no device connected");
+                    return self.update(Message::ShowError(
+                        "No device connected — connect a device before dropping files."
+                            .to_string(),
+                    ));
+                };
+
+                // Skip directories (first iteration: files only)
+                if path.is_dir() {
+                    tracing::warn!(path = %path.display(), "directory drop ignored (not supported yet)");
+                    return Task::none();
+                }
+
+                let android_dir = self.android_pane.current_path.clone();
+                let filename = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+
+                self.transfer_id += 1;
+                let job = TransferJob {
+                    id: self.transfer_id,
+                    adb_path: client.adb_path.clone(),
+                    serial: serial.clone(),
+                    source: path.clone(),
+                    destination: android_dir,
+                    direction: TransferDirection::ToAndroid,
+                    filename: filename.clone(),
+                };
+
+                tracing::info!(file = %path.display(), "file dropped → queuing transfer to android");
+
+                if self.active_transfer.is_none() {
+                    // No transfer running — start this job immediately
+                    let cancel = Arc::new(AtomicBool::new(false));
+                    self.cancel_flag = Some(cancel);
+                    self.transfer_queue_done = 0;
+                    self.transfer_queue_total = 1;
+                    self.transfer_status = Some(TransferStatus {
+                        filename,
+                        percent: 0,
+                        speed_display: String::new(),
+                        job_index: 1,
+                        job_total: 1,
+                    });
+                    self.active_transfer = Some(job);
+                } else {
+                    // A transfer is already running — add to queue
+                    self.transfer_queue.push_back(job);
+                    self.transfer_queue_total += 1;
+                }
+
+                Task::none()
+            }
         }
     }
 }
@@ -1249,16 +1350,36 @@ impl App {
             Message::LocalSortBy,
         );
 
-        let right = self.android_pane.view(
+        let right_inner = self.android_pane.view(
             self.theme,
             Message::AndroidNavigateTo,
             Message::AndroidSelectEntry,
         );
 
+        // Wrap the android pane with a drop-zone highlight while a file hovers
+        let t = self.theme;
+        let hover = self.file_hover_active;
+        let right: Element<Message> = container(right_inner)
+            .width(Fill)
+            .height(Fill)
+            .style(move |_theme| container::Style {
+                border: Border {
+                    color: if hover {
+                        t.accent.scale_alpha(0.8)
+                    } else {
+                        iced::Color::TRANSPARENT
+                    },
+                    width: if hover { 2.0 } else { 0.0 },
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into();
+
         let divider = container(vertical_rule(1))
             .height(Fill)
             .style(move |_theme| container::Style {
-                background: Some(self.theme.border.into()),
+                background: Some(t.border.into()),
                 ..Default::default()
             });
 
@@ -1329,5 +1450,36 @@ mod tests {
     fn derive_status_offline_is_disconnected() {
         let devices = vec![device("ABC123", DeviceState::Offline, None)];
         assert_eq!(derive_status(&devices), AdbStatus::Disconnected);
+    }
+
+    // ── Drag-and-drop tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn file_hover_sets_active_flag() {
+        let mut app = App::default();
+        assert!(!app.file_hover_active);
+        let _ = app.update(Message::FileHovered);
+        assert!(app.file_hover_active);
+    }
+
+    #[test]
+    fn files_hovered_left_clears_flag() {
+        let mut app = App::default();
+        app.file_hover_active = true;
+        let _ = app.update(Message::FilesHoveredLeft);
+        assert!(!app.file_hover_active);
+    }
+
+    #[test]
+    fn file_dropped_without_device_shows_error() {
+        let mut app = App::default();
+        app.file_hover_active = true;
+        let _ = app.update(Message::FileDropped(PathBuf::from("/tmp/test.jpg")));
+        // hover flag should be cleared even on error
+        assert!(!app.file_hover_active);
+        // error banner should be set
+        assert!(app.error_banner.is_some());
+        // no transfer queued
+        assert!(app.active_transfer.is_none());
     }
 }
