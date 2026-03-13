@@ -365,6 +365,52 @@ impl AdbClient {
         Ok(entries)
     }
 
+    /// Rename a file or directory on the device using `adb shell mv`.
+    pub async fn rename(
+        &self,
+        serial: &str,
+        from: &std::path::Path,
+        to: &std::path::Path,
+    ) -> Result<()> {
+        let from_str = from.to_string_lossy();
+        let to_str = to.to_string_lossy();
+        let output = Command::new(&self.adb_path)
+            .args(["-s", serial, "shell", "mv", &*from_str, &*to_str])
+            .output()
+            .await
+            .context("failed to run adb shell mv")?;
+        let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim().to_string();
+        let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim().to_string();
+        if !output.status.success()
+            || stderr.contains("Permission denied")
+            || stdout.contains("Permission denied")
+        {
+            let msg = if !stderr.is_empty() { stderr } else { stdout };
+            anyhow::bail!("rename failed: {}", msg);
+        }
+        Ok(())
+    }
+
+    /// Delete a file or directory on the device using `adb shell rm -rf`.
+    pub async fn delete(&self, serial: &str, path: &std::path::Path) -> Result<()> {
+        let path_str = path.to_string_lossy();
+        let output = Command::new(&self.adb_path)
+            .args(["-s", serial, "shell", "rm", "-rf", &*path_str])
+            .output()
+            .await
+            .context("failed to run adb shell rm -rf")?;
+        let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim().to_string();
+        let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim().to_string();
+        if !output.status.success()
+            || stderr.contains("Permission denied")
+            || stdout.contains("Permission denied")
+        {
+            let msg = if !stderr.is_empty() { stderr } else { stdout };
+            anyhow::bail!("delete failed: {}", msg);
+        }
+        Ok(())
+    }
+
     /// Discover Android storage roots: always includes `/sdcard`; also
     /// returns any SD-card entries from `/storage/` that are not `emulated`
     /// or `self`.

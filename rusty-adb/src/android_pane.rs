@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::{Border, Color, Element, Fill};
 
 use crate::adb::AndroidEntry;
@@ -36,6 +36,9 @@ pub enum AndroidPaneState {
     Error(String),
 }
 
+/// Stable widget ID for the inline rename text input — used by `text_input::focus`.
+pub const RENAME_INPUT_ID: &str = "android-rename-input";
+
 /// State for the Android device file browser pane
 #[derive(Debug, Clone)]
 pub struct AndroidPane {
@@ -50,6 +53,8 @@ pub struct AndroidPane {
     pub storage_roots: Vec<PathBuf>,
     /// Spinner frame counter (incremented by SpinnerTick messages)
     pub spinner_frame: u8,
+    /// Active inline rename: (entry_index, current_text_input_value)
+    pub rename_pending: Option<(usize, String)>,
 }
 
 impl Default for AndroidPane {
@@ -61,6 +66,7 @@ impl Default for AndroidPane {
             selected: Vec::new(),
             storage_roots: Vec::new(),
             spinner_frame: 0,
+            rename_pending: None,
         }
     }
 }
@@ -156,17 +162,42 @@ impl AndroidPane {
         self.spinner_frame = self.spinner_frame.wrapping_add(1);
     }
 
+    /// Activate inline rename for the entry at `index`.
+    /// No-op if the index is out of bounds.
+    pub fn begin_rename(&mut self, index: usize) {
+        if let Some(entry) = self.entries.get(index) {
+            self.rename_pending = Some((index, entry.name.clone()));
+        }
+    }
+
+    /// Update the in-flight rename input value.
+    pub fn update_rename_input(&mut self, value: String) {
+        if let Some((idx, _)) = &self.rename_pending {
+            self.rename_pending = Some((*idx, value));
+        }
+    }
+
+    /// Cancel rename without making changes.
+    pub fn cancel_rename(&mut self) {
+        self.rename_pending = None;
+    }
+
     // ─── View ─────────────────────────────────────────────────────────────
 
     /// Render the full Android pane (header + body).
+    ///
+    /// `on_rename_input` is called on every keystroke while an inline rename is active.
+    /// `on_rename_commit` fires when the user presses Enter to commit the rename.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
+        on_rename_input: impl Fn(String) -> Message + 'a,
+        on_rename_commit: Message,
     ) -> Element<'a, Message> {
         let header = self.view_header(theme);
-        let body = self.view_body(theme, on_navigate, on_select);
+        let body = self.view_body(theme, on_navigate, on_select, on_rename_input, on_rename_commit);
         column![header, body].width(Fill).height(Fill).into()
     }
 
@@ -215,6 +246,8 @@ impl AndroidPane {
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
+        on_rename_input: impl Fn(String) -> Message + 'a,
+        on_rename_commit: Message,
     ) -> Element<'a, Message> {
         match &self.state {
             AndroidPaneState::NoDevice => self.view_no_device(theme),
@@ -225,7 +258,9 @@ impl AndroidPane {
                 self.view_empty(theme, "Error", msg)
             }
 
-            AndroidPaneState::Browsing => self.view_entries(theme, on_navigate, on_select),
+            AndroidPaneState::Browsing => {
+                self.view_entries(theme, on_navigate, on_select, on_rename_input, on_rename_commit)
+            }
         }
     }
 
@@ -311,6 +346,8 @@ impl AndroidPane {
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
+        on_rename_input: impl Fn(String) -> Message + 'a,
+        on_rename_commit: Message,
     ) -> Element<'a, Message> {
         // Column header
         let col_header = container(
@@ -332,6 +369,32 @@ impl AndroidPane {
             },
             ..Default::default()
         });
+
+        // Pre-build the inline rename input (consumes callbacks once).
+        // Only one entry can be in rename mode at a time, so this element
+        // is moved into the row at the right index via Option::take().
+        let mut rename_row: Option<(usize, Element<Message>)> =
+            if let Some((idx, val)) = &self.rename_pending {
+                let icon = self
+                    .entries
+                    .get(*idx)
+                    .map(|e| if e.is_symlink { "🔗" } else if e.is_dir { "📁" } else { "📄" })
+                    .unwrap_or("📄");
+                let input = text_input("New name…", val.as_str())
+                    .id(text_input::Id::new(RENAME_INPUT_ID))
+                    .on_input(on_rename_input)
+                    .on_submit(on_rename_commit)
+                    .size(12)
+                    .width(Fill);
+                let elem: Element<Message> = row![text(icon).size(12), input]
+                    .spacing(6)
+                    .padding([1, 0])
+                    .into();
+                Some((*idx, elem))
+            } else {
+                drop((on_rename_input, on_rename_commit));
+                None
+            };
 
         let mut rows: Vec<Element<Message>> = Vec::new();
 
@@ -438,33 +501,40 @@ impl AndroidPane {
             let on_nav = on_navigate(entry_path.clone());
             let on_sel = on_select(i);
 
-            let row_content = row![
-                text(icon).size(12),
-                text(entry.name.clone())
-                    .size(12)
-                    .color(name_color)
-                    .width(Fill),
-                text(entry.size_display())
-                    .size(11)
-                    .color(theme.text_secondary)
-                    .width(80),
-                text(entry.modified.clone())
-                    .size(11)
-                    .color(theme.text_secondary)
-                    .width(90),
-            ]
-            .spacing(6)
-            .padding([1, 0]);
+            // If this entry is the one being renamed, use the pre-built input row.
+            let row_element: Element<Message> =
+                if rename_row.as_ref().map(|(idx, _)| *idx == i).unwrap_or(false) {
+                    rename_row.take().unwrap().1
+                } else {
+                    let row_content = row![
+                        text(icon).size(12),
+                        text(entry.name.clone())
+                            .size(12)
+                            .color(name_color)
+                            .width(Fill),
+                        text(entry.size_display())
+                            .size(11)
+                            .color(theme.text_secondary)
+                            .width(80),
+                        text(entry.modified.clone())
+                            .size(11)
+                            .color(theme.text_secondary)
+                            .width(90),
+                    ]
+                    .spacing(6)
+                    .padding([1, 0]);
 
-            let btn = button(row_content)
-                .width(Fill)
-                .style(move |_t, _s| button::Style {
-                    background: row_bg.map(Into::into),
-                    ..Default::default()
-                })
-                .on_press(if entry_is_dir { on_nav } else { on_sel });
+                    button(row_content)
+                        .width(Fill)
+                        .style(move |_t, _s| button::Style {
+                            background: row_bg.map(Into::into),
+                            ..Default::default()
+                        })
+                        .on_press(if entry_is_dir { on_nav } else { on_sel })
+                        .into()
+                };
 
-            rows.push(btn.into());
+            rows.push(row_element);
         }
 
         let list = scrollable(column(rows).width(Fill).padding([0, 4]))

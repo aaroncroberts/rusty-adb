@@ -33,7 +33,7 @@ use theme::ThemeColors;
 use transfer::{TransferDirection, TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
-use iced::widget::{button, column, container, row, text, vertical_rule};
+use iced::widget::{button, column, container, row, text, text_input, vertical_rule};
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 40.0;
@@ -119,6 +119,30 @@ enum Message {
     FilesHoveredLeft,
     /// A file was dropped onto the window — queue a local→android transfer
     FileDropped(PathBuf),
+
+    // ── File operations (rename / delete on Android device) ───────────────────
+    /// F2: begin inline rename for the first selected android entry
+    AndroidBeginRename,
+    /// Keystroke inside the inline rename text input
+    AndroidRenameInput(String),
+    /// Enter: commit rename — calls adb shell mv then refreshes listing
+    AndroidRenameCommit,
+    /// Escape: cancel rename without changes
+    AndroidRenameCancel,
+    /// adb shell mv completed successfully — reload current dir
+    AndroidRenameComplete,
+    /// adb shell mv returned an error
+    AndroidRenameFailed(String),
+    /// Delete/toolbar: open confirmation for selected android entries
+    AndroidBeginDelete,
+    /// User clicked "Confirm Delete" in the confirmation banner
+    AndroidDeleteConfirm,
+    /// User clicked "Cancel" in the confirmation banner
+    AndroidDeleteCancel,
+    /// adb shell rm -rf completed — reload current dir
+    AndroidDeleteComplete,
+    /// adb shell rm -rf returned an error
+    AndroidDeleteFailed(String),
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -161,6 +185,8 @@ struct App {
 
     /// `true` while an OS file drag is hovering over the window — shows drop highlight
     file_hover_active: bool,
+    /// Paths pending deletion confirmation — shown in the delete confirmation banner
+    delete_confirm_paths: Option<Vec<PathBuf>>,
 }
 
 impl Default for App {
@@ -187,6 +213,7 @@ impl Default for App {
             installing: false,
             daemon_error_count: 0,
             file_hover_active: false,
+            delete_confirm_paths: None,
             theme,
         }
     }
@@ -280,6 +307,8 @@ fn handle_key_press(key: keyboard::Key, _mods: keyboard::Modifiers) -> Option<Me
     match key.as_ref() {
         keyboard::Key::Named(Named::F5) => Some(Message::RefreshPanes),
         keyboard::Key::Named(Named::Backspace) => Some(Message::LocalNavigateUp),
+        keyboard::Key::Named(Named::F2) => Some(Message::AndroidBeginRename),
+        keyboard::Key::Named(Named::Escape) => Some(Message::AndroidRenameCancel),
         _ => None,
     }
 }
@@ -1011,6 +1040,142 @@ impl App {
 
                 Task::none()
             }
+
+            // ── File operations — rename ──────────────────────────────────────
+            Message::AndroidBeginRename => {
+                // Activate rename for the first selected entry
+                if let Some(&idx) = self.android_pane.selected.first() {
+                    self.android_pane.begin_rename(idx);
+                    return text_input::focus(text_input::Id::new(
+                        android_pane::RENAME_INPUT_ID,
+                    ));
+                }
+                Task::none()
+            }
+
+            Message::AndroidRenameInput(val) => {
+                self.android_pane.update_rename_input(val);
+                Task::none()
+            }
+
+            Message::AndroidRenameCancel => {
+                self.android_pane.cancel_rename();
+                Task::none()
+            }
+
+            Message::AndroidRenameCommit => {
+                let Some((idx, new_name)) = self.android_pane.rename_pending.clone() else {
+                    return Task::none();
+                };
+                let Some(entry) = self.android_pane.entries.get(idx).cloned() else {
+                    return Task::none();
+                };
+                let new_name = new_name.trim().to_string();
+                if new_name.is_empty() || new_name == entry.name {
+                    self.android_pane.cancel_rename();
+                    return Task::none();
+                }
+                let Some(client) = &self.adb_client else {
+                    return Task::none();
+                };
+                let Some(serial) = &self.active_serial else {
+                    return Task::none();
+                };
+                let to_path = entry.path.parent().unwrap_or(&entry.path).join(&new_name);
+                let client = client.clone();
+                let serial = serial.clone();
+                let from_path = entry.path.clone();
+                self.android_pane.cancel_rename();
+                tracing::info!(
+                    from = %from_path.display(),
+                    to = %to_path.display(),
+                    "renaming android file"
+                );
+                Task::perform(
+                    async move { client.rename(&serial, &from_path, &to_path).await.map_err(|e| e.to_string()) },
+                    |result| match result {
+                        Ok(()) => Message::AndroidRenameComplete,
+                        Err(e) => Message::AndroidRenameFailed(e),
+                    },
+                )
+            }
+
+            Message::AndroidRenameComplete => {
+                tracing::info!("rename complete — refreshing android listing");
+                self.update(Message::AndroidNavigateTo(
+                    self.android_pane.current_path.clone(),
+                ))
+            }
+
+            Message::AndroidRenameFailed(msg) => {
+                tracing::warn!(error = %msg, "android rename failed");
+                self.update(Message::ShowError(format!("Rename failed: {msg}")))
+            }
+
+            // ── File operations — delete ──────────────────────────────────────
+            Message::AndroidBeginDelete => {
+                if self.android_pane.selected.is_empty() {
+                    return Task::none();
+                }
+                let paths: Vec<PathBuf> = self
+                    .android_pane
+                    .selected
+                    .iter()
+                    .filter_map(|&i| self.android_pane.entries.get(i))
+                    .map(|e| e.path.clone())
+                    .collect();
+                if paths.is_empty() {
+                    return Task::none();
+                }
+                self.delete_confirm_paths = Some(paths);
+                Task::none()
+            }
+
+            Message::AndroidDeleteCancel => {
+                self.delete_confirm_paths = None;
+                Task::none()
+            }
+
+            Message::AndroidDeleteConfirm => {
+                let paths = match self.delete_confirm_paths.take() {
+                    Some(p) => p,
+                    None => return Task::none(),
+                };
+                let Some(client) = &self.adb_client else {
+                    return Task::none();
+                };
+                let Some(serial) = &self.active_serial else {
+                    return Task::none();
+                };
+                let client = client.clone();
+                let serial = serial.clone();
+                tracing::info!(count = paths.len(), "deleting android files");
+                Task::perform(
+                    async move {
+                        for path in &paths {
+                            client.delete(&serial, path).await.map_err(|e| e.to_string())?;
+                        }
+                        Ok::<(), String>(())
+                    },
+                    |result| match result {
+                        Ok(()) => Message::AndroidDeleteComplete,
+                        Err(e) => Message::AndroidDeleteFailed(e),
+                    },
+                )
+            }
+
+            Message::AndroidDeleteComplete => {
+                tracing::info!("delete complete — refreshing android listing");
+                self.android_pane.selected.clear();
+                self.update(Message::AndroidNavigateTo(
+                    self.android_pane.current_path.clone(),
+                ))
+            }
+
+            Message::AndroidDeleteFailed(msg) => {
+                tracing::warn!(error = %msg, "android delete failed");
+                self.update(Message::ShowError(format!("Delete failed: {msg}")))
+            }
         }
     }
 }
@@ -1047,6 +1212,9 @@ impl App {
         let mut items: Vec<Element<Message>> = vec![self.view_toolbar()];
         if let Some(msg) = &self.error_banner {
             items.push(self.view_error_banner(msg));
+        }
+        if let Some(paths) = &self.delete_confirm_paths {
+            items.push(self.view_delete_confirm(paths));
         }
         items.push(self.view_panes());
         items.push(self.status_bar.view(
@@ -1242,6 +1410,58 @@ impl App {
             .into()
     }
 
+    /// Delete confirmation banner — shown above the panes when paths are pending deletion.
+    fn view_delete_confirm<'a>(&'a self, paths: &'a [PathBuf]) -> Element<'a, Message> {
+        let t = self.theme;
+        let label = if paths.len() == 1 {
+            format!(
+                "Delete \"{}\"? This cannot be undone.",
+                paths[0].file_name().unwrap_or_default().to_string_lossy()
+            )
+        } else {
+            format!("Delete {} items? This cannot be undone.", paths.len())
+        };
+
+        let confirm_btn = button(text("Confirm Delete").size(12).color(iced::Color::WHITE))
+            .style(move |_t, _s| button::Style {
+                background: Some(t.error.into()),
+                border: Border { radius: 4.0.into(), ..Default::default() },
+                ..Default::default()
+            })
+            .padding([4, 12])
+            .on_press(Message::AndroidDeleteConfirm);
+
+        let cancel_btn = button(text("Cancel").size(12).color(t.text))
+            .style(move |_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .padding([4, 8])
+            .on_press(Message::AndroidDeleteCancel);
+
+        let content = row![
+            text(label).size(12).color(t.text).width(Fill),
+            confirm_btn,
+            cancel_btn,
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(8)
+        .padding([4, 12]);
+
+        container(content)
+            .width(Fill)
+            .style(move |_t| container::Style {
+                background: Some(t.warning.scale_alpha(0.15).into()),
+                border: Border {
+                    color: t.warning.scale_alpha(0.5),
+                    width: 1.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
     fn view_toolbar(&self) -> Element<Message> {
         let t = self.theme;
 
@@ -1308,6 +1528,25 @@ impl App {
             if can_copy_to_local { Some(Message::CopyToLocal) } else { None },
         );
 
+        let can_rename = has_device
+            && self.android_pane.selected.len() == 1
+            && self.android_pane.rename_pending.is_none();
+        let can_delete = has_device
+            && !self.android_pane.selected.is_empty()
+            && self.android_pane.rename_pending.is_none();
+
+        let rename_btn = toolbar_btn(
+            "✏ Rename".to_string(),
+            if can_rename { t.accent } else { t.text_secondary },
+            if can_rename { Some(Message::AndroidBeginRename) } else { None },
+        );
+
+        let delete_btn = toolbar_btn(
+            "🗑 Delete".to_string(),
+            if can_delete { t.error } else { t.text_secondary },
+            if can_delete { Some(Message::AndroidBeginDelete) } else { None },
+        );
+
         let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
         let restart_btn = toolbar_btn(
             "↺ Restart Daemon".to_string(),
@@ -1320,6 +1559,8 @@ impl App {
             disconnect_btn,
             copy_to_android_btn,
             copy_to_local_btn,
+            rename_btn,
+            delete_btn,
             restart_btn,
         ]
         .spacing(8)
@@ -1354,6 +1595,8 @@ impl App {
             self.theme,
             Message::AndroidNavigateTo,
             Message::AndroidSelectEntry,
+            Message::AndroidRenameInput,
+            Message::AndroidRenameCommit,
         );
 
         // Wrap the android pane with a drop-zone highlight while a file hovers
@@ -1481,5 +1724,48 @@ mod tests {
         assert!(app.error_banner.is_some());
         // no transfer queued
         assert!(app.active_transfer.is_none());
+    }
+
+    // ── File operations tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn begin_rename_no_selection_is_noop() {
+        let mut app = App::default();
+        let _ = app.update(Message::AndroidBeginRename);
+        assert!(app.android_pane.rename_pending.is_none());
+    }
+
+    #[test]
+    fn rename_cancel_clears_pending() {
+        let mut app = App::default();
+        app.android_pane.rename_pending = Some((0, "test.jpg".to_string()));
+        let _ = app.update(Message::AndroidRenameCancel);
+        assert!(app.android_pane.rename_pending.is_none());
+    }
+
+    #[test]
+    fn rename_input_updates_value() {
+        let mut app = App::default();
+        app.android_pane.rename_pending = Some((0, "old.jpg".to_string()));
+        let _ = app.update(Message::AndroidRenameInput("new.jpg".to_string()));
+        assert_eq!(
+            app.android_pane.rename_pending,
+            Some((0, "new.jpg".to_string()))
+        );
+    }
+
+    #[test]
+    fn begin_delete_no_selection_is_noop() {
+        let mut app = App::default();
+        let _ = app.update(Message::AndroidBeginDelete);
+        assert!(app.delete_confirm_paths.is_none());
+    }
+
+    #[test]
+    fn delete_cancel_clears_confirm() {
+        let mut app = App::default();
+        app.delete_confirm_paths = Some(vec![PathBuf::from("/sdcard/test.jpg")]);
+        let _ = app.update(Message::AndroidDeleteCancel);
+        assert!(app.delete_confirm_paths.is_none());
     }
 }
