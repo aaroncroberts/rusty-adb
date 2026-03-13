@@ -12,11 +12,12 @@ use iced::{Border, Element, Fill};
 pub const STATUS_BAR_HEIGHT: f32 = 30.0;
 
 /// ADB device connection status
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AdbStatus {
     /// ADB binary not found on this system — install screen is shown
     NotFound,
     /// No device connected
+    #[default]
     Disconnected,
     /// Device found but user hasn't authorized USB debugging yet
     Unauthorized,
@@ -45,11 +46,6 @@ impl AdbStatus {
     }
 }
 
-impl Default for AdbStatus {
-    fn default() -> Self {
-        AdbStatus::Disconnected
-    }
-}
 
 // ─── Transfer status ───────────────────────────────────────────────────────────
 

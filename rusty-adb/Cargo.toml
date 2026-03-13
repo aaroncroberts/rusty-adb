@@ -9,6 +9,10 @@ license.workspace = true
 name = "rusty-adb"
 path = "src/main.rs"
 
+[lib]
+name = "rusty_adb"
+path = "src/lib.rs"
+
 [dependencies]
 rusty-logging = { path = "../rusty-logging" }
 

@@ -399,7 +399,7 @@ impl AndroidPane {
         let mut rows: Vec<Element<Message>> = Vec::new();
 
         // ".." up-navigation (don't go above /sdcard)
-        let is_at_root = self.current_path == PathBuf::from("/sdcard")
+        let is_at_root = self.current_path == std::path::Path::new("/sdcard")
             || self.storage_roots.contains(&self.current_path);
 
         if !is_at_root {
@@ -427,7 +427,7 @@ impl AndroidPane {
         }
 
         // Storage root quick-nav (shown at /sdcard level)
-        if self.current_path == PathBuf::from("/sdcard") && self.storage_roots.len() > 1 {
+        if self.current_path == std::path::Path::new("/sdcard") && self.storage_roots.len() > 1 {
             for root in &self.storage_roots {
                 if root == &PathBuf::from("/sdcard") {
                     continue; // already here

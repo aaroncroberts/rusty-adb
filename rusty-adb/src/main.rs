@@ -786,7 +786,8 @@ impl App {
                 }
 
                 let total = jobs.len();
-                let first = jobs.pop_front().unwrap();
+                // Safety: guarded by is_empty() check above
+                let first = jobs.pop_front().expect("queue non-empty: guarded above");
                 tracing::info!(total, file = %first.source.display(), "starting copy → android");
 
                 let cancel = Arc::new(AtomicBool::new(false));
@@ -844,7 +845,8 @@ impl App {
                 }
 
                 let total = jobs.len();
-                let first = jobs.pop_front().unwrap();
+                // Safety: guarded by is_empty() check above
+                let first = jobs.pop_front().expect("queue non-empty: guarded above");
                 tracing::info!(total, file = %first.source.display(), "starting copy ← android");
 
                 let cancel = Arc::new(AtomicBool::new(false));
@@ -929,7 +931,7 @@ impl App {
                 self.transfer_status = None;
                 self.transfer_queue.clear();
                 self.cancel_flag = None;
-                return self.update(Message::ShowError(format!("Transfer failed: {msg}")));
+                self.update(Message::ShowError(format!("Transfer failed: {msg}")))
             }
 
             Message::CancelTransfer => {
@@ -1778,6 +1780,26 @@ impl App {
 
     /// Preview modal overlay — rendered on top of the full UI via `stack!`.
     ///
+    /// Wraps `content` in a full-window semi-transparent backdrop.
+    ///
+    /// Shared by all three modal overlays (preview, about, settings).
+    fn modal_backdrop<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+        container(
+            container(content)
+                .center_x(Fill)
+                .center_y(Fill)
+                .width(Fill)
+                .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(|_th| container::Style {
+            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
+            ..Default::default()
+        })
+        .into()
+    }
+
     /// The semi-transparent backdrop captures clicks (closing the modal).
     /// The inner card shows either an image or scrollable text.
     fn view_preview_modal<'a>(&'a self, content: &'a PreviewContent) -> Element<'a, Message> {
@@ -1876,20 +1898,7 @@ impl App {
         });
 
         // Semi-transparent backdrop — fills the full window
-        container(
-            container(card)
-                .center_x(Fill)
-                .center_y(Fill)
-                .width(Fill)
-                .height(Fill),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(move |_th| container::Style {
-            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
-            ..Default::default()
-        })
-        .into()
+        Self::modal_backdrop(card)
     }
 
     /// About modal overlay — app info, version, GitHub link, license.
@@ -1978,20 +1987,7 @@ impl App {
             ..Default::default()
         });
 
-        container(
-            container(card)
-                .center_x(Fill)
-                .center_y(Fill)
-                .width(Fill)
-                .height(Fill),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(move |_th| container::Style {
-            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
-            ..Default::default()
-        })
-        .into()
+        Self::modal_backdrop(card)
     }
 
     /// Success/info toast banner (green tint, auto-dismisses after 3 s).
@@ -2155,20 +2151,7 @@ impl App {
             ..Default::default()
         });
 
-        container(
-            container(card)
-                .center_x(Fill)
-                .center_y(Fill)
-                .width(Fill)
-                .height(Fill),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(move |_th| container::Style {
-            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
-            ..Default::default()
-        })
-        .into()
+        Self::modal_backdrop(card)
     }
 
     fn view_toolbar(&self) -> Element<Message> {
@@ -2430,16 +2413,14 @@ mod tests {
 
     #[test]
     fn files_hovered_left_clears_flag() {
-        let mut app = App::default();
-        app.file_hover_active = true;
+        let mut app = App { file_hover_active: true, ..Default::default() };
         let _ = app.update(Message::FilesHoveredLeft);
         assert!(!app.file_hover_active);
     }
 
     #[test]
     fn file_dropped_without_device_shows_error() {
-        let mut app = App::default();
-        app.file_hover_active = true;
+        let mut app = App { file_hover_active: true, ..Default::default() };
         let _ = app.update(Message::FileDropped(PathBuf::from("/tmp/test.jpg")));
         // hover flag should be cleared even on error
         assert!(!app.file_hover_active);
@@ -2486,8 +2467,10 @@ mod tests {
 
     #[test]
     fn delete_cancel_clears_confirm() {
-        let mut app = App::default();
-        app.delete_confirm_paths = Some(vec![PathBuf::from("/sdcard/test.jpg")]);
+        let mut app = App {
+            delete_confirm_paths: Some(vec![PathBuf::from("/sdcard/test.jpg")]),
+            ..Default::default()
+        };
         let _ = app.update(Message::AndroidDeleteCancel);
         assert!(app.delete_confirm_paths.is_none());
     }
@@ -2530,16 +2513,20 @@ mod tests {
 
     #[test]
     fn close_preview_clears_modal() {
-        let mut app = App::default();
-        app.preview_modal = Some(PreviewContent::Unsupported("n/a".to_string()));
+        let mut app = App {
+            preview_modal: Some(PreviewContent::Unsupported("n/a".to_string())),
+            ..Default::default()
+        };
         let _ = app.update(Message::ClosePreview);
         assert!(app.preview_modal.is_none());
     }
 
     #[test]
     fn escape_closes_preview_modal_first() {
-        let mut app = App::default();
-        app.preview_modal = Some(PreviewContent::Unsupported("n/a".to_string()));
+        let mut app = App {
+            preview_modal: Some(PreviewContent::Unsupported("n/a".to_string())),
+            ..Default::default()
+        };
         app.android_pane.rename_pending = Some((0, "name".to_string()));
         let _ = app.update(Message::EscapePressed);
         // modal closed, rename still active (Escape routed to ClosePreview)
@@ -2558,16 +2545,14 @@ mod tests {
 
     #[test]
     fn close_about_clears_flag() {
-        let mut app = App::default();
-        app.about_open = true;
+        let mut app = App { about_open: true, ..Default::default() };
         let _ = app.update(Message::CloseAbout);
         assert!(!app.about_open);
     }
 
     #[test]
     fn escape_closes_about_before_rename() {
-        let mut app = App::default();
-        app.about_open = true;
+        let mut app = App { about_open: true, ..Default::default() };
         app.android_pane.rename_pending = Some((0, "n".to_string()));
         let _ = app.update(Message::EscapePressed);
         assert!(!app.about_open);
@@ -2594,8 +2579,7 @@ mod tests {
 
     #[test]
     fn close_settings_hides_modal() {
-        let mut app = App::default();
-        app.settings_open = true;
+        let mut app = App { settings_open: true, ..Default::default() };
         let _ = app.update(Message::CloseSettings);
         assert!(!app.settings_open);
     }
@@ -2629,10 +2613,9 @@ mod tests {
 
     #[test]
     fn save_settings_closes_modal_and_updates_config() {
-        let mut app = App::default();
+        let mut app = App { settings_open: true, ..Default::default() };
         // config_path is empty in tests — SaveSettings will fail disk write
         // but should still update in-memory config and close modal
-        app.settings_open = true;
         app.settings_draft.log.level = "error".to_string();
         app.settings_draft.log.console_enabled = false;
         let _ = app.update(Message::SaveSettings);
@@ -2660,8 +2643,7 @@ mod tests {
 
     #[test]
     fn escape_closes_settings_first() {
-        let mut app = App::default();
-        app.settings_open = true;
+        let mut app = App { settings_open: true, ..Default::default() };
         app.android_pane.rename_pending = Some((0, "name".to_string()));
         let _ = app.update(Message::EscapePressed);
         assert!(!app.settings_open, "settings should close");
@@ -2670,8 +2652,10 @@ mod tests {
 
     #[test]
     fn open_settings_closes_preview_modal() {
-        let mut app = App::default();
-        app.preview_modal = Some(PreviewContent::Unsupported("n/a".to_string()));
+        let mut app = App {
+            preview_modal: Some(PreviewContent::Unsupported("n/a".to_string())),
+            ..Default::default()
+        };
         let _ = app.update(Message::OpenSettings);
         assert!(app.preview_modal.is_none(), "preview should be cleared");
         assert!(app.settings_open);
@@ -2686,8 +2670,7 @@ mod tests {
 
     #[test]
     fn dismiss_toast_clears_message() {
-        let mut app = App::default();
-        app.toast = Some("hello".to_string());
+        let mut app = App { toast: Some("hello".to_string()), ..Default::default() };
         let _ = app.update(Message::DismissToast);
         assert!(app.toast.is_none());
     }

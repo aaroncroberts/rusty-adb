@@ -83,7 +83,7 @@ impl AdbClient {
     /// 2. Platform-specific Android SDK default locations
     ///    - macOS: `~/Library/Android/sdk/platform-tools/adb`
     ///    - Windows: `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`
-    ///              `%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe`
+    ///      `%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe`
     pub async fn find() -> Result<Self> {
         // 1. Try PATH first (cross-platform)
         #[cfg(target_os = "windows")]
@@ -265,7 +265,7 @@ fn parse_devices(output: &str) -> Vec<AdbDevice> {
 }
 
 /// Extract `key:value` from a space-separated list of `key:value` pairs.
-fn extract_kv<'a>(s: &'a str, key: &str) -> Option<String> {
+fn extract_kv(s: &str, key: &str) -> Option<String> {
     let prefix = format!("{}:", key);
     s.split_whitespace()
         .find(|tok| tok.starts_with(&prefix))
@@ -314,6 +314,29 @@ fn format_android_size(bytes: u64) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/// Check the output of a fire-and-forget `adb shell` command.
+///
+/// Returns `Ok(())` when the command succeeded and produced no error output.
+/// Returns `Err` when the process exited non-zero or either stream contains
+/// "Permission denied".
+///
+/// `context` is a caller-supplied string included in the error message, e.g.
+/// `"rename failed [serial=device1234 from=/sdcard/a to=/sdcard/b]"`.
+fn check_adb_output(output: &std::process::Output, context: &str) -> Result<()> {
+    let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim().to_string();
+    let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim().to_string();
+    if !output.status.success()
+        || stderr.contains("Permission denied")
+        || stdout.contains("Permission denied")
+    {
+        let msg = if !stderr.is_empty() { stderr } else { stdout };
+        anyhow::bail!("{context}: {msg}");
+    }
+    Ok(())
 }
 
 // ─── Directory Listing ────────────────────────────────────────────────────────
@@ -379,15 +402,10 @@ impl AdbClient {
             .output()
             .await
             .context("failed to run adb shell mv")?;
-        let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim().to_string();
-        let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim().to_string();
-        if !output.status.success()
-            || stderr.contains("Permission denied")
-            || stdout.contains("Permission denied")
-        {
-            let msg = if !stderr.is_empty() { stderr } else { stdout };
-            anyhow::bail!("rename failed: {}", msg);
-        }
+        check_adb_output(
+            &output,
+            &format!("rename failed [serial={serial} from={from_str} to={to_str}]"),
+        )?;
         Ok(())
     }
 
@@ -399,15 +417,10 @@ impl AdbClient {
             .output()
             .await
             .context("failed to run adb shell rm -rf")?;
-        let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim().to_string();
-        let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim().to_string();
-        if !output.status.success()
-            || stderr.contains("Permission denied")
-            || stdout.contains("Permission denied")
-        {
-            let msg = if !stderr.is_empty() { stderr } else { stdout };
-            anyhow::bail!("delete failed: {}", msg);
-        }
+        check_adb_output(
+            &output,
+            &format!("delete failed [serial={serial} path={path_str}]"),
+        )?;
         Ok(())
     }
 
@@ -439,7 +452,9 @@ impl AdbClient {
 
         if !output.status.success() {
             let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim();
-            anyhow::bail!("adb pull failed: {}", stderr);
+            anyhow::bail!(
+                "pull_to_temp failed [serial={serial} remote={remote_str}]: {stderr}"
+            );
         }
 
         tracing::info!(

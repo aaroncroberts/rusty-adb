@@ -10,18 +10,10 @@ use std::path::Path;
 // ─── Root ──────────────────────────────────────────────────────────────────
 
 /// Top-level application configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub log: LogConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            log: LogConfig::default(),
-        }
-    }
 }
 
 impl AppConfig {

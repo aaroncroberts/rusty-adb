@@ -239,4 +239,49 @@ mod tests {
         // malformed — no parenthesis
         assert_eq!(parse_speed("something without paren"), None);
     }
+
+    // ── run_transfer failure path ─────────────────────────────────────────────
+
+    /// Verify that run_transfer emits TransferEvent::Failed when the adb
+    /// subprocess exits with a non-zero status code.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn run_transfer_emits_failed_on_bad_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::Ordering;
+
+        // Write a tiny script that always exits 1
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("fail-adb.sh");
+        std::fs::write(&script, b"#!/bin/sh\nexit 1\n").expect("write script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod +x");
+
+        let job = TransferJob {
+            id: 99,
+            adb_path: script,
+            serial: "test".to_string(),
+            source: std::path::PathBuf::from("/sdcard/file.jpg"),
+            destination: tmp.path().join("file.jpg"),
+            direction: TransferDirection::ToLocal,
+            filename: "file.jpg".to_string(),
+        };
+
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _ = cancel.load(Ordering::Relaxed); // suppress unused warning
+        let mut events: Vec<TransferEvent> = Vec::new();
+
+        run_transfer(&job, cancel, |ev| events.push(ev))
+            .await
+            .expect("run_transfer itself should not error");
+
+        assert!(
+            events.iter().any(|e| matches!(e, TransferEvent::Failed(_))),
+            "expected a Failed event when adb exits 1, got: {events:?}"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(e, TransferEvent::Complete { .. })),
+            "should not receive Complete when adb exits 1"
+        );
+    }
 }
