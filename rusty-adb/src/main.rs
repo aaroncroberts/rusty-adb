@@ -13,6 +13,7 @@
 
 mod adb;
 mod android_pane;
+mod config;
 mod local_pane;
 mod status_bar;
 mod theme;
@@ -154,11 +155,35 @@ impl Default for App {
 // ─── Entry Point ──────────────────────────────────────────────────────────────
 
 pub fn main() -> iced::Result {
-    rusty_logging::LoggingConfig::builder()
-        .with_console_compact()
-        .with_file_text()
-        .with_file_directory("./logs")
-        .with_file_prefix("rusty-adb")
+    // Resolve ~/.rusty-adb/ and ensure it exists before logging starts.
+    let app_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".rusty-adb");
+    std::fs::create_dir_all(&app_dir).ok();
+
+    // Load config.yml (silently uses defaults if absent or unreadable).
+    let cfg = config::AppConfig::load(&app_dir.join("config.yml"));
+
+    // Build logging from config values.
+    let mut log_builder = rusty_logging::LoggingConfig::builder()
+        .with_filter(&cfg.log.level)
+        .with_rotation_policy(rusty_logging::RotationPolicy::Daily)
+        .with_file_directory(&app_dir)
+        .with_file_prefix("rusty-adb");
+
+    log_builder = if cfg.log.console_enabled {
+        log_builder.with_console_compact()
+    } else {
+        log_builder.without_console()
+    };
+
+    log_builder = if cfg.log.file_enabled {
+        log_builder.with_file_text()
+    } else {
+        log_builder.without_file()
+    };
+
+    log_builder
         .build()
         .expect("Invalid logging configuration")
         .apply()
