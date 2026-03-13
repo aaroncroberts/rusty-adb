@@ -201,7 +201,7 @@ impl AndroidPane {
     /// Full android pane view: device header + scrollable entry list with rename support.
     ///
     /// Used for the **Details** view mode.
-    pub fn view<'a, Message: 'a + Clone>(
+    pub fn view<'a, Message: 'a + Clone + 'static>(
         &'a self,
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
@@ -221,7 +221,7 @@ impl AndroidPane {
     }
 
     /// Compact **List** mode view: device header + name-only rows, no size/date columns.
-    pub fn view_list<'a, Message: 'a + Clone>(
+    pub fn view_list<'a, Message: 'a + Clone + 'static>(
         &'a self,
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
@@ -229,28 +229,51 @@ impl AndroidPane {
     ) -> Element<'a, Message> {
         let header = self.view_header(theme);
 
-        // When not browsing (no device, loading, error) fall back to the header only
+        // When not browsing (no device, loading, error) show state-appropriate content
         if self.state != AndroidPaneState::Browsing {
-            return column![
-                header,
-                container(
-                    text(match &self.state {
-                        AndroidPaneState::NoDevice => "No Android device connected".to_string(),
-                        AndroidPaneState::Loading => "Loading...".to_string(),
-                        AndroidPaneState::Error(e) => format!("Error: {e}"),
-                        AndroidPaneState::Browsing => unreachable!(),
-                    })
-                    .size(12)
-                    .color(theme.text_secondary)
+            let body: Element<Message> = match &self.state {
+                AndroidPaneState::NoDevice => view_connect_guide(theme),
+                AndroidPaneState::Loading => container(
+                    text("Loading...").size(12).color(theme.text_secondary),
                 )
                 .padding([12, 16])
-            ]
-            .width(Fill)
-            .height(Fill)
-            .into();
+                .into(),
+                AndroidPaneState::Error(e) => container(
+                    text(format!("Error: {e}")).size(12).color(theme.error),
+                )
+                .padding([12, 16])
+                .into(),
+                AndroidPaneState::Browsing => unreachable!(),
+            };
+            return column![header, body]
+                .width(Fill)
+                .height(Fill)
+                .into();
         }
 
         let mut rows: Vec<Element<Message>> = Vec::new();
+
+        // ".." up-navigation — allow all the way to filesystem root "/"
+        let is_at_fs_root = self.current_path == std::path::Path::new("/");
+        if !is_at_fs_root {
+            if let Some(parent) = self.current_path.parent() {
+                let parent_path = parent.to_path_buf();
+                rows.push(
+                    button(
+                        row![
+                            text("[/]").size(11).color(theme.accent).width(28),
+                            text("..").size(12).color(theme.text),
+                        ]
+                        .spacing(4)
+                        .padding([1, 4]),
+                    )
+                    .width(Fill)
+                    .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                    .on_press(on_navigate(parent_path))
+                    .into(),
+                );
+            }
+        }
 
         let visible_count = if self.show_hidden {
             self.entries.len()
@@ -376,7 +399,7 @@ impl AndroidPane {
             .into()
     }
 
-    fn view_body<'a, Message: 'a + Clone>(
+    fn view_body<'a, Message: 'a + Clone + 'static>(
         &'a self,
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
@@ -385,7 +408,7 @@ impl AndroidPane {
         on_rename_commit: Message,
     ) -> Element<'a, Message> {
         match &self.state {
-            AndroidPaneState::NoDevice => self.view_no_device(theme),
+            AndroidPaneState::NoDevice => view_connect_guide(theme),
 
             AndroidPaneState::Loading => self.view_loading(theme),
 
@@ -424,40 +447,6 @@ impl AndroidPane {
             .into()
     }
 
-    fn view_no_device<'a, Message: 'a + Clone>(
-        &'a self,
-        theme: ThemeColors,
-    ) -> Element<'a, Message> {
-        let steps = column![
-            text("No Android device connected")
-                .size(13)
-                .color(theme.text),
-            text("To get started:").size(11).color(theme.text_secondary),
-            text("  1.  Enable USB debugging on your device")
-                .size(11)
-                .color(theme.text_secondary),
-            text("      Settings > Developer Options > USB Debugging")
-                .size(11)
-                .color(theme.text_secondary),
-            text("  2.  Connect via USB cable")
-                .size(11)
-                .color(theme.text_secondary),
-            text("  3.  Tap \"Allow\" when prompted on your phone")
-                .size(11)
-                .color(theme.text_secondary),
-        ]
-        .spacing(4);
-
-        container(steps)
-            .width(Fill)
-            .height(Fill)
-            .padding(24)
-            .style(move |_t| container::Style {
-                background: Some(theme.background.into()),
-                ..Default::default()
-            })
-            .into()
-    }
 
     fn view_loading<'a, Message: 'a + Clone>(&'a self, theme: ThemeColors) -> Element<'a, Message> {
         let spinner_chars = ["|", "/", "-", "\\"];
@@ -553,9 +542,8 @@ impl AndroidPane {
 
         let mut rows: Vec<Element<Message>> = Vec::new();
 
-        // ".." up-navigation (don't go above /sdcard)
-        let is_at_root = self.current_path == std::path::Path::new("/sdcard")
-            || self.storage_roots.contains(&self.current_path);
+        // ".." up-navigation — allow all the way to filesystem root "/"
+        let is_at_root = self.current_path == std::path::Path::new("/");
 
         if !is_at_root {
             if let Some(parent) = self.current_path.parent() {
@@ -738,6 +726,163 @@ impl AndroidPane {
             })
             .into()
     }
+}
+
+// ─── Device connection guide ───────────────────────────────────────────────────
+
+/// Renders the step-by-step guide shown in the Android pane when no device is connected.
+fn view_connect_guide<Message: Clone + 'static>(theme: ThemeColors) -> Element<'static, Message>
+where
+    Message: 'static,
+{
+    use iced::widget::Space;
+
+    fn step<Message: Clone + 'static>(
+        theme: ThemeColors,
+        number: &'static str,
+        title: &'static str,
+        detail: &'static str,
+    ) -> Element<'static, Message> {
+        container(
+            column![
+                row![
+                    text(number).size(11).color(theme.accent),
+                    text(title).size(12).color(theme.text),
+                ]
+                .spacing(6),
+                text(detail).size(11).color(theme.text_secondary),
+            ]
+            .spacing(2),
+        )
+        .padding([6, 10])
+        .style(move |_t| container::Style {
+            background: Some(theme.background_secondary.into()),
+            border: iced::Border {
+                color: theme.border,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .width(Fill)
+        .into()
+    }
+
+    let guide = column![
+        text("Connect your Android device").size(14).color(theme.text),
+        Space::with_height(4),
+        text("ADB requires Developer Mode to be enabled on your phone.")
+            .size(11)
+            .color(theme.text_secondary),
+        Space::with_height(12),
+
+        // ── Step 1 ──────────────────────────────────────────────────────────
+        text("Step 1 — Unlock Developer Options")
+            .size(11)
+            .color(theme.text_secondary),
+        Space::with_height(4),
+        step::<Message>(
+            theme,
+            "1.",
+            "Open Settings › About Phone › Software Information",
+            "The exact path varies by manufacturer — see notes below.",
+        ),
+        step::<Message>(
+            theme,
+            "2.",
+            "Tap \"Build Number\" seven times in a row",
+            "A toast will say \"You are now a developer!\" when done.",
+        ),
+        Space::with_height(10),
+
+        // ── Step 2 ──────────────────────────────────────────────────────────
+        text("Step 2 — Enable USB Debugging")
+            .size(11)
+            .color(theme.text_secondary),
+        Space::with_height(4),
+        step::<Message>(
+            theme,
+            "3.",
+            "Go back to Settings › Developer Options",
+            "This menu appears after step 1.",
+        ),
+        step::<Message>(
+            theme,
+            "4.",
+            "Turn on \"USB Debugging\"",
+            "Toggle is near the top of the Developer Options list.",
+        ),
+        Space::with_height(10),
+
+        // ── Step 3 ──────────────────────────────────────────────────────────
+        text("Step 3 — Connect and authorize")
+            .size(11)
+            .color(theme.text_secondary),
+        Space::with_height(4),
+        step::<Message>(
+            theme,
+            "5.",
+            "Plug in a USB cable between your phone and this computer",
+            "Use a data cable — charge-only cables won't work.",
+        ),
+        step::<Message>(
+            theme,
+            "6.",
+            "Set USB mode to \"File Transfer\" on your phone",
+            "Swipe down the notification shade and tap the USB notification.",
+        ),
+        step::<Message>(
+            theme,
+            "7.",
+            "Tap \"Allow\" on the \"Allow USB Debugging?\" dialog",
+            "Tick \"Always allow from this computer\" to skip this next time.",
+        ),
+        Space::with_height(12),
+
+        // ── Manufacturer notes ───────────────────────────────────────────────
+        text("Manufacturer notes — where to find Build Number")
+            .size(11)
+            .color(theme.text_secondary),
+        Space::with_height(4),
+        container(
+            column![
+                text("Samsung:   Settings › About Phone › Software Information › Build Number")
+                    .size(10).color(theme.text_secondary),
+                text("Pixel:     Settings › About Phone › Build Number")
+                    .size(10).color(theme.text_secondary),
+                text("OnePlus:   Settings › About Device › Version › Build Number")
+                    .size(10).color(theme.text_secondary),
+                text("Xiaomi:    Settings › About Phone › MIUI Version (tap 7×)")
+                    .size(10).color(theme.text_secondary),
+                text("Motorola:  Settings › About Phone › Build Number")
+                    .size(10).color(theme.text_secondary),
+            ]
+            .spacing(3),
+        )
+        .padding([8, 10])
+        .style(move |_t| container::Style {
+            background: Some(theme.background_secondary.into()),
+            border: iced::Border {
+                color: theme.border,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .width(Fill),
+    ]
+    .spacing(4)
+    .width(Fill);
+
+    container(scrollable(guide.padding([0, 4])))
+        .width(Fill)
+        .height(Fill)
+        .padding(16)
+        .style(move |_t| container::Style {
+            background: Some(theme.background.into()),
+            ..Default::default()
+        })
+        .into()
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────

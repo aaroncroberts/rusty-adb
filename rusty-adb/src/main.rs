@@ -1737,23 +1737,72 @@ impl App {
         .spacing(4)
         .into();
 
+        // ── Developer mode steps (same on all platforms) ─────────────────────
+        let dev_steps: Element<Message> = column![
+            text("After installing ADB, enable Developer Mode on your phone:")
+                .size(12).color(t.text_secondary),
+            Space::with_height(6),
+            text("  1.  Settings › About Phone › tap Build Number 7 times")
+                .size(12).color(t.text_secondary),
+            text("      Samsung:  About Phone › Software Information › Build Number")
+                .size(11).color(t.text_secondary),
+            text("      Xiaomi:   About Phone › tap MIUI Version 7 times")
+                .size(11).color(t.text_secondary),
+            text("      OnePlus:  About Device › Version › Build Number")
+                .size(11).color(t.text_secondary),
+            Space::with_height(4),
+            text("  2.  Settings › Developer Options › enable USB Debugging")
+                .size(12).color(t.text_secondary),
+            Space::with_height(4),
+            text("  3.  Plug in USB cable and set USB mode to \"File Transfer\"")
+                .size(12).color(t.text_secondary),
+            text("      Swipe down the notification shade and tap the USB notification.")
+                .size(11).color(t.text_secondary),
+            Space::with_height(4),
+            text("  4.  Tap \"Allow\" on the USB Debugging dialog on your phone")
+                .size(12).color(t.text_secondary),
+            text("      Tick \"Always allow from this computer\" to skip this next time.")
+                .size(11).color(t.text_secondary),
+        ]
+        .spacing(2)
+        .into();
+
+        let divider = container(Space::with_height(1))
+            .width(Fill)
+            .style(move |_t| container::Style {
+                background: Some(t.border.into()),
+                ..Default::default()
+            });
+
         // ── Main card layout ─────────────────────────────────────────────────
         let card = container(
-            column![
-                text("ADB Not Found").size(24).color(t.text),
-                Space::with_height(8),
-                text("Android Debug Bridge (ADB) is required to connect to your device.")
-                    .size(13)
-                    .color(t.text_secondary),
-                Space::with_height(20),
-                steps,
-                Space::with_height(20),
-                row![install_btn, retry_btn, download_btn].spacing(12),
-                Space::with_height(12),
-                log_section,
-            ]
-            .spacing(0)
-            .width(520),
+            scrollable(
+                column![
+                    text("Setup Guide").size(22).color(t.text),
+                    Space::with_height(4),
+                    text("ADB gives rusty-adb full read/write access to your device's filesystem.")
+                        .size(13).color(t.text_secondary),
+                    Space::with_height(20),
+                    text("Step 1 — Install ADB").size(14).color(t.text),
+                    Space::with_height(8),
+                    steps,
+                    Space::with_height(12),
+                    row![install_btn, retry_btn, download_btn].spacing(12),
+                    Space::with_height(8),
+                    log_section,
+                    Space::with_height(20),
+                    divider,
+                    Space::with_height(20),
+                    text("Step 2 — Enable Developer Mode on your phone")
+                        .size(14).color(t.text),
+                    Space::with_height(8),
+                    dev_steps,
+                ]
+                .spacing(0)
+                .width(560)
+                .padding([0, 4]),
+            )
+            .height(Fill),
         )
         .padding(32)
         .style(move |_t| container::Style {
