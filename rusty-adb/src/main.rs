@@ -168,6 +168,7 @@ enum Message {
     },
     AndroidLoadError(String),
     AndroidSelectEntry(usize),
+    AndroidSortBy(SortField),
     /// Drives the loading spinner animation
     SpinnerTick,
 
@@ -795,6 +796,10 @@ impl App {
             }
             Message::LocalSortBy(field) => {
                 self.local_pane.sort_by(field);
+                Task::none()
+            }
+            Message::AndroidSortBy(field) => {
+                self.android_pane.set_sort(field);
                 Task::none()
             }
 
@@ -1755,7 +1760,7 @@ impl App {
             return column(items).into();
         }
 
-        let mut items: Vec<Element<Message>> = vec![self.view_toolbar()];
+        let mut items: Vec<Element<Message>> = vec![self.view_toolbar(), self.view_hero_banner()];
         if let Some(msg) = &self.error_banner {
             items.push(self.view_error_banner(msg));
         }
@@ -2705,6 +2710,49 @@ impl App {
             .into()
     }
 
+    // ── Hero Banner ────────────────────────────────────────────────────────────
+
+    /// Retro ASCII hero banner — a slim persistent strip above the pane menu bars.
+    ///
+    /// Shows: ASCII logotype · version · tagline, in phosphor-green palette.
+    fn view_hero_banner<'a>(&self) -> Element<'a, Message> {
+        let t = self.theme;
+        let version = env!("CARGO_PKG_VERSION");
+
+        // Top row: ASCII logotype + version
+        let logo_line = format!(
+            "◄◄ RUSTY-ADB ►► v{}",
+            version
+        );
+        let logo = text(logo_line)
+            .size(13)
+            .color(t.accent)
+            .font(iced::Font::MONOSPACE);
+
+        // Bottom row: tagline
+        let tagline = text("Android file manager · Rust + Iced")
+            .size(9)
+            .color(t.text_secondary)
+            .font(iced::Font::MONOSPACE);
+
+        let inner = column![logo, tagline]
+            .spacing(1)
+            .padding([4, 12]);
+
+        container(inner)
+            .width(Fill)
+            .style(move |_| container::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.accent.scale_alpha(0.35),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
     // ── Pane Menu Bar ──────────────────────────────────────────────────────────
 
     /// Horizontal menu bar rendered at the top of each directory pane.
@@ -2793,6 +2841,7 @@ impl App {
 
         let content = row![
             text("View").size(11).color(t.text_secondary),
+            iced::widget::Space::new(6, 1),
             view_picker,
             iced::widget::horizontal_space(),
             cmd_row,
@@ -3235,6 +3284,7 @@ impl App {
                 self.theme,
                 Message::LocalNavigateTo,
                 Message::LocalSelectEntry,
+                Message::LocalSortBy,
             ),
             // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(false),
@@ -3269,6 +3319,7 @@ impl App {
                 self.theme,
                 Message::AndroidNavigateTo,
                 Message::AndroidSelectEntry,
+                Message::AndroidSortBy,
             ),
             // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(true),
@@ -3398,12 +3449,14 @@ impl App {
                 self.theme,
                 Message::AndroidNavigateTo,
                 Message::AndroidSelectEntry,
+                Message::AndroidSortBy,
             )
         } else {
             self.local_pane.view_list(
                 self.theme,
                 Message::LocalNavigateTo,
                 Message::LocalSelectEntry,
+                Message::LocalSortBy,
             )
         };
 

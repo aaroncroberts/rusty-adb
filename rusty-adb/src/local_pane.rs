@@ -204,6 +204,7 @@ impl LocalPane {
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
+        on_sort: impl Fn(SortField) -> Message + 'a,
     ) -> Element<'a, Message> {
         // Column pixel widths — must match between header and every data row.
         const W_ICON: u16 = 24;
@@ -214,18 +215,46 @@ impl LocalPane {
         let t = theme;
         let breadcrumb = view_breadcrumb(&self.current_path, theme, &on_navigate);
 
+        // ── Sort indicator helper ─────────────────────────────────────────────
+        let sort_ind = |field: SortField| -> &'static str {
+            if self.sort_by == field {
+                if self.sort_ascending { " ▲" } else { " ▼" }
+            } else {
+                ""
+            }
+        };
+        let mk_col_hdr = |label: String, field: SortField, width: iced::Length, msg: Message|
+            -> Element<'a, Message>
+        {
+            let is_active = self.sort_by == field;
+            let fg = if is_active { t.accent } else { t.text_secondary };
+            button(
+                text(label).size(10).color(fg),
+            )
+            .width(width)
+            .padding([2, 4])
+            .style(move |_t, _s| button::Style { background: None, ..Default::default() })
+            .on_press(msg)
+            .into()
+        };
+
         // ── Sticky column header ──────────────────────────────────────────────
+        let name_label = format!("Name{}", sort_ind(SortField::Name));
+        let type_label_hdr = "Type";
+        let size_label = format!("Size{}", sort_ind(SortField::Size));
+        let date_label = format!("Modified{}", sort_ind(SortField::Modified));
+
         let header = container(
             row![
                 iced::widget::Space::new(20, 1),  // checkbox placeholder
                 text("").width(W_ICON),           // icon placeholder
-                text("Name").size(10).color(t.text_secondary).width(Fill),
-                text("Type").size(10).color(t.text_secondary).width(W_TYPE),
-                text("Size").size(10).color(t.text_secondary).width(W_SIZE),
-                text("Modified").size(10).color(t.text_secondary).width(W_DATE),
+                mk_col_hdr(name_label, SortField::Name, Fill, on_sort(SortField::Name)),
+                mk_col_hdr(type_label_hdr.to_string(), SortField::Name, iced::Length::Fixed(W_TYPE as f32), on_sort(SortField::Name)),
+                mk_col_hdr(size_label, SortField::Size, iced::Length::Fixed(W_SIZE as f32), on_sort(SortField::Size)),
+                mk_col_hdr(date_label, SortField::Modified, iced::Length::Fixed(W_DATE as f32), on_sort(SortField::Modified)),
             ]
             .spacing(6)
-            .padding([3, 8])
+            .padding([2, 8])
             .align_y(iced::Alignment::Center),
         )
         .width(Fill)

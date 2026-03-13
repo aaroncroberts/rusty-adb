@@ -19,6 +19,7 @@ use iced::widget::{button, checkbox, column, container, row, scrollable, text, t
 use iced::{Border, Color, Element, Fill};
 
 use crate::adb::AndroidEntry;
+use crate::local_pane::SortField;
 use crate::theme::ThemeColors;
 
 // ─── Pane State ───────────────────────────────────────────────────────────────
@@ -57,6 +58,10 @@ pub struct AndroidPane {
     pub rename_pending: Option<(usize, String)>,
     /// Whether to show hidden files (entries starting with '.')
     pub show_hidden: bool,
+    /// Active sort field
+    pub sort_by: SortField,
+    /// True = ascending (A→Z, small→large); false = descending
+    pub sort_ascending: bool,
 }
 
 impl Default for AndroidPane {
@@ -70,6 +75,8 @@ impl Default for AndroidPane {
             spinner_frame: 0,
             rename_pending: None,
             show_hidden: false,
+            sort_by: SortField::Name,
+            sort_ascending: true,
         }
     }
 }
@@ -116,7 +123,7 @@ impl AndroidPane {
     pub fn on_entries_loaded(
         &mut self,
         path: PathBuf,
-        mut entries: Vec<AndroidEntry>,
+        entries: Vec<AndroidEntry>,
         roots: Vec<PathBuf>,
     ) {
         // Discard stale responses (user may have navigated elsewhere)
@@ -128,12 +135,6 @@ impl AndroidPane {
             );
             return;
         }
-        // Dirs first, then alphabetical
-        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        });
         tracing::info!(
             path = %path.display(),
             count = entries.len(),
@@ -141,8 +142,40 @@ impl AndroidPane {
             "android pane: directory loaded, transitioning to Browsing"
         );
         self.entries = entries;
+        self.sort_entries();  // dirs first, then by active field/direction
         self.storage_roots = roots;
         self.state = AndroidPaneState::Browsing;
+    }
+
+    /// Change sort field (or toggle direction if already active) and re-sort entries.
+    pub fn set_sort(&mut self, field: SortField) {
+        if self.sort_by == field {
+            self.sort_ascending = !self.sort_ascending;
+        } else {
+            self.sort_by = field;
+            self.sort_ascending = true;
+        }
+        self.sort_entries();
+    }
+
+    /// Sort `self.entries` in-place using the current sort state (dirs always first).
+    fn sort_entries(&mut self) {
+        let field = self.sort_by;
+        let asc = self.sort_ascending;
+        self.entries.sort_by(|a, b| {
+            match (a.is_dir, b.is_dir) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => {
+                    let base = match field {
+                        SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                        SortField::Size => a.size.cmp(&b.size),
+                        SortField::Modified => a.modified.cmp(&b.modified),
+                    };
+                    if asc { base } else { base.reverse() }
+                }
+            }
+        });
     }
 
     /// Called when ADB returns an error for the current path.
@@ -220,12 +253,13 @@ impl AndroidPane {
         column![header, body].width(Fill).height(Fill).into()
     }
 
-    /// Compact **List** mode view: device header + name-only rows, no size/date columns.
+    /// Compact **List** mode view: device header + sortable column header + entry rows.
     pub fn view_list<'a, Message: 'a + Clone + 'static>(
         &'a self,
         theme: ThemeColors,
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
+        on_sort: impl Fn(SortField) -> Message + 'a,
     ) -> Element<'a, Message> {
         let header = self.view_header(theme);
 
@@ -300,24 +334,48 @@ impl AndroidPane {
         const W_SIZE: u16 = 72;
         const W_DATE: u16 = 90;
 
-        // ── Sticky column header ──────────────────────────────────────────────
+        // ── Sortable column header ────────────────────────────────────────────
+        let t = theme;
+        let sort_ind = |field: SortField| -> &'static str {
+            if self.sort_by == field {
+                if self.sort_ascending { " ▲" } else { " ▼" }
+            } else {
+                ""
+            }
+        };
+        let mk_hdr = |label: String, field: SortField, width: iced::Length, msg: Message|
+            -> Element<'a, Message>
+        {
+            let fg = if self.sort_by == field { t.accent } else { t.text_secondary };
+            button(text(label).size(10).color(fg))
+                .width(width)
+                .padding([2, 4])
+                .style(move |_t, _s| button::Style { background: None, ..Default::default() })
+                .on_press(msg)
+                .into()
+        };
+
+        let name_lbl = format!("Name{}", sort_ind(SortField::Name));
+        let size_lbl = format!("Size{}", sort_ind(SortField::Size));
+        let date_lbl = format!("Modified{}", sort_ind(SortField::Modified));
+
         let col_header = container(
             row![
                 iced::widget::Space::new(20, 1),
                 text("").width(W_ICON),
-                text("Name").size(10).color(theme.text_secondary).width(Fill),
-                text("Type").size(10).color(theme.text_secondary).width(W_TYPE),
-                text("Size").size(10).color(theme.text_secondary).width(W_SIZE),
-                text("Modified").size(10).color(theme.text_secondary).width(W_DATE),
+                mk_hdr(name_lbl, SortField::Name, Fill, on_sort(SortField::Name)),
+                mk_hdr("Type".to_string(), SortField::Name, iced::Length::Fixed(W_TYPE as f32), on_sort(SortField::Name)),
+                mk_hdr(size_lbl, SortField::Size, iced::Length::Fixed(W_SIZE as f32), on_sort(SortField::Size)),
+                mk_hdr(date_lbl, SortField::Modified, iced::Length::Fixed(W_DATE as f32), on_sort(SortField::Modified)),
             ]
             .spacing(6)
-            .padding([3, 8])
+            .padding([2, 8])
             .align_y(iced::Alignment::Center),
         )
         .width(Fill)
         .style(move |_t| container::Style {
-            background: Some(theme.background_secondary.into()),
-            border: Border { color: theme.border, width: 1.0, radius: 0.0.into() },
+            background: Some(t.background_secondary.into()),
+            border: Border { color: t.border, width: 1.0, radius: 0.0.into() },
             ..Default::default()
         });
 
