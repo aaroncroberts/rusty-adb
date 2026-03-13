@@ -285,8 +285,11 @@ pub struct AndroidEntry {
     pub size: u64,
     /// Pre-formatted modified date "YYYY-MM-DD" (or "--" if unknown)
     pub modified: String,
+    /// `true` when the entry's mode starts with `d`
     pub is_dir: bool,
+    /// `true` when the entry's mode starts with `l` (symlink)
     pub is_symlink: bool,
+    /// `true` when the filename starts with `.`
     pub is_hidden: bool,
 }
 

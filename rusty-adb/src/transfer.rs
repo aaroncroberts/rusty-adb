@@ -20,11 +20,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 // ─── Direction ─────────────────────────────────────────────────────────────────
 
+/// Direction of a file transfer relative to the Android device
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferDirection {
-    /// Local → Android device
+    /// Local → Android device (`adb push`)
     ToAndroid,
-    /// Android device → Local
+    /// Android device → Local (`adb pull`)
     ToLocal,
 }
 
@@ -43,6 +44,7 @@ pub struct TransferJob {
     pub source: PathBuf,
     /// Destination path (android for push, local for pull)
     pub destination: PathBuf,
+    /// Which direction the transfer runs (determines whether adb push or pull is used)
     pub direction: TransferDirection,
     /// Display name (source filename) — copied into `TransferStatus` at transfer start
     #[allow(dead_code)] // read in main.rs to construct TransferStatus
