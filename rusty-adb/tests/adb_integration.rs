@@ -24,8 +24,8 @@ use rusty_adb::transfer::{run_transfer, TransferDirection, TransferEvent, Transf
 /// `CARGO_MANIFEST_DIR` is set by Cargo to the crate root at test time,
 /// so this path is always correct regardless of where `cargo test` is run.
 fn mock_adb_path() -> PathBuf {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR must be set by Cargo");
+    let manifest =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by Cargo");
     PathBuf::from(manifest).join("tests/fixtures/mock-adb")
 }
 
@@ -265,7 +265,9 @@ async fn test_transfer_cancel_stops_early() {
         "expected a Cancelled event when cancel flag is pre-set"
     );
     assert!(
-        !events.iter().any(|e| matches!(e, TransferEvent::Complete { .. })),
+        !events
+            .iter()
+            .any(|e| matches!(e, TransferEvent::Complete { .. })),
         "should not receive Complete when cancelled"
     );
 }
@@ -296,7 +298,9 @@ async fn test_push_transfer_progress_events() {
         .expect("run_transfer push failed");
 
     assert!(
-        events.iter().any(|e| matches!(e, TransferEvent::Progress { .. })),
+        events
+            .iter()
+            .any(|e| matches!(e, TransferEvent::Progress { .. })),
         "push should emit Progress events"
     );
     assert!(
@@ -338,7 +342,10 @@ async fn test_pull_to_temp_returns_existing_file() {
         .await
         .expect("pull_to_temp should succeed with mock-adb");
 
-    assert!(local_path.exists(), "pull_to_temp must create a file at the local path");
+    assert!(
+        local_path.exists(),
+        "pull_to_temp must create a file at the local path"
+    );
     assert_eq!(
         local_path.file_name().and_then(|n| n.to_str()),
         Some("photo.jpg"),
@@ -352,7 +359,10 @@ async fn test_pull_to_temp_returns_existing_file() {
 async fn test_start_server_succeeds() {
     let client = make_client();
     // start_server returns Ok(()) when adb exits 0
-    client.start_server().await.expect("start_server should succeed with mock-adb");
+    client
+        .start_server()
+        .await
+        .expect("start_server should succeed with mock-adb");
 }
 
 #[tokio::test]
