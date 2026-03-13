@@ -61,6 +61,28 @@ enum ViewMode {
     Icon,
 }
 
+impl ViewMode {
+    /// All variants in the order shown in the drop-down picker.
+    #[allow(dead_code)]
+    const ALL: &'static [ViewMode] = &[
+        ViewMode::Icon,
+        ViewMode::List,
+        ViewMode::Grid,
+        ViewMode::Details,
+    ];
+}
+
+impl std::fmt::Display for ViewMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ViewMode::Icon    => f.write_str("As Icons"),
+            ViewMode::List    => f.write_str("As List"),
+            ViewMode::Grid    => f.write_str("As Gallery"),
+            ViewMode::Details => f.write_str("As Columns"),
+        }
+    }
+}
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -2358,36 +2380,16 @@ impl App {
     ) -> Element<'a, Message> {
         let t = self.theme;
 
-        // ── view mode toggle button ─────────────────────────────────────────
-        let vm_btn = move |label: &'static str, mode: ViewMode| {
-            let active = view_mode == mode;
-            let fg = if active { t.accent } else { t.text_secondary };
-            let msg: Message = if is_android {
+        // ── view mode drop-down picker ──────────────────────────────────────
+        let view_picker = pick_list(ViewMode::ALL, Some(view_mode), move |mode| {
+            if is_android {
                 Message::SetAndroidViewMode(mode)
             } else {
                 Message::SetLocalViewMode(mode)
-            };
-            button(text(label).size(11).color(fg))
-                .padding([2, 8])
-                .style(move |_t, _s| button::Style {
-                    background: if active {
-                        Some(t.accent.scale_alpha(0.15).into())
-                    } else {
-                        None
-                    },
-                    border: if active {
-                        Border {
-                            color: t.accent.scale_alpha(0.4),
-                            width: 1.0,
-                            radius: 3.0.into(),
-                        }
-                    } else {
-                        Border::default()
-                    },
-                    ..Default::default()
-                })
-                .on_press(msg)
-        };
+            }
+        })
+        .text_size(11)
+        .padding([2, 8]);
 
         // ── file command button ─────────────────────────────────────────────
         let cmd_btn =
@@ -2442,10 +2444,7 @@ impl App {
             .align_y(iced::Alignment::Center);
 
         let content = row![
-            vm_btn("List", ViewMode::List),
-            vm_btn("Details", ViewMode::Details),
-            vm_btn("Grid", ViewMode::Grid),
-            vm_btn("Icon", ViewMode::Icon),
+            view_picker,
             iced::widget::horizontal_space(),
             cmd_row,
             button(text(hidden_label).size(11).color(hidden_fg))
