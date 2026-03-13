@@ -1760,7 +1760,7 @@ impl App {
             return column(items).into();
         }
 
-        let mut items: Vec<Element<Message>> = vec![self.view_toolbar(), self.view_hero_banner()];
+        let mut items: Vec<Element<Message>> = vec![self.view_hero_banner(), self.view_toolbar()];
         if let Some(msg) = &self.error_banner {
             items.push(self.view_error_banner(msg));
         }
