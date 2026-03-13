@@ -46,7 +46,6 @@ impl AdbStatus {
     }
 }
 
-
 // ─── Transfer status ───────────────────────────────────────────────────────────
 
 /// Live transfer state shown in the status bar during an active copy
@@ -143,13 +142,18 @@ impl StatusBar {
             let label = if xfer.speed_display.is_empty() {
                 format!("  {}{}  {}%", queue_label, xfer.filename, xfer.percent)
             } else {
-                format!("  {}{}  {}%  {}", queue_label, xfer.filename, xfer.percent, xfer.speed_display)
+                format!(
+                    "  {}{}  {}%  {}",
+                    queue_label, xfer.filename, xfer.percent, xfer.speed_display
+                )
             };
 
-            let cancel_btn = button(text("✕ Cancel").size(11).color(theme.error))
-                .style(move |_t, _s| button::Style {
-                    background: None,
-                    ..Default::default()
+            let cancel_btn =
+                button(text("✕ Cancel").size(11).color(theme.error)).style(move |_t, _s| {
+                    button::Style {
+                        background: None,
+                        ..Default::default()
+                    }
                 });
             let cancel_btn = if let Some(msg) = on_cancel {
                 cancel_btn.on_press(msg)
@@ -157,10 +161,14 @@ impl StatusBar {
                 cancel_btn
             };
 
-            row![bar, text(label).size(12).color(theme.text_secondary), cancel_btn]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into()
+            row![
+                bar,
+                text(label).size(12).color(theme.text_secondary),
+                cancel_btn
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
         } else {
             // ── Connection status ─────────────────────────────────────────────
             let status_color = match status {

@@ -197,7 +197,13 @@ impl AndroidPane {
         on_rename_commit: Message,
     ) -> Element<'a, Message> {
         let header = self.view_header(theme);
-        let body = self.view_body(theme, on_navigate, on_select, on_rename_input, on_rename_commit);
+        let body = self.view_body(
+            theme,
+            on_navigate,
+            on_select,
+            on_rename_input,
+            on_rename_commit,
+        );
         column![header, body].width(Fill).height(Fill).into()
     }
 
@@ -254,13 +260,15 @@ impl AndroidPane {
 
             AndroidPaneState::Loading => self.view_loading(theme),
 
-            AndroidPaneState::Error(msg) => {
-                self.view_empty(theme, "Error", msg)
-            }
+            AndroidPaneState::Error(msg) => self.view_empty(theme, "Error", msg),
 
-            AndroidPaneState::Browsing => {
-                self.view_entries(theme, on_navigate, on_select, on_rename_input, on_rename_commit)
-            }
+            AndroidPaneState::Browsing => self.view_entries(
+                theme,
+                on_navigate,
+                on_select,
+                on_rename_input,
+                on_rename_commit,
+            ),
         }
     }
 
@@ -302,7 +310,9 @@ impl AndroidPane {
             text("      Settings → Developer Options → USB Debugging")
                 .size(11)
                 .color(theme.text_secondary),
-            text("  2.  Connect via USB cable").size(11).color(theme.text_secondary),
+            text("  2.  Connect via USB cable")
+                .size(11)
+                .color(theme.text_secondary),
             text("  3.  Tap \"Allow\" when prompted on your phone")
                 .size(11)
                 .color(theme.text_secondary),
@@ -326,7 +336,9 @@ impl AndroidPane {
 
         let content = row![
             text(spinner).size(14).color(theme.accent),
-            text("  Fetching directory listing…").size(12).color(theme.text_secondary),
+            text("  Fetching directory listing…")
+                .size(12)
+                .color(theme.text_secondary),
         ]
         .align_y(iced::Alignment::Center);
 
@@ -352,9 +364,15 @@ impl AndroidPane {
         // Column header
         let col_header = container(
             row![
-                text("Name").size(11).color(theme.text_secondary).width(Fill),
+                text("Name")
+                    .size(11)
+                    .color(theme.text_secondary)
+                    .width(Fill),
                 text("Size").size(11).color(theme.text_secondary).width(80),
-                text("Modified").size(11).color(theme.text_secondary).width(90),
+                text("Modified")
+                    .size(11)
+                    .color(theme.text_secondary)
+                    .width(90),
             ]
             .padding([2, 12])
             .spacing(4),
@@ -378,7 +396,15 @@ impl AndroidPane {
                 let icon = self
                     .entries
                     .get(*idx)
-                    .map(|e| if e.is_symlink { "🔗" } else if e.is_dir { "📁" } else { "📄" })
+                    .map(|e| {
+                        if e.is_symlink {
+                            "🔗"
+                        } else if e.is_dir {
+                            "📁"
+                        } else {
+                            "📄"
+                        }
+                    })
                     .unwrap_or("📄");
                 let input = text_input("New name…", val.as_str())
                     .id(text_input::Id::new(RENAME_INPUT_ID))
@@ -502,37 +528,40 @@ impl AndroidPane {
             let on_sel = on_select(i);
 
             // If this entry is the one being renamed, use the pre-built input row.
-            let row_element: Element<Message> =
-                if rename_row.as_ref().map(|(idx, _)| *idx == i).unwrap_or(false) {
-                    rename_row.take().unwrap().1
-                } else {
-                    let row_content = row![
-                        text(icon).size(12),
-                        text(entry.name.clone())
-                            .size(12)
-                            .color(name_color)
-                            .width(Fill),
-                        text(entry.size_display())
-                            .size(11)
-                            .color(theme.text_secondary)
-                            .width(80),
-                        text(entry.modified.clone())
-                            .size(11)
-                            .color(theme.text_secondary)
-                            .width(90),
-                    ]
-                    .spacing(6)
-                    .padding([1, 0]);
+            let row_element: Element<Message> = if rename_row
+                .as_ref()
+                .map(|(idx, _)| *idx == i)
+                .unwrap_or(false)
+            {
+                rename_row.take().unwrap().1
+            } else {
+                let row_content = row![
+                    text(icon).size(12),
+                    text(entry.name.clone())
+                        .size(12)
+                        .color(name_color)
+                        .width(Fill),
+                    text(entry.size_display())
+                        .size(11)
+                        .color(theme.text_secondary)
+                        .width(80),
+                    text(entry.modified.clone())
+                        .size(11)
+                        .color(theme.text_secondary)
+                        .width(90),
+                ]
+                .spacing(6)
+                .padding([1, 0]);
 
-                    button(row_content)
-                        .width(Fill)
-                        .style(move |_t, _s| button::Style {
-                            background: row_bg.map(Into::into),
-                            ..Default::default()
-                        })
-                        .on_press(if entry_is_dir { on_nav } else { on_sel })
-                        .into()
-                };
+                button(row_content)
+                    .width(Fill)
+                    .style(move |_t, _s| button::Style {
+                        background: row_bg.map(Into::into),
+                        ..Default::default()
+                    })
+                    .on_press(if entry_is_dir { on_nav } else { on_sel })
+                    .into()
+            };
 
             rows.push(row_element);
         }
@@ -541,18 +570,14 @@ impl AndroidPane {
             .width(Fill)
             .height(Fill);
 
-        container(
-            column![col_header, list]
-                .width(Fill)
-                .height(Fill),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(move |_t| container::Style {
-            background: Some(theme.background.into()),
-            ..Default::default()
-        })
-        .into()
+        container(column![col_header, list].width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill)
+            .style(move |_t| container::Style {
+                background: Some(theme.background.into()),
+                ..Default::default()
+            })
+            .into()
     }
 }
 

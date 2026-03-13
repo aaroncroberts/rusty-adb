@@ -125,13 +125,13 @@ impl AdbClient {
                     .ok()
                     .map(|p| PathBuf::from(p).join("Android\\Sdk\\platform-tools\\adb.exe")),
                 // Fallback via USERPROFILE
-                std::env::var("USERPROFILE")
-                    .ok()
-                    .map(|p| PathBuf::from(p).join("AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe")),
+                std::env::var("USERPROFILE").ok().map(|p| {
+                    PathBuf::from(p).join("AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe")
+                }),
                 // Program Files (x86) — older SDK installs
-                std::env::var("ProgramFiles(x86)")
-                    .ok()
-                    .map(|p| PathBuf::from(p).join("Android\\android-sdk\\platform-tools\\adb.exe")),
+                std::env::var("ProgramFiles(x86)").ok().map(|p| {
+                    PathBuf::from(p).join("Android\\android-sdk\\platform-tools\\adb.exe")
+                }),
             ]
             .into_iter()
             .flatten()
@@ -327,8 +327,14 @@ fn format_android_size(bytes: u64) -> String {
 /// `context` is a caller-supplied string included in the error message, e.g.
 /// `"rename failed [serial=device1234 from=/sdcard/a to=/sdcard/b]"`.
 fn check_adb_output(output: &std::process::Output, context: &str) -> Result<()> {
-    let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim().to_string();
-    let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim().to_string();
+    let stderr = str::from_utf8(&output.stderr)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let stdout = str::from_utf8(&output.stdout)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if !output.status.success()
         || stderr.contains("Permission denied")
         || stdout.contains("Permission denied")
@@ -452,9 +458,7 @@ impl AdbClient {
 
         if !output.status.success() {
             let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim();
-            anyhow::bail!(
-                "pull_to_temp failed [serial={serial} remote={remote_str}]: {stderr}"
-            );
+            anyhow::bail!("pull_to_temp failed [serial={serial} remote={remote_str}]: {stderr}");
         }
 
         tracing::info!(
@@ -523,7 +527,10 @@ pub fn parse_ls_output(output: &str, parent: &std::path::Path) -> Vec<AndroidEnt
             {
                 // Only warn for lines that look like they should be entries
                 // (start with a permission character: -, d, l, c, b, p, s)
-                if matches!(trimmed.chars().next(), Some('-' | 'd' | 'l' | 'c' | 'b' | 'p' | 's')) {
+                if matches!(
+                    trimmed.chars().next(),
+                    Some('-' | 'd' | 'l' | 'c' | 'b' | 'p' | 's')
+                ) {
                     tracing::warn!(
                         line = %trimmed,
                         parent = %parent.display(),
@@ -558,9 +565,7 @@ fn parse_ls_line(line: &str, parent: &std::path::Path) -> Option<AndroidEntry> {
 
     // Find the date token — always "YYYY-MM-DD" (10 chars, '-' at 4 and 7)
     let date_idx = tokens.iter().position(|t| {
-        t.len() == 10
-            && t.as_bytes().get(4) == Some(&b'-')
-            && t.as_bytes().get(7) == Some(&b'-')
+        t.len() == 10 && t.as_bytes().get(4) == Some(&b'-') && t.as_bytes().get(7) == Some(&b'-')
     })?;
 
     if date_idx < 1 || date_idx + 2 >= tokens.len() {
@@ -568,8 +573,8 @@ fn parse_ls_line(line: &str, parent: &std::path::Path) -> Option<AndroidEntry> {
     }
 
     let size: u64 = tokens[date_idx - 1].parse().ok()?;
-    let date_str = tokens[date_idx];       // "2024-01-15"
-    let time_str = tokens[date_idx + 1];   // "12:00"
+    let date_str = tokens[date_idx]; // "2024-01-15"
+    let time_str = tokens[date_idx + 1]; // "12:00"
     let modified = format!("{} {}", date_str, &time_str[..5]); // "2024-01-15 12:00"
 
     // The name is everything after the time token in the original line.
@@ -755,7 +760,10 @@ lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulate
 
     #[test]
     fn device_state_from_unauthorized() {
-        assert_eq!(DeviceState::from_str("unauthorized"), DeviceState::Unauthorized);
+        assert_eq!(
+            DeviceState::from_str("unauthorized"),
+            DeviceState::Unauthorized
+        );
     }
 
     #[test]
@@ -808,8 +816,7 @@ lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulate
 
     #[test]
     fn ls_file_with_spaces_in_name() {
-        let input =
-            "-rw-rw----  1 root sdcard_rw 1234 2024-01-15 10:00 my vacation photos.jpg\n";
+        let input = "-rw-rw----  1 root sdcard_rw 1234 2024-01-15 10:00 my vacation photos.jpg\n";
         let entries = parse_ls_output(input, std::path::Path::new("/sdcard"));
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "my vacation photos.jpg");

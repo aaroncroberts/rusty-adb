@@ -90,8 +90,13 @@ pub fn parse_speed(line: &str) -> Option<String> {
     // Speed is the token immediately before "(", containing "MB/s", "KB/s", or "B/s"
     let paren = line.find('(')?;
     let before_paren = &line[..paren];
-    for token in before_paren.split_whitespace().collect::<Vec<_>>().windows(2) {
-        if token[1].ends_with("/s") || token[1] == "MB/s" || token[1] == "KB/s" || token[1] == "B/s" {
+    for token in before_paren
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(2)
+    {
+        if token[1].ends_with("/s") || token[1] == "MB/s" || token[1] == "KB/s" || token[1] == "B/s"
+        {
             return Some(format!("{} {}", token[0], token[1]));
         }
     }
@@ -131,7 +136,14 @@ where
     };
 
     let mut child = tokio::process::Command::new(&job.adb_path)
-        .args(["-s", &job.serial, adb_verb, "--progress", &source_str, &dest_str])
+        .args([
+            "-s",
+            &job.serial,
+            adb_verb,
+            "--progress",
+            &source_str,
+            &dest_str,
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -280,7 +292,9 @@ mod tests {
             "expected a Failed event when adb exits 1, got: {events:?}"
         );
         assert!(
-            !events.iter().any(|e| matches!(e, TransferEvent::Complete { .. })),
+            !events
+                .iter()
+                .any(|e| matches!(e, TransferEvent::Complete { .. })),
             "should not receive Complete when adb exits 1"
         );
     }

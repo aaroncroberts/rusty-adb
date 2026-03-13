@@ -33,7 +33,10 @@ use theme::ThemeColors;
 use transfer::{TransferDirection, TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
-use iced::widget::{button, column, container, image, pick_list, row, scrollable, stack, text, text_input, toggler, vertical_rule};
+use iced::widget::{
+    button, column, container, image, pick_list, row, scrollable, stack, text, text_input, toggler,
+    vertical_rule,
+};
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 40.0;
@@ -80,9 +83,13 @@ enum Message {
     /// User pressed "Copy ←" (android → local)
     CopyToLocal,
     /// Progress event from the active transfer subscription
-    TransferProgress { percent: u8 },
+    TransferProgress {
+        percent: u8,
+    },
     /// Transfer completed — carries final speed for display
-    TransferComplete { speed_display: String },
+    TransferComplete {
+        speed_display: String,
+    },
     /// Transfer failed
     TransferFailed(String),
     /// User pressed the Cancel button during a transfer
@@ -382,42 +389,42 @@ pub fn main() -> iced::Result {
         App::update,
         App::view,
     )
-        .subscription(App::subscription)
-        .theme(|_| Theme::TokyoNightStorm)
-        .window(iced::window::Settings {
-            size: iced::Size::new(1280.0, 800.0),
-            min_size: Some(iced::Size::new(900.0, 600.0)),
-            icon: placeholder_icon(),
-            ..Default::default()
-        })
-        .run_with(|| {
-            let init_task = Task::perform(
-                async {
-                    let client = AdbClient::find().await.map_err(|e| e.to_string())?;
-                    if let Err(e) = client.start_server().await {
-                        return Err(format!("daemon:{}", e));
-                    }
-                    Ok::<AdbClient, String>(client)
-                },
-                |result| match result {
-                    Ok(client) => {
-                        tracing::info!(adb = %client.adb_path.display(), "adb ready");
-                        Message::AdbReady(Arc::new(client))
-                    }
-                    Err(e) if e.starts_with("adb not found") => {
-                        tracing::warn!("adb binary not found — showing install guide");
-                        Message::AdbNotFound
-                    }
-                    Err(e) if e.starts_with("daemon:") => {
-                        let msg = e["daemon:".len()..].to_string();
-                        tracing::warn!(error = %msg, "adb start-server failed");
-                        Message::DaemonStartFailed(msg)
-                    }
-                    Err(e) => Message::AdbError(e),
-                },
-            );
-            (App::with_config(cfg, config_path), init_task)
-        })
+    .subscription(App::subscription)
+    .theme(|_| Theme::TokyoNightStorm)
+    .window(iced::window::Settings {
+        size: iced::Size::new(1280.0, 800.0),
+        min_size: Some(iced::Size::new(900.0, 600.0)),
+        icon: placeholder_icon(),
+        ..Default::default()
+    })
+    .run_with(|| {
+        let init_task = Task::perform(
+            async {
+                let client = AdbClient::find().await.map_err(|e| e.to_string())?;
+                if let Err(e) = client.start_server().await {
+                    return Err(format!("daemon:{}", e));
+                }
+                Ok::<AdbClient, String>(client)
+            },
+            |result| match result {
+                Ok(client) => {
+                    tracing::info!(adb = %client.adb_path.display(), "adb ready");
+                    Message::AdbReady(Arc::new(client))
+                }
+                Err(e) if e.starts_with("adb not found") => {
+                    tracing::warn!("adb binary not found — showing install guide");
+                    Message::AdbNotFound
+                }
+                Err(e) if e.starts_with("daemon:") => {
+                    let msg = e["daemon:".len()..].to_string();
+                    tracing::warn!(error = %msg, "adb start-server failed");
+                    Message::DaemonStartFailed(msg)
+                }
+                Err(e) => Message::AdbError(e),
+            },
+        );
+        (App::with_config(cfg, config_path), init_task)
+    })
 }
 
 // ─── Keyboard ─────────────────────────────────────────────────────────────────
@@ -438,8 +445,7 @@ fn handle_key_press(key: keyboard::Key, _mods: keyboard::Modifiers) -> Option<Me
 
 impl App {
     fn subscription(&self) -> Subscription<Message> {
-        let device_poll =
-            iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices);
+        let device_poll = iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices);
 
         // Spinner — only while the Android pane is loading
         let maybe_spinner = if self.android_pane.state == AndroidPaneState::Loading {
@@ -497,19 +503,16 @@ impl App {
         let keys = keyboard::on_key_press(handle_key_press);
 
         // File drag-and-drop from the OS — FileHovered/FileDropped/FilesHoveredLeft
-        let file_drops =
-            iced::event::listen_with(|event, _status, _window| match event {
-                iced::Event::Window(iced::window::Event::FileHovered(_)) => {
-                    Some(Message::FileHovered)
-                }
-                iced::Event::Window(iced::window::Event::FilesHoveredLeft) => {
-                    Some(Message::FilesHoveredLeft)
-                }
-                iced::Event::Window(iced::window::Event::FileDropped(path)) => {
-                    Some(Message::FileDropped(path))
-                }
-                _ => None,
-            });
+        let file_drops = iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Window(iced::window::Event::FileHovered(_)) => Some(Message::FileHovered),
+            iced::Event::Window(iced::window::Event::FilesHoveredLeft) => {
+                Some(Message::FilesHoveredLeft)
+            }
+            iced::Event::Window(iced::window::Event::FileDropped(path)) => {
+                Some(Message::FileDropped(path))
+            }
+            _ => None,
+        });
 
         // Combine all active subscriptions
         let mut subs = vec![device_poll, keys, file_drops];
@@ -607,8 +610,7 @@ impl App {
                     let msg = "ADB daemon unresponsive".to_string();
                     self.adb_status = AdbStatus::Error(msg.clone());
                     return self.update(Message::ShowError(
-                        "ADB daemon unresponsive. Use 'Restart Daemon' in the toolbar."
-                            .to_string(),
+                        "ADB daemon unresponsive. Use 'Restart Daemon' in the toolbar.".to_string(),
                     ));
                 }
                 // Counts 1–2: transient failures — suppress to avoid spurious error toasts
@@ -649,8 +651,7 @@ impl App {
                         // Fetch directory entries and storage roots in parallel
                         let entries_fut = client.list_dir(&serial, &path);
                         let roots_fut = client.list_storage_roots(&serial);
-                        let (entries_res, roots) =
-                            tokio::join!(entries_fut, roots_fut);
+                        let (entries_res, roots) = tokio::join!(entries_fut, roots_fut);
                         entries_res
                             .map(|e| (path, e, roots))
                             .map_err(|e| e.to_string())
@@ -666,12 +667,13 @@ impl App {
                 )
             }
 
-            Message::AndroidEntriesLoaded { path, entries, roots } => {
-                self.android_pane.on_entries_loaded(
-                    path,
-                    (*entries).clone(),
-                    (*roots).clone(),
-                );
+            Message::AndroidEntriesLoaded {
+                path,
+                entries,
+                roots,
+            } => {
+                self.android_pane
+                    .on_entries_loaded(path, (*entries).clone(), (*roots).clone());
                 Task::none()
             }
 
@@ -877,10 +879,7 @@ impl App {
 
             Message::TransferComplete { speed_display } => {
                 tracing::info!(speed = %speed_display, "transfer complete");
-                let direction = self
-                    .active_transfer
-                    .as_ref()
-                    .map(|j| j.direction.clone());
+                let direction = self.active_transfer.as_ref().map(|j| j.direction.clone());
 
                 self.transfer_queue_done += 1;
 
@@ -1006,8 +1005,7 @@ impl App {
                 }
                 self.installing = true;
                 self.install_log.clear();
-                self.install_log
-                    .push("Starting installation…".to_string());
+                self.install_log.push("Starting installation…".to_string());
                 tracing::info!("starting platform-tools install via package manager");
 
                 Task::perform(
@@ -1019,7 +1017,11 @@ impl App {
                             .stdout(std::process::Stdio::piped())
                             .stderr(std::process::Stdio::piped())
                             .spawn()
-                            .map_err(|e| format!("brew not found: {e}. Install Homebrew from https://brew.sh"))?;
+                            .map_err(|e| {
+                                format!(
+                                    "brew not found: {e}. Install Homebrew from https://brew.sh"
+                                )
+                            })?;
 
                         #[cfg(target_os = "windows")]
                         let mut child = tokio::process::Command::new("winget")
@@ -1049,7 +1051,8 @@ impl App {
 
             Message::InstallComplete => {
                 tracing::info!("platform-tools install succeeded, retrying adb detection");
-                self.install_log.push("✓ Installation complete. Detecting adb…".to_string());
+                self.install_log
+                    .push("✓ Installation complete. Detecting adb…".to_string());
                 self.installing = false;
                 self.update(Message::RetryAdbFind)
             }
@@ -1123,13 +1126,10 @@ impl App {
                 self.file_hover_active = false;
 
                 // Guard: need a connected device and adb client
-                let (Some(client), Some(serial)) =
-                    (&self.adb_client, &self.active_serial)
-                else {
+                let (Some(client), Some(serial)) = (&self.adb_client, &self.active_serial) else {
                     tracing::warn!(path = %path.display(), "file dropped but no device connected");
                     return self.update(Message::ShowError(
-                        "No device connected — connect a device before dropping files."
-                            .to_string(),
+                        "No device connected — connect a device before dropping files.".to_string(),
                     ));
                 };
 
@@ -1187,9 +1187,7 @@ impl App {
                 // Activate rename for the first selected entry
                 if let Some(&idx) = self.android_pane.selected.first() {
                     self.android_pane.begin_rename(idx);
-                    return text_input::focus(text_input::Id::new(
-                        android_pane::RENAME_INPUT_ID,
-                    ));
+                    return text_input::focus(text_input::Id::new(android_pane::RENAME_INPUT_ID));
                 }
                 Task::none()
             }
@@ -1233,7 +1231,12 @@ impl App {
                     "renaming android file"
                 );
                 Task::perform(
-                    async move { client.rename(&serial, &from_path, &to_path).await.map_err(|e| e.to_string()) },
+                    async move {
+                        client
+                            .rename(&serial, &from_path, &to_path)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
                     |result| match result {
                         Ok(()) => Message::AndroidRenameComplete,
                         Err(e) => Message::AndroidRenameFailed(e),
@@ -1294,7 +1297,10 @@ impl App {
                 Task::perform(
                     async move {
                         for path in &paths {
-                            client.delete(&serial, path).await.map_err(|e| e.to_string())?;
+                            client
+                                .delete(&serial, path)
+                                .await
+                                .map_err(|e| e.to_string())?;
                         }
                         Ok::<(), String>(())
                     },
@@ -1436,7 +1442,10 @@ impl App {
                 tracing::info!(file = %path.display(), "pulling file to temp for preview");
                 Task::perform(
                     async move {
-                        client.pull_to_temp(&serial, &path).await.map_err(|e| e.to_string())
+                        client
+                            .pull_to_temp(&serial, &path)
+                            .await
+                            .map_err(|e| e.to_string())
                     },
                     |result| match result {
                         Ok(local) => Message::PreviewReady(local),
@@ -1455,9 +1464,9 @@ impl App {
                     "txt" | "log" | "json" | "xml" | "md" | "toml" | "yaml" | "yml" => {
                         match std::fs::read_to_string(&local_path) {
                             Ok(text) => PreviewContent::Text(text),
-                            Err(e) => PreviewContent::Unsupported(format!(
-                                "Could not read file: {e}"
-                            )),
+                            Err(e) => {
+                                PreviewContent::Unsupported(format!("Could not read file: {e}"))
+                            }
                         }
                     }
                     other => PreviewContent::Unsupported(format!(
@@ -1521,11 +1530,15 @@ impl App {
             items.push(self.view_delete_confirm(paths));
         }
         items.push(self.view_panes());
-        items.push(self.status_bar.view(
-            &self.adb_status,
-            self.transfer_status.as_ref(),
-            self.active_transfer.as_ref().map(|_| Message::CancelTransfer),
-        ));
+        items.push(
+            self.status_bar.view(
+                &self.adb_status,
+                self.transfer_status.as_ref(),
+                self.active_transfer
+                    .as_ref()
+                    .map(|_| Message::CancelTransfer),
+            ),
+        );
 
         let base: Element<Message> = column(items).into();
 
@@ -1555,16 +1568,17 @@ impl App {
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let install_label = "Download Platform Tools";
 
-        let install_btn = button(
-            text(install_label).size(13).color(iced::Color::WHITE),
-        )
-        .style(move |_t, _s| button::Style {
-            background: Some(t.accent.into()),
-            border: Border { radius: 4.0.into(), ..Default::default() },
-            ..Default::default()
-        })
-        .padding([8, 16])
-        .on_press(Message::InstallAdb);
+        let install_btn = button(text(install_label).size(13).color(iced::Color::WHITE))
+            .style(move |_t, _s| button::Style {
+                background: Some(t.accent.into()),
+                border: Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .padding([8, 16])
+            .on_press(Message::InstallAdb);
 
         let retry_btn = button(text("↺  Retry Detection").size(13).color(t.text))
             .style(move |_t, _s| button::Style {
@@ -1594,14 +1608,21 @@ impl App {
         } else {
             let log_text = self.install_log.join("\n");
             scrollable(
-                container(text(log_text).size(11).color(t.text_secondary).font(
-                    iced::Font::with_name("Menlo"),
-                ))
+                container(
+                    text(log_text)
+                        .size(11)
+                        .color(t.text_secondary)
+                        .font(iced::Font::with_name("Menlo")),
+                )
                 .width(Fill)
                 .padding([8, 12])
                 .style(move |_t| container::Style {
                     background: Some(t.background_secondary.into()),
-                    border: Border { color: t.border, width: 1.0, radius: 4.0.into() },
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
                     ..Default::default()
                 }),
             )
@@ -1612,13 +1633,17 @@ impl App {
         // ── Platform-specific install steps ──────────────────────────────────
         #[cfg(target_os = "macos")]
         let steps: Element<Message> = column![
-            text("Option A — Homebrew (recommended)").size(12).color(t.text_secondary),
+            text("Option A — Homebrew (recommended)")
+                .size(12)
+                .color(t.text_secondary),
             text("  brew install --cask android-platform-tools")
                 .size(12)
                 .color(t.accent)
                 .font(iced::Font::with_name("Menlo")),
             Space::with_height(8),
-            text("Option B — Android Studio").size(12).color(t.text_secondary),
+            text("Option B — Android Studio")
+                .size(12)
+                .color(t.text_secondary),
             text("  Open SDK Manager → SDK Tools → Android SDK Platform-Tools")
                 .size(12)
                 .color(t.text_secondary),
@@ -1631,13 +1656,17 @@ impl App {
 
         #[cfg(target_os = "windows")]
         let steps: Element<Message> = column![
-            text("Option A — winget (recommended)").size(12).color(t.text_secondary),
+            text("Option A — winget (recommended)")
+                .size(12)
+                .color(t.text_secondary),
             text("  winget install Google.PlatformTools")
                 .size(12)
                 .color(t.accent)
                 .font(iced::Font::with_name("Menlo")),
             Space::with_height(8),
-            text("Option B — Android Studio").size(12).color(t.text_secondary),
+            text("Option B — Android Studio")
+                .size(12)
+                .color(t.text_secondary),
             text("  Open SDK Manager → SDK Tools → Android SDK Platform-Tools")
                 .size(12)
                 .color(t.text_secondary),
@@ -1741,7 +1770,10 @@ impl App {
         let confirm_btn = button(text("Confirm Delete").size(12).color(iced::Color::WHITE))
             .style(move |_t, _s| button::Style {
                 background: Some(t.error.into()),
-                border: Border { radius: 4.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .padding([4, 12])
@@ -1826,28 +1858,26 @@ impl App {
                     .height(Fill)
                     .into()
             }
-            PreviewContent::Text(text_content) => {
-                scrollable(
-                    container(
-                        text(text_content.clone())
-                            .size(12)
-                            .color(t.text)
-                            .font(iced::Font::with_name("Menlo")),
-                    )
-                    .padding([8, 12]),
+            PreviewContent::Text(text_content) => scrollable(
+                container(
+                    text(text_content.clone())
+                        .size(12)
+                        .color(t.text)
+                        .font(iced::Font::with_name("Menlo")),
                 )
-                .width(Fill)
-                .height(Fill)
-                .into()
-            }
-            PreviewContent::Unsupported(msg) => container(
-                text(msg.clone()).size(12).color(t.text_secondary),
+                .padding([8, 12]),
             )
             .width(Fill)
             .height(Fill)
-            .center_x(Fill)
-            .center_y(Fill)
             .into(),
+            PreviewContent::Unsupported(msg) => {
+                container(text(msg.clone()).size(12).color(t.text_secondary))
+                    .width(Fill)
+                    .height(Fill)
+                    .center_x(Fill)
+                    .center_y(Fill)
+                    .into()
+            }
         };
 
         let card = container(
@@ -1965,9 +1995,7 @@ impl App {
                             .color(t.text_secondary),
                         text("").size(6), // spacer
                         github_btn,
-                        text("License: MIT")
-                            .size(11)
-                            .color(t.text_secondary),
+                        text("License: MIT").size(11).color(t.text_secondary),
                     ]
                     .spacing(6),
                 )
@@ -1993,10 +2021,7 @@ impl App {
     /// Success/info toast banner (green tint, auto-dismisses after 3 s).
     fn view_toast_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
         let t = self.theme;
-        let content = row![
-            text(msg).size(12).color(t.text).width(Fill),
-        ]
-        .padding([6, 15]);
+        let content = row![text(msg).size(12).color(t.text).width(Fill),].padding([6, 15]);
         container(content)
             .width(Fill)
             .style(move |_th| container::Style {
@@ -2023,11 +2048,9 @@ impl App {
 
         let level_row: Element<Message> = row![
             text("Log level:").size(12).color(t.text).width(120),
-            pick_list(
-                LOG_LEVELS,
-                selected_level,
-                |l: &'static str| Message::SettingsDraftLogLevel(l.to_string()),
-            )
+            pick_list(LOG_LEVELS, selected_level, |l: &'static str| {
+                Message::SettingsDraftLogLevel(l.to_string())
+            },)
             .text_size(12),
         ]
         .align_y(iced::Alignment::Center)
@@ -2045,8 +2068,7 @@ impl App {
 
         let file_row: Element<Message> = row![
             text("File log:").size(12).color(t.text).width(120),
-            toggler(self.settings_draft.log.file_enabled)
-                .on_toggle(Message::SettingsDraftFile),
+            toggler(self.settings_draft.log.file_enabled).on_toggle(Message::SettingsDraftFile),
         ]
         .align_y(iced::Alignment::Center)
         .spacing(12)
@@ -2062,7 +2084,10 @@ impl App {
         let save_btn = button(text("Save").size(12).color(iced::Color::WHITE))
             .style(move |_th, _s| button::Style {
                 background: Some(t.accent.into()),
-                border: Border { radius: 4.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .padding([5, 16])
@@ -2120,12 +2145,9 @@ impl App {
                 .width(Fill),
                 // Footer
                 container(
-                    row![
-                        iced::widget::Space::with_width(Fill),
-                        save_btn,
-                    ]
-                    .spacing(8)
-                    .padding([8, 12]),
+                    row![iced::widget::Space::with_width(Fill), save_btn,]
+                        .spacing(8)
+                        .padding([8, 12]),
                 )
                 .width(Fill)
                 .style(move |_th| container::Style {
@@ -2196,28 +2218,48 @@ impl App {
         };
 
         // ── Buttons ───────────────────────────────────────────────────────────
-        let refresh_btn = toolbar_btn(
-            "⟳ Refresh".to_string(),
-            t.text,
-            Some(Message::RefreshPanes),
-        );
+        let refresh_btn = toolbar_btn("⟳ Refresh".to_string(), t.text, Some(Message::RefreshPanes));
 
         let disconnect_btn = toolbar_btn(
             "Disconnect".to_string(),
-            if has_device { t.warning } else { t.text_secondary },
-            if has_device { Some(Message::DisconnectDevice) } else { None },
+            if has_device {
+                t.warning
+            } else {
+                t.text_secondary
+            },
+            if has_device {
+                Some(Message::DisconnectDevice)
+            } else {
+                None
+            },
         );
 
         let copy_to_android_btn = toolbar_btn(
             "Copy →".to_string(),
-            if can_copy_to_android { t.accent } else { t.text_secondary },
-            if can_copy_to_android { Some(Message::CopyToAndroid) } else { None },
+            if can_copy_to_android {
+                t.accent
+            } else {
+                t.text_secondary
+            },
+            if can_copy_to_android {
+                Some(Message::CopyToAndroid)
+            } else {
+                None
+            },
         );
 
         let copy_to_local_btn = toolbar_btn(
             "Copy ←".to_string(),
-            if can_copy_to_local { t.accent } else { t.text_secondary },
-            if can_copy_to_local { Some(Message::CopyToLocal) } else { None },
+            if can_copy_to_local {
+                t.accent
+            } else {
+                t.text_secondary
+            },
+            if can_copy_to_local {
+                Some(Message::CopyToLocal)
+            } else {
+                None
+            },
         );
 
         let can_rename = has_device
@@ -2229,21 +2271,45 @@ impl App {
 
         let rename_btn = toolbar_btn(
             "✏ Rename".to_string(),
-            if can_rename { t.accent } else { t.text_secondary },
-            if can_rename { Some(Message::AndroidBeginRename) } else { None },
+            if can_rename {
+                t.accent
+            } else {
+                t.text_secondary
+            },
+            if can_rename {
+                Some(Message::AndroidBeginRename)
+            } else {
+                None
+            },
         );
 
         let delete_btn = toolbar_btn(
             "🗑 Delete".to_string(),
-            if can_delete { t.error } else { t.text_secondary },
-            if can_delete { Some(Message::AndroidBeginDelete) } else { None },
+            if can_delete {
+                t.error
+            } else {
+                t.text_secondary
+            },
+            if can_delete {
+                Some(Message::AndroidBeginDelete)
+            } else {
+                None
+            },
         );
 
         let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
         let restart_btn = toolbar_btn(
             "↺ Restart Daemon".to_string(),
-            if daemon_error { t.warning } else { t.text_secondary },
-            if daemon_error { Some(Message::RestartDaemon) } else { None },
+            if daemon_error {
+                t.warning
+            } else {
+                t.text_secondary
+            },
+            if daemon_error {
+                Some(Message::RestartDaemon)
+            } else {
+                None
+            },
         );
 
         let settings_btn = toolbar_btn(
@@ -2332,10 +2398,7 @@ impl App {
                 ..Default::default()
             });
 
-        row![left, divider, right]
-            .width(Fill)
-            .height(Fill)
-            .into()
+        row![left, divider, right].width(Fill).height(Fill).into()
     }
 }
 
@@ -2413,14 +2476,20 @@ mod tests {
 
     #[test]
     fn files_hovered_left_clears_flag() {
-        let mut app = App { file_hover_active: true, ..Default::default() };
+        let mut app = App {
+            file_hover_active: true,
+            ..Default::default()
+        };
         let _ = app.update(Message::FilesHoveredLeft);
         assert!(!app.file_hover_active);
     }
 
     #[test]
     fn file_dropped_without_device_shows_error() {
-        let mut app = App { file_hover_active: true, ..Default::default() };
+        let mut app = App {
+            file_hover_active: true,
+            ..Default::default()
+        };
         let _ = app.update(Message::FileDropped(PathBuf::from("/tmp/test.jpg")));
         // hover flag should be cleared even on error
         assert!(!app.file_hover_active);
@@ -2545,14 +2614,20 @@ mod tests {
 
     #[test]
     fn close_about_clears_flag() {
-        let mut app = App { about_open: true, ..Default::default() };
+        let mut app = App {
+            about_open: true,
+            ..Default::default()
+        };
         let _ = app.update(Message::CloseAbout);
         assert!(!app.about_open);
     }
 
     #[test]
     fn escape_closes_about_before_rename() {
-        let mut app = App { about_open: true, ..Default::default() };
+        let mut app = App {
+            about_open: true,
+            ..Default::default()
+        };
         app.android_pane.rename_pending = Some((0, "n".to_string()));
         let _ = app.update(Message::EscapePressed);
         assert!(!app.about_open);
@@ -2579,7 +2654,10 @@ mod tests {
 
     #[test]
     fn close_settings_hides_modal() {
-        let mut app = App { settings_open: true, ..Default::default() };
+        let mut app = App {
+            settings_open: true,
+            ..Default::default()
+        };
         let _ = app.update(Message::CloseSettings);
         assert!(!app.settings_open);
     }
@@ -2613,7 +2691,10 @@ mod tests {
 
     #[test]
     fn save_settings_closes_modal_and_updates_config() {
-        let mut app = App { settings_open: true, ..Default::default() };
+        let mut app = App {
+            settings_open: true,
+            ..Default::default()
+        };
         // config_path is empty in tests — SaveSettings will fail disk write
         // but should still update in-memory config and close modal
         app.settings_draft.log.level = "error".to_string();
@@ -2643,11 +2724,17 @@ mod tests {
 
     #[test]
     fn escape_closes_settings_first() {
-        let mut app = App { settings_open: true, ..Default::default() };
+        let mut app = App {
+            settings_open: true,
+            ..Default::default()
+        };
         app.android_pane.rename_pending = Some((0, "name".to_string()));
         let _ = app.update(Message::EscapePressed);
         assert!(!app.settings_open, "settings should close");
-        assert!(app.android_pane.rename_pending.is_some(), "rename still active");
+        assert!(
+            app.android_pane.rename_pending.is_some(),
+            "rename still active"
+        );
     }
 
     #[test]
@@ -2670,7 +2757,10 @@ mod tests {
 
     #[test]
     fn dismiss_toast_clears_message() {
-        let mut app = App { toast: Some("hello".to_string()), ..Default::default() };
+        let mut app = App {
+            toast: Some("hello".to_string()),
+            ..Default::default()
+        };
         let _ = app.update(Message::DismissToast);
         assert!(app.toast.is_none());
     }

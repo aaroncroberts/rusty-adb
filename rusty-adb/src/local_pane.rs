@@ -97,7 +97,12 @@ impl LocalPane {
         self.selected.clear();
         self.error = None;
 
-        match load_entries(&self.current_path, self.show_hidden, self.sort_by, self.sort_ascending) {
+        match load_entries(
+            &self.current_path,
+            self.show_hidden,
+            self.sort_by,
+            self.sort_ascending,
+        ) {
             Ok(entries) => {
                 tracing::debug!(
                     path = %self.current_path.display(),
@@ -184,7 +189,10 @@ impl LocalPane {
         // breadcrumb is a free function — its lifetime is independent of &'a self
         let breadcrumb = view_breadcrumb(&self.current_path, theme, &on_navigate);
         let body = self.view_body(theme, on_navigate, on_select, on_sort);
-        column![header, breadcrumb, body].width(Fill).height(Fill).into()
+        column![header, breadcrumb, body]
+            .width(Fill)
+            .height(Fill)
+            .into()
     }
 
     fn view_header<'a, Message: 'a + Clone>(
@@ -233,9 +241,7 @@ impl LocalPane {
         on_sort: impl Fn(SortField) -> Message + 'a,
     ) -> Element<'a, Message> {
         if let Some(err) = &self.error {
-            let msg = text(format!("Error: {}", err))
-                .size(12)
-                .color(theme.error);
+            let msg = text(format!("Error: {}", err)).size(12).color(theme.error);
             return container(msg)
                 .width(Fill)
                 .height(Fill)
@@ -250,7 +256,11 @@ impl LocalPane {
         // ── Sort indicator helper ────────────────────────────────────────────
         let sort_indicator = |field: SortField| -> &'static str {
             if self.sort_by == field {
-                if self.sort_ascending { " ▲" } else { " ▼" }
+                if self.sort_ascending {
+                    " ▲"
+                } else {
+                    " ▼"
+                }
             } else {
                 ""
             }
@@ -266,35 +276,56 @@ impl LocalPane {
                           width: Length,
                           msg: Message|
          -> Element<'a, Message> {
-            button(text(label).size(11).color(theme.text_secondary).width(width))
-                .style(move |_t, _s| button::Style {
-                    background: None,
-                    ..Default::default()
-                })
-                .padding([2, 4])
-                .on_press(msg)
-                .into()
+            button(
+                text(label)
+                    .size(11)
+                    .color(theme.text_secondary)
+                    .width(width),
+            )
+            .style(move |_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .padding([2, 4])
+            .on_press(msg)
+            .into()
         };
 
         let col_header = row![
-            mk_hdr_btn(name_hdr_label, SortField::Name, Length::Fill, on_sort(SortField::Name)),
-            mk_hdr_btn(size_hdr_label, SortField::Size, Length::Fixed(80.0), on_sort(SortField::Size)),
-            mk_hdr_btn(date_hdr_label, SortField::Modified, Length::Fixed(90.0), on_sort(SortField::Modified)),
+            mk_hdr_btn(
+                name_hdr_label,
+                SortField::Name,
+                Length::Fill,
+                on_sort(SortField::Name)
+            ),
+            mk_hdr_btn(
+                size_hdr_label,
+                SortField::Size,
+                Length::Fixed(80.0),
+                on_sort(SortField::Size)
+            ),
+            mk_hdr_btn(
+                date_hdr_label,
+                SortField::Modified,
+                Length::Fixed(90.0),
+                on_sort(SortField::Modified)
+            ),
         ]
         .padding([2, 8])
         .spacing(4);
 
-        let col_header_container = container(col_header)
-            .width(Fill)
-            .style(move |_t| container::Style {
-                background: Some(theme.background_secondary.into()),
-                border: Border {
-                    color: theme.border,
-                    width: 1.0,
+        let col_header_container =
+            container(col_header)
+                .width(Fill)
+                .style(move |_t| container::Style {
+                    background: Some(theme.background_secondary.into()),
+                    border: Border {
+                        color: theme.border,
+                        width: 1.0,
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            });
+                });
 
         // ".." up-navigation entry (if not at filesystem root)
         let mut rows: Vec<Element<Message>> = Vec::new();
@@ -359,8 +390,14 @@ impl LocalPane {
                     .size(12)
                     .color(name_color)
                     .width(Fill),
-                text(entry.size_display()).size(11).color(theme.text_secondary).width(80),
-                text(entry.modified_display()).size(11).color(theme.text_secondary).width(90),
+                text(entry.size_display())
+                    .size(11)
+                    .color(theme.text_secondary)
+                    .width(80),
+                text(entry.modified_display())
+                    .size(11)
+                    .color(theme.text_secondary)
+                    .width(90),
             ]
             .spacing(6)
             .padding([1, 0]);
@@ -379,25 +416,17 @@ impl LocalPane {
             rows.push(entry_btn.into());
         }
 
-        let list = scrollable(
-            column(rows)
-                .width(Fill)
-                .padding([0, 4]),
-        )
-        .width(Fill)
-        .height(Fill);
+        let list = scrollable(column(rows).width(Fill).padding([0, 4]))
+            .width(Fill)
+            .height(Fill);
 
-        let body = container(
-            column![col_header_container, list]
-                .width(Fill)
-                .height(Fill),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(move |_t| container::Style {
-            background: Some(theme.background.into()),
-            ..Default::default()
-        });
+        let body = container(column![col_header_container, list].width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill)
+            .style(move |_t| container::Style {
+                background: Some(theme.background.into()),
+                ..Default::default()
+            });
 
         body.into()
     }
@@ -511,17 +540,19 @@ fn load_entries(
         .collect();
 
     // Dirs first, then sort within groups (with direction)
-    entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => {
-                let base = match sort {
-                    SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                    SortField::Size => a.size.cmp(&b.size),
-                    SortField::Modified => a.modified.cmp(&b.modified),
-                };
-                if ascending { base } else { base.reverse() }
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => {
+            let base = match sort {
+                SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortField::Size => a.size.cmp(&b.size),
+                SortField::Modified => a.modified.cmp(&b.modified),
+            };
+            if ascending {
+                base
+            } else {
+                base.reverse()
             }
         }
     });
@@ -712,7 +743,10 @@ mod tests {
         let new_path = tmp.join("..").canonicalize().unwrap_or(tmp.clone());
         pane.navigate_to(new_path.clone());
         assert_eq!(pane.current_path, new_path);
-        assert!(pane.selected.is_empty(), "selection should clear on navigation");
+        assert!(
+            pane.selected.is_empty(),
+            "selection should clear on navigation"
+        );
     }
 
     #[test]
@@ -780,9 +814,15 @@ mod tests {
         let mut pane = LocalPane::new(tmp);
         if !pane.entries.is_empty() {
             pane.select(0);
-            assert!(pane.selected.contains(&0), "should be selected after first click");
+            assert!(
+                pane.selected.contains(&0),
+                "should be selected after first click"
+            );
             pane.select(0);
-            assert!(!pane.selected.contains(&0), "should be deselected after second click");
+            assert!(
+                !pane.selected.contains(&0),
+                "should be deselected after second click"
+            );
         }
     }
 
