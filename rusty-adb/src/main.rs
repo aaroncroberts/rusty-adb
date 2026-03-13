@@ -952,7 +952,9 @@ impl App {
                 if is_double_click {
                     self.android_last_click = None;
                     if let Some(entry) = self.android_pane.entries.get(i).cloned() {
-                        if !entry.is_dir {
+                        if entry.is_navigable() {
+                            return self.update(Message::AndroidNavigateTo(entry.path.clone()));
+                        } else {
                             return self.update(Message::PreviewFile(entry));
                         }
                     }
@@ -2490,7 +2492,7 @@ impl App {
             .on_press(Message::CloseAbout);
 
         let github_btn = button(
-            text("github.com/aaroncontini/rusty-adb")
+            text("github.com/aaroncroberts/rusty-adb")
                 .size(12)
                 .color(t.accent),
         )
@@ -2499,7 +2501,7 @@ impl App {
             ..Default::default()
         })
         .on_press(Message::OpenUrl(
-            "https://github.com/aaroncontini/rusty-adb".to_string(),
+            "https://github.com/aaroncroberts/rusty-adb".to_string(),
         ));
 
         let card = container(
@@ -2529,16 +2531,15 @@ impl App {
                     column![
                         // ASCII art logo
                         column![
-                            text("╔══════════════════════════════╗").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║   ██████╗ ██╗   ██╗███████╗ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║   ██╔══██╗██║   ██║██╔════╝ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║   ██████╔╝██║   ██║███████╗ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║   ██╔══██╗██║   ██║╚════██║ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║   ██║  ██║╚██████╔╝███████║ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║          ─── ADB ───          ║").size(11).font(iced::Font::MONOSPACE).color(t.text_secondary),
-                            text(format!("║        version  v{version:<13}║")).size(11).font(iced::Font::MONOSPACE).color(t.text),
-                            text("╚══════════════════════════════╝").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("╔════════════════════════════════════╗").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║  ____           _                  ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║ |  _ \\ _   _ __| |_ _   _         ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║ | |_) | | | / _` | __| | | |      ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║ |  _ <| |_| \\__ \\ |_| |_| |  ADB ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║ |_| \\_\\\\__,_|___/\\__|\\__, |      ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║                       |___/        ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text(format!("║  Android file manager  v{version:<12}║")).size(12).font(iced::Font::MONOSPACE).color(t.text),
+                            text("╚════════════════════════════════════╝").size(12).font(iced::Font::MONOSPACE).color(t.accent),
                         ]
                         .spacing(0),
                         text("").size(8), // spacer
@@ -2556,7 +2557,7 @@ impl App {
             ]
             .width(Fill),
         )
-        .width(380)
+        .width(440)
         .style(move |_th| container::Style {
             background: Some(t.background.into()),
             border: Border {

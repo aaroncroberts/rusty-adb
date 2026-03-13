@@ -34,11 +34,13 @@ Browse your Android device's file system, transfer files in both directions, pre
 
 | Feature | Description |
 |---|---|
-| **Device browser** | Two-pane layout: local filesystem on the left, Android device on the right |
+| **Two-pane browser** | Local filesystem on the left, Android device on the right |
+| **Four view modes** | List, Details (columns), Grid, and Icon — switchable per pane |
+| **Show dropdown** | Toggle individual columns (Type, Size, Modified) and hidden files per pane |
 | **Device auto-detection** | Polls `adb devices` every 2 s; connects automatically when a device is authorised |
 | **File transfers** | Copy files to/from Android with a live progress bar and transfer speed display |
 | **Drag-and-drop** | Drop files from Finder/Explorer onto the app to push them to the current Android directory |
-| **Multi-file selection** | Select multiple files in the Android pane and transfer them all in one queued batch |
+| **Multi-file selection** | Select multiple files and transfer them all in one queued batch |
 | **File preview** | Preview images (PNG, JPG, GIF, WebP, BMP) and text files directly in the app |
 | **Rename & delete** | Rename or delete files on the Android device with confirmation prompts |
 | **Settings** | Configure log level, console logging, and file logging via a persistent `config.yml` |
@@ -98,7 +100,7 @@ sudo pacman -S android-tools
 ### Quick start
 
 ```bash
-git clone https://github.com/aaroncontini/rusty-adb.git
+git clone https://github.com/aaroncroberts/rusty-adb.git
 cd rusty-adb
 
 # Run in development mode
@@ -163,6 +165,32 @@ All scripts accept `--help`.
 
 ---
 
+## Using the Interface
+
+### View Modes
+
+Each pane has its own **Views** dropdown in the toolbar. Options:
+
+| Mode | Description |
+|---|---|
+| **List** | Single-column filename rows — highest density |
+| **Details** | Tabular rows with Name, Size, Modified, Type columns |
+| **Grid** | Compact multi-column tiles (4 per row) |
+| **Icon** | Large tiles (2–3 per row) with big type icon |
+
+### Show Dropdown
+
+The **Show** dropdown next to the Views picker lets you toggle what each pane displays:
+
+- **Type** — file type column (Details mode)
+- **Size** — file size column (Details mode)
+- **Modified** — last-modified date column (Details mode)
+- **Hidden files** — toggle display of dotfiles (`.filename`)
+
+Items with a `✓` prefix are currently enabled; clicking them again disables the setting.
+
+---
+
 ## Configuration
 
 rusty-adb reads `~/.rusty-adb/config.yml` on startup. All fields are optional and fall back to sensible defaults.
@@ -184,15 +212,17 @@ Log files are written to `~/.rusty-adb/` and rotate automatically.
 rusty-adb/
 ├── rusty-adb/          # Main application crate
 │   ├── src/
-│   │   ├── main.rs     # Iced Application, Message enum, update/view
-│   │   ├── adb.rs      # AdbClient — device polling, file operations
-│   │   ├── transfer.rs # Async file transfer engine with progress events
-│   │   ├── config.rs   # AppConfig loaded from config.yml
-│   │   ├── local_pane.rs     # Local filesystem pane widget
-│   │   ├── android_pane.rs   # Android device pane widget
-│   │   ├── status_bar.rs     # Status bar widget
-│   │   ├── theme.rs          # Colour palette
-│   │   └── lib.rs            # Library target for integration tests
+│   │   ├── main.rs         # Iced Application, Message enum, update/view
+│   │   ├── adb.rs          # AdbClient — device polling, file operations
+│   │   ├── transfer.rs     # Async file transfer engine with progress events
+│   │   ├── config.rs       # AppConfig loaded from config.yml
+│   │   ├── filesystem.rs   # Shared traits: FileSystem, DirEntry, PaneState
+│   │   ├── file_pane.rs    # Generic FilePane<FS> widget (list, details, grid, icon)
+│   │   ├── local_fs.rs     # Local filesystem backend (FileSystem impl)
+│   │   ├── android_fs.rs   # Android ADB backend (FileSystem impl)
+│   │   ├── status_bar.rs   # Status bar widget
+│   │   ├── theme.rs        # Colour palette
+│   │   └── lib.rs          # Library target for integration tests
 │   └── tests/
 │       ├── adb_integration.rs  # Integration tests via mock-adb
 │       └── fixtures/mock-adb   # Bash script that fakes the adb binary

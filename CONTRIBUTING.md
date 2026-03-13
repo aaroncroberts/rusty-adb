@@ -32,7 +32,7 @@ Thanks for your interest in contributing. This document covers everything you ne
 ### 2. Clone and build
 
 ```bash
-git clone https://github.com/aaroncontini/rusty-adb.git
+git clone https://github.com/aaroncroberts/rusty-adb.git
 cd rusty-adb
 cargo build
 ```
