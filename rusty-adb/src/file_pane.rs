@@ -329,7 +329,8 @@ impl<FS: FileSystem> FilePane<FS> {
 
         // ── State guard: show spinner / error / no-device ────────────────────
         if self.state != PaneState::Ready {
-            let body = self.view_state_body(theme);
+            let retry = Some(on_navigate(self.current_path.clone()));
+            let body = self.view_state_body(theme, retry);
             return column![col_header, body].width(Fill).height(Fill).into();
         }
 
@@ -500,11 +501,15 @@ impl<FS: FileSystem> FilePane<FS> {
 
     // ── State body helpers ────────────────────────────────────────────────────
 
-    fn view_state_body<'a, Message: 'a + Clone>(&'a self, theme: ThemeColors) -> Element<'a, Message> {
+    fn view_state_body<'a, Message: 'a + Clone>(
+        &'a self,
+        theme: ThemeColors,
+        on_retry: Option<Message>,
+    ) -> Element<'a, Message> {
         match &self.state {
             PaneState::NoDevice => view_connect_guide(theme),
             PaneState::Loading => self.view_loading(theme),
-            PaneState::Error(e) => view_error(theme, e),
+            PaneState::Error(e) => view_error(theme, e, on_retry),
             PaneState::Ready => unreachable!("guarded above"),
         }
     }
@@ -534,12 +539,33 @@ impl<FS: FileSystem> FilePane<FS> {
 // ─── Free View Helpers ────────────────────────────────────────────────────────
 
 /// Error state body — shown when `list_dir` fails.
-pub fn view_error<'a, Message: 'a + Clone>(theme: ThemeColors, msg: &str) -> Element<'a, Message> {
-    let content = column![
+pub fn view_error<'a, Message: 'a + Clone>(
+    theme: ThemeColors,
+    msg: &str,
+    on_retry: Option<Message>,
+) -> Element<'a, Message> {
+    let mut content = column![
         text("Error").size(13).color(theme.text_secondary),
         text(msg.to_string()).size(11).color(theme.error),
     ]
     .spacing(6);
+
+    if let Some(retry_msg) = on_retry {
+        content = content.push(
+            button(text("Retry").size(11).color(theme.text))
+                .padding([4, 12])
+                .style(move |_t, _s| button::Style {
+                    background: Some(theme.background_secondary.into()),
+                    border: iced::Border {
+                        color: theme.border,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .on_press(retry_msg),
+        );
+    }
 
     container(content)
         .width(Fill)

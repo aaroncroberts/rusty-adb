@@ -567,8 +567,8 @@ pub fn main() -> iced::Result {
         let adb_task = Task::perform(
             async {
                 let client = AdbClient::find().await.map_err(|e| e.to_string())?;
-                // Kill any stale daemon, then start fresh — ensures a clean connection.
-                let _ = client.kill_server().await;
+                // start-server is a no-op if already running; avoids disrupting
+                // devices that are already authorized and connected.
                 if let Err(e) = client.start_server().await {
                     return Err(format!("daemon:{}", e));
                 }
@@ -2544,17 +2544,16 @@ impl App {
                 // Body
                 container(
                     column![
-                        // ASCII art logo
+                        // ASCII art logo — "rusty" (left) + "adb" (right), figlet small
                         column![
-                            text("╔════════════════════════════════════╗").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║  ____           _                  ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║ |  _ \\ _   _ __| |_ _   _         ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║ | |_) | | | / _` | __| | | |      ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║ |  _ <| |_| \\__ \\ |_| |_| |  ADB ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║ |_| \\_\\\\__,_|___/\\__|\\__, |      ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║                       |___/        ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text(format!("║  Android file manager  v{version:<12}║")).size(12).font(iced::Font::MONOSPACE).color(t.text),
-                            text("╚════════════════════════════════════╝").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("╔══════════════════════════════════════════════╗").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║ _ __ _   _ ___| |_ _   _    __ _  __| | |__ ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║| '__| | | / __| __| | | |  / _` |/ _` | '_ \\║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║| |  | |_| \\__ \\ |_| |_| | | (_| | (_| | |_) |║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║|_|   \\__,_|___/\\__|\\__, | \\__,_|\\__,_|_.__/ ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║                      |___/                    ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
+                            text(format!("║  Android file manager  v{version:<21}║")).size(12).font(iced::Font::MONOSPACE).color(t.text),
+                            text("╚══════════════════════════════════════════════╝").size(12).font(iced::Font::MONOSPACE).color(t.accent),
                         ]
                         .spacing(0),
                         text("").size(8), // spacer
@@ -2572,7 +2571,7 @@ impl App {
             ]
             .width(Fill),
         )
-        .width(440)
+        .width(480)
         .style(move |_th| container::Style {
             background: Some(t.background.into()),
             border: Border {
