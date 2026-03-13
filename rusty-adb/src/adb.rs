@@ -166,6 +166,16 @@ impl AdbClient {
         );
     }
 
+    /// Kill the ADB server (non-fatal — silently succeeds if no server is running).
+    pub async fn kill_server(&self) -> Result<()> {
+        let _ = Command::new(&self.adb_path)
+            .arg("kill-server")
+            .status()
+            .await;
+        tracing::info!("adb kill-server sent");
+        Ok(())
+    }
+
     /// Start the ADB server in the background (idempotent — safe to call multiple times).
     pub async fn start_server(&self) -> Result<()> {
         let status = Command::new(&self.adb_path)

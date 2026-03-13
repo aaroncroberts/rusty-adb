@@ -563,9 +563,12 @@ pub fn main() -> iced::Result {
         ..Default::default()
     })
     .run_with(|| {
-        let init_task = Task::perform(
+        // Kick off ADB: kill any stale daemon, then start fresh.
+        let adb_task = Task::perform(
             async {
                 let client = AdbClient::find().await.map_err(|e| e.to_string())?;
+                // Kill any stale daemon, then start fresh — ensures a clean connection.
+                let _ = client.kill_server().await;
                 if let Err(e) = client.start_server().await {
                     return Err(format!("daemon:{}", e));
                 }
@@ -588,7 +591,19 @@ pub fn main() -> iced::Result {
                 Err(e) => Message::AdbError(e),
             },
         );
-        (App::with_config(cfg, config_path), init_task)
+
+        // Load the local pane immediately — doesn't need ADB to be ready.
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let load_path = home_dir.clone();
+        let local_task = Task::perform(
+            async move { LocalFs::list_dir(&(), &load_path).await.map_err(|e| e.to_string()) },
+            move |result| match result {
+                Ok(entries) => Message::LocalEntriesLoaded { path: home_dir.clone(), entries },
+                Err(e) => Message::LocalLoadError(e),
+            },
+        );
+
+        (App::with_config(cfg, config_path), Task::batch([adb_task, local_task]))
     })
 }
 
