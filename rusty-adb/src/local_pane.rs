@@ -74,6 +74,12 @@ pub struct LocalPane {
     pub sort_ascending: bool,
     /// Last error loading directory (displayed in body)
     pub error: Option<String>,
+    /// Show the Type column in list view
+    pub show_type: bool,
+    /// Show the Size column in list view
+    pub show_size: bool,
+    /// Show the Modified column in list view
+    pub show_modified: bool,
 }
 
 impl LocalPane {
@@ -87,6 +93,9 @@ impl LocalPane {
             sort_by: SortField::Name,
             sort_ascending: true,
             error: None,
+            show_type: true,
+            show_size: true,
+            show_modified: true,
         };
         pane.reload();
         pane
@@ -157,6 +166,13 @@ impl LocalPane {
         tracing::debug!(show_hidden = self.show_hidden, "toggled hidden files");
         self.reload();
     }
+
+    /// Toggle Type column visibility.
+    pub fn toggle_type(&mut self) { self.show_type = !self.show_type; }
+    /// Toggle Size column visibility.
+    pub fn toggle_size(&mut self) { self.show_size = !self.show_size; }
+    /// Toggle Modified column visibility.
+    pub fn toggle_modified(&mut self) { self.show_modified = !self.show_modified; }
 
     /// Change sort field (or toggle direction if already active) and reload.
     ///
@@ -240,19 +256,26 @@ impl LocalPane {
 
         // ── Sticky column header ──────────────────────────────────────────────
         let name_label = format!("Name{}", sort_ind(SortField::Name));
-        let type_label_hdr = "Type";
         let size_label = format!("Size{}", sort_ind(SortField::Size));
         let date_label = format!("Modified{}", sort_ind(SortField::Modified));
 
+        let mut hdr_cells: Vec<Element<Message>> = vec![
+            iced::widget::Space::new(20, 1).into(),
+            text("").width(W_ICON).into(),
+            mk_col_hdr(name_label, SortField::Name, Fill, on_sort(SortField::Name)),
+        ];
+        if self.show_type {
+            hdr_cells.push(mk_col_hdr("Type".to_string(), SortField::Name, iced::Length::Fixed(W_TYPE as f32), on_sort(SortField::Name)));
+        }
+        if self.show_size {
+            hdr_cells.push(mk_col_hdr(size_label, SortField::Size, iced::Length::Fixed(W_SIZE as f32), on_sort(SortField::Size)));
+        }
+        if self.show_modified {
+            hdr_cells.push(mk_col_hdr(date_label, SortField::Modified, iced::Length::Fixed(W_DATE as f32), on_sort(SortField::Modified)));
+        }
+
         let header = container(
-            row![
-                iced::widget::Space::new(20, 1),  // checkbox placeholder
-                text("").width(W_ICON),           // icon placeholder
-                mk_col_hdr(name_label, SortField::Name, Fill, on_sort(SortField::Name)),
-                mk_col_hdr(type_label_hdr.to_string(), SortField::Name, iced::Length::Fixed(W_TYPE as f32), on_sort(SortField::Name)),
-                mk_col_hdr(size_label, SortField::Size, iced::Length::Fixed(W_SIZE as f32), on_sort(SortField::Size)),
-                mk_col_hdr(date_label, SortField::Modified, iced::Length::Fixed(W_DATE as f32), on_sort(SortField::Modified)),
-            ]
+            iced::widget::Row::from_vec(hdr_cells)
             .spacing(6)
             .padding([2, 8])
             .align_y(iced::Alignment::Center),
@@ -314,6 +337,20 @@ impl LocalPane {
             let on_sel_btn = on_select(i);
             let on_sel_chk = on_select(i);
 
+            let mut cells: Vec<Element<Message>> = vec![
+                text(icon).size(11).color(icon_fg).width(W_ICON).into(),
+                text(name).size(11).color(fg).width(Fill).into(),
+            ];
+            if self.show_type {
+                cells.push(text(type_label).size(10).color(t.text_secondary).width(W_TYPE).into());
+            }
+            if self.show_size {
+                cells.push(text(size_str).size(10).color(t.text_secondary).width(W_SIZE).into());
+            }
+            if self.show_modified {
+                cells.push(text(date_str).size(10).color(t.text_secondary).width(W_DATE).into());
+            }
+
             rows.push(
                 container(
                     row![
@@ -321,13 +358,7 @@ impl LocalPane {
                             .on_toggle(move |_| on_sel_chk.clone())
                             .size(12),
                         button(
-                            row![
-                                text(icon).size(11).color(icon_fg).width(W_ICON),
-                                text(name).size(11).color(fg).width(Fill),
-                                text(type_label).size(10).color(t.text_secondary).width(W_TYPE),
-                                text(size_str).size(10).color(t.text_secondary).width(W_SIZE),
-                                text(date_str).size(10).color(t.text_secondary).width(W_DATE),
-                            ]
+                            iced::widget::Row::from_vec(cells)
                             .spacing(6)
                             .align_y(iced::Alignment::Center),
                         )

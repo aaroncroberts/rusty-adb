@@ -156,10 +156,16 @@ enum Message {
     LocalNavigateTo(PathBuf),
     LocalSelectEntry(usize),
     LocalToggleHidden,
+    LocalToggleType,
+    LocalToggleSize,
+    LocalToggleModified,
     LocalSortBy(SortField),
 
     // ── Android Pane ──────────────────────────────────────────────────────────
     AndroidToggleHidden,
+    AndroidToggleType,
+    AndroidToggleSize,
+    AndroidToggleModified,
     AndroidNavigateTo(PathBuf),
     AndroidEntriesLoaded {
         path: PathBuf,
@@ -794,6 +800,18 @@ impl App {
                 self.local_pane.toggle_hidden();
                 Task::none()
             }
+            Message::LocalToggleType => {
+                self.local_pane.toggle_type();
+                Task::none()
+            }
+            Message::LocalToggleSize => {
+                self.local_pane.toggle_size();
+                Task::none()
+            }
+            Message::LocalToggleModified => {
+                self.local_pane.toggle_modified();
+                Task::none()
+            }
             Message::LocalSortBy(field) => {
                 self.local_pane.sort_by(field);
                 Task::none()
@@ -806,6 +824,18 @@ impl App {
             // ── Android Pane ──────────────────────────────────────────────────
             Message::AndroidToggleHidden => {
                 self.android_pane.toggle_hidden();
+                Task::none()
+            }
+            Message::AndroidToggleType => {
+                self.android_pane.toggle_type();
+                Task::none()
+            }
+            Message::AndroidToggleSize => {
+                self.android_pane.toggle_size();
+                Task::none()
+            }
+            Message::AndroidToggleModified => {
+                self.android_pane.toggle_modified();
                 Task::none()
             }
             Message::AndroidNavigateTo(path) => {
@@ -2799,14 +2829,36 @@ impl App {
                 if let Some(m) = msg { b.on_press(m) } else { b }
             };
 
-        // ── hidden toggle button ────────────────────────────────────────────
-        let hidden_msg: Message = if is_android {
-            Message::AndroidToggleHidden
+        // ── "Show" dropdown ─────────────────────────────────────────────────
+        // Read column/hidden visibility from the appropriate pane.
+        let (show_type, show_size, show_modified) = if is_android {
+            (self.android_pane.show_type, self.android_pane.show_size, self.android_pane.show_modified)
         } else {
-            Message::LocalToggleHidden
+            (self.local_pane.show_type, self.local_pane.show_size, self.local_pane.show_modified)
         };
-        let hidden_label = if show_hidden { ".Shown" } else { ".Hidden" };
-        let hidden_fg = if show_hidden { t.accent } else { t.text_secondary };
+
+        // Build item labels — checkmark prefix indicates enabled state.
+        let type_item:     &'static str = if show_type     { "✓ Type"         } else { "  Type"         };
+        let size_item:     &'static str = if show_size     { "✓ Size"         } else { "  Size"         };
+        let modified_item: &'static str = if show_modified { "✓ Modified"     } else { "  Modified"     };
+        let hidden_item:   &'static str = if show_hidden   { "✓ Hidden files" } else { "  Hidden files" };
+
+        let show_items: Vec<&'static str> = vec![type_item, size_item, modified_item, hidden_item];
+
+        let show_picker = pick_list(show_items, None::<&str>, move |picked: &str| {
+            match picked {
+                s if s.contains("Type") =>
+                    if is_android { Message::AndroidToggleType } else { Message::LocalToggleType },
+                s if s.contains("Size") =>
+                    if is_android { Message::AndroidToggleSize } else { Message::LocalToggleSize },
+                s if s.contains("Modified") =>
+                    if is_android { Message::AndroidToggleModified } else { Message::LocalToggleModified },
+                _ => if is_android { Message::AndroidToggleHidden } else { Message::LocalToggleHidden },
+            }
+        })
+        .placeholder("Show")
+        .text_size(11)
+        .padding([2, 8]);
 
         // ── file commands ───────────────────────────────────────────────────
         let mut cmd_items: Vec<Element<Message>> = Vec::new();
@@ -2843,12 +2895,12 @@ impl App {
             text("View").size(11).color(t.text_secondary),
             iced::widget::Space::new(6, 1),
             view_picker,
+            iced::widget::Space::new(8, 1),
+            text("Show").size(11).color(t.text_secondary),
+            iced::widget::Space::new(6, 1),
+            show_picker,
             iced::widget::horizontal_space(),
             cmd_row,
-            button(text(hidden_label).size(11).color(hidden_fg))
-                .padding([2, 8])
-                .style(|_t, _s| button::Style { background: None, ..Default::default() })
-                .on_press(hidden_msg),
         ]
         .spacing(2)
         .padding([2, 8])

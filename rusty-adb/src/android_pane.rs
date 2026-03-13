@@ -62,6 +62,12 @@ pub struct AndroidPane {
     pub sort_by: SortField,
     /// True = ascending (A→Z, small→large); false = descending
     pub sort_ascending: bool,
+    /// Show the Type column in list view
+    pub show_type: bool,
+    /// Show the Size column in list view
+    pub show_size: bool,
+    /// Show the Modified column in list view
+    pub show_modified: bool,
 }
 
 impl Default for AndroidPane {
@@ -77,6 +83,9 @@ impl Default for AndroidPane {
             show_hidden: false,
             sort_by: SortField::Name,
             sort_ascending: true,
+            show_type: true,
+            show_size: true,
+            show_modified: true,
         }
     }
 }
@@ -88,6 +97,13 @@ impl AndroidPane {
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
     }
+
+    /// Toggle Type column visibility.
+    pub fn toggle_type(&mut self) { self.show_type = !self.show_type; }
+    /// Toggle Size column visibility.
+    pub fn toggle_size(&mut self) { self.show_size = !self.show_size; }
+    /// Toggle Modified column visibility.
+    pub fn toggle_modified(&mut self) { self.show_modified = !self.show_modified; }
 
     /// Called when a device connects — begin loading /sdcard.
     pub fn on_device_connected(&mut self) {
@@ -362,15 +378,23 @@ impl AndroidPane {
         let size_lbl = format!("Size{}", sort_ind(SortField::Size));
         let date_lbl = format!("Modified{}", sort_ind(SortField::Modified));
 
+        let mut hdr_cells: Vec<Element<Message>> = vec![
+            iced::widget::Space::new(20, 1).into(),
+            text("").width(W_ICON).into(),
+            mk_hdr(name_lbl, SortField::Name, Fill, on_sort(SortField::Name)),
+        ];
+        if self.show_type {
+            hdr_cells.push(mk_hdr("Type".to_string(), SortField::Name, iced::Length::Fixed(W_TYPE as f32), on_sort(SortField::Name)));
+        }
+        if self.show_size {
+            hdr_cells.push(mk_hdr(size_lbl, SortField::Size, iced::Length::Fixed(W_SIZE as f32), on_sort(SortField::Size)));
+        }
+        if self.show_modified {
+            hdr_cells.push(mk_hdr(date_lbl, SortField::Modified, iced::Length::Fixed(W_DATE as f32), on_sort(SortField::Modified)));
+        }
+
         let col_header = container(
-            row![
-                iced::widget::Space::new(20, 1),
-                text("").width(W_ICON),
-                mk_hdr(name_lbl, SortField::Name, Fill, on_sort(SortField::Name)),
-                mk_hdr("Type".to_string(), SortField::Name, iced::Length::Fixed(W_TYPE as f32), on_sort(SortField::Name)),
-                mk_hdr(size_lbl, SortField::Size, iced::Length::Fixed(W_SIZE as f32), on_sort(SortField::Size)),
-                mk_hdr(date_lbl, SortField::Modified, iced::Length::Fixed(W_DATE as f32), on_sort(SortField::Modified)),
-            ]
+            iced::widget::Row::from_vec(hdr_cells)
             .spacing(6)
             .padding([2, 8])
             .align_y(iced::Alignment::Center),
@@ -410,6 +434,20 @@ impl AndroidPane {
             let on_nav = on_navigate(entry_path);
             let on_sel_btn = on_select(i);
             let on_sel_chk = on_select(i);
+            let mut cells: Vec<Element<Message>> = vec![
+                text(icon).size(11).color(icon_fg).width(W_ICON).into(),
+                text(name).size(11).color(fg).width(Fill).into(),
+            ];
+            if self.show_type {
+                cells.push(text(type_label).size(10).color(t.text_secondary).width(W_TYPE).into());
+            }
+            if self.show_size {
+                cells.push(text(size_str).size(10).color(t.text_secondary).width(W_SIZE).into());
+            }
+            if self.show_modified {
+                cells.push(text(date_str).size(10).color(t.text_secondary).width(W_DATE).into());
+            }
+
             rows.push(
                 container(
                     row![
@@ -417,13 +455,7 @@ impl AndroidPane {
                             .on_toggle(move |_| on_sel_chk.clone())
                             .size(12),
                         button(
-                            row![
-                                text(icon).size(11).color(icon_fg).width(W_ICON),
-                                text(name).size(11).color(fg).width(Fill),
-                                text(type_label).size(10).color(theme.text_secondary).width(W_TYPE),
-                                text(size_str).size(10).color(theme.text_secondary).width(W_SIZE),
-                                text(date_str).size(10).color(theme.text_secondary).width(W_DATE),
-                            ]
+                            iced::widget::Row::from_vec(cells)
                             .spacing(6)
                             .align_y(iced::Alignment::Center),
                         )
