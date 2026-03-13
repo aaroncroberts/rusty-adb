@@ -120,6 +120,12 @@ enum Message {
     /// A file was dropped onto the window — queue a local→android transfer
     FileDropped(PathBuf),
 
+    // ── About dialog ──────────────────────────────────────────────────────────
+    /// Open the About modal
+    OpenAbout,
+    /// Close the About modal
+    CloseAbout,
+
     // ── Settings ──────────────────────────────────────────────────────────────
     /// Open the settings modal (copies live config to draft)
     OpenSettings,
@@ -192,6 +198,30 @@ enum PreviewContent {
     Unsupported(String),
 }
 
+// ─── App Icon ─────────────────────────────────────────────────────────────────
+
+/// Build a simple placeholder 32×32 icon from inline RGBA data.
+///
+/// Returns `None` if icon creation fails (non-fatal — app still launches).
+/// Replace this with a real `.icns`/`.ico` at packaging time.
+fn placeholder_icon() -> Option<iced::window::Icon> {
+    const SIZE: u32 = 32;
+    // Teal (#1a9e8a) squares with a dark border — minimal but recognisable
+    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    for row in 0..SIZE {
+        for col in 0..SIZE {
+            let is_border = row == 0 || row == SIZE - 1 || col == 0 || col == SIZE - 1;
+            let (r, g, b, a) = if is_border {
+                (0x0d, 0x6e, 0x60, 0xff) // dark teal border
+            } else {
+                (0x1a, 0x9e, 0x8a, 0xff) // teal fill
+            };
+            rgba.extend_from_slice(&[r, g, b, a]);
+        }
+    }
+    iced::window::icon::from_rgba(rgba, SIZE, SIZE).ok()
+}
+
 // ─── App State ────────────────────────────────────────────────────────────────
 
 struct App {
@@ -250,6 +280,8 @@ struct App {
     settings_draft: config::AppConfig,
     /// Transient success/info toast (None = hidden)
     toast: Option<String>,
+    /// Whether the About modal is currently open
+    about_open: bool,
 }
 
 impl Default for App {
@@ -284,6 +316,7 @@ impl Default for App {
             settings_open: false,
             settings_draft: config::AppConfig::default(),
             toast: None,
+            about_open: false,
             theme,
         }
     }
@@ -351,7 +384,12 @@ pub fn main() -> iced::Result {
     )
         .subscription(App::subscription)
         .theme(|_| Theme::TokyoNightStorm)
-        .window_size((1280.0, 800.0))
+        .window(iced::window::Settings {
+            size: iced::Size::new(1280.0, 800.0),
+            min_size: Some(iced::Size::new(900.0, 600.0)),
+            icon: placeholder_icon(),
+            ..Default::default()
+        })
         .run_with(|| {
             let init_task = Task::perform(
                 async {
@@ -1278,6 +1316,17 @@ impl App {
                 self.update(Message::ShowError(format!("Delete failed: {msg}")))
             }
 
+            // ── About dialog ──────────────────────────────────────────────────
+            Message::OpenAbout => {
+                self.about_open = true;
+                Task::none()
+            }
+
+            Message::CloseAbout => {
+                self.about_open = false;
+                Task::none()
+            }
+
             // ── Settings ──────────────────────────────────────────────────────
             Message::OpenSettings => {
                 self.settings_draft = self.config.clone();
@@ -1358,6 +1407,9 @@ impl App {
             Message::EscapePressed => {
                 if self.settings_open {
                     return self.update(Message::CloseSettings);
+                }
+                if self.about_open {
+                    return self.update(Message::CloseAbout);
                 }
                 if self.preview_modal.is_some() {
                     return self.update(Message::ClosePreview);
@@ -1475,9 +1527,11 @@ impl App {
 
         let base: Element<Message> = column(items).into();
 
-        // Stack-based modal overlays (settings takes priority over preview)
+        // Stack-based modal overlays (settings > about > preview in priority)
         if self.settings_open {
             stack![base, self.view_settings_modal()].into()
+        } else if self.about_open {
+            stack![base, self.view_about_modal()].into()
         } else if let Some(modal_content) = &self.preview_modal {
             stack![base, self.view_preview_modal(modal_content)].into()
         } else {
@@ -1838,6 +1892,108 @@ impl App {
         .into()
     }
 
+    /// About modal overlay — app info, version, GitHub link, license.
+    fn view_about_modal(&self) -> Element<Message> {
+        let t = self.theme;
+        let version = env!("CARGO_PKG_VERSION");
+
+        let close_btn = button(text("✕  Close").size(12).color(t.text))
+            .style(move |_th, _s| button::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .padding([4, 12])
+            .on_press(Message::CloseAbout);
+
+        let github_btn = button(
+            text("github.com/aaroncontini/rusty-adb")
+                .size(12)
+                .color(t.accent),
+        )
+        .style(move |_th, _s| button::Style {
+            background: None,
+            ..Default::default()
+        })
+        .on_press(Message::OpenUrl(
+            "https://github.com/aaroncontini/rusty-adb".to_string(),
+        ));
+
+        let card = container(
+            column![
+                // Header
+                container(
+                    row![
+                        text("About rusty-adb").size(14).color(t.text).width(Fill),
+                        close_btn,
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .spacing(8)
+                    .padding([6, 10]),
+                )
+                .width(Fill)
+                .style(move |_th| container::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+                // Body
+                container(
+                    column![
+                        text(format!("rusty-adb  v{version}"))
+                            .size(18)
+                            .color(t.text),
+                        text("Android file manager built with Rust and Iced.")
+                            .size(12)
+                            .color(t.text_secondary),
+                        text("").size(6), // spacer
+                        github_btn,
+                        text("License: MIT")
+                            .size(11)
+                            .color(t.text_secondary),
+                    ]
+                    .spacing(6),
+                )
+                .padding([20, 20])
+                .width(Fill),
+            ]
+            .width(Fill),
+        )
+        .width(380)
+        .style(move |_th| container::Style {
+            background: Some(t.background.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        });
+
+        container(
+            container(card)
+                .center_x(Fill)
+                .center_y(Fill)
+                .width(Fill)
+                .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(move |_th| container::Style {
+            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
+            ..Default::default()
+        })
+        .into()
+    }
+
     /// Success/info toast banner (green tint, auto-dismisses after 3 s).
     fn view_toast_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
         let t = self.theme;
@@ -2113,6 +2269,12 @@ impl App {
             Some(Message::OpenSettings),
         );
 
+        let about_btn = toolbar_btn(
+            "? About".to_string(),
+            t.text_secondary,
+            Some(Message::OpenAbout),
+        );
+
         let content = row![
             refresh_btn,
             disconnect_btn,
@@ -2122,6 +2284,7 @@ impl App {
             delete_btn,
             restart_btn,
             settings_btn,
+            about_btn,
         ]
         .spacing(8)
         .padding([0, 16])
@@ -2382,6 +2545,40 @@ mod tests {
         // modal closed, rename still active (Escape routed to ClosePreview)
         assert!(app.preview_modal.is_none());
         assert!(app.android_pane.rename_pending.is_some());
+    }
+
+    // ── About dialog tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn open_about_sets_flag() {
+        let mut app = App::default();
+        let _ = app.update(Message::OpenAbout);
+        assert!(app.about_open);
+    }
+
+    #[test]
+    fn close_about_clears_flag() {
+        let mut app = App::default();
+        app.about_open = true;
+        let _ = app.update(Message::CloseAbout);
+        assert!(!app.about_open);
+    }
+
+    #[test]
+    fn escape_closes_about_before_rename() {
+        let mut app = App::default();
+        app.about_open = true;
+        app.android_pane.rename_pending = Some((0, "n".to_string()));
+        let _ = app.update(Message::EscapePressed);
+        assert!(!app.about_open);
+        assert!(app.android_pane.rename_pending.is_some());
+    }
+
+    #[test]
+    fn placeholder_icon_generates_without_panic() {
+        // Verify the icon helper runs cleanly — it's called at app startup
+        let icon = placeholder_icon();
+        assert!(icon.is_some(), "placeholder_icon should succeed");
     }
 
     // ── Settings tests ────────────────────────────────────────────────────────
