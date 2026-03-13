@@ -147,6 +147,10 @@ enum Message {
     SetLocalViewMode(ViewMode),
     /// Switch the android pane to the given view mode
     SetAndroidViewMode(ViewMode),
+    /// Select the item shown in the large Gallery preview (local pane)
+    LocalGallerySelect(usize),
+    /// Select the item shown in the large Gallery preview (android pane)
+    AndroidGallerySelect(usize),
 
     // ── Local Pane ────────────────────────────────────────────────────────────
     LocalNavigateTo(PathBuf),
@@ -358,6 +362,11 @@ struct App {
     /// Active view mode for the android pane (persists during navigation)
     android_view_mode: ViewMode,
 
+    /// Index of the item shown in the large preview area (Gallery view)
+    local_gallery_idx: usize,
+    /// Index of the item shown in the large preview area (Gallery view)
+    android_gallery_idx: usize,
+
     /// Currently active transfer (drives the streaming subscription)
     active_transfer: Option<TransferJob>,
     /// Monotonic counter used to give each transfer a unique subscription ID
@@ -432,6 +441,8 @@ impl Default for App {
             android_pane: AndroidPane::default(),
             local_view_mode: ViewMode::default(),
             android_view_mode: ViewMode::default(),
+            local_gallery_idx: 0,
+            android_gallery_idx: 0,
             active_transfer: None,
             transfer_id: 0,
             transfer_status: None,
@@ -672,6 +683,14 @@ impl App {
             }
             Message::SetAndroidViewMode(mode) => {
                 self.android_view_mode = mode;
+                Task::none()
+            }
+            Message::LocalGallerySelect(idx) => {
+                self.local_gallery_idx = idx;
+                Task::none()
+            }
+            Message::AndroidGallerySelect(idx) => {
+                self.android_gallery_idx = idx;
                 Task::none()
             }
 
@@ -2822,29 +2841,26 @@ impl App {
         self.view_icon_impl(true)
     }
 
+    /// Finder "As Gallery": large preview at top, horizontal filmstrip of all entries at bottom.
     fn view_grid_impl(&self, is_android: bool) -> Element<Message> {
-        const COLS: usize = 4;
-        const TILE_W: u16 = 120;
-        const TILE_H: u16 = 52;
+        const STRIP_TILE_W: u16 = 90;
+        const STRIP_TILE_H: u16 = 80;
         let t = self.theme;
 
-        // (original_index, name, is_dir, is_selected, is_hidden)
-        let visible: Vec<(usize, String, bool, bool, bool)> = if is_android {
+        let visible: Vec<(usize, String, bool, bool)> = if is_android {
             self.android_pane
                 .entries
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
-                .map(|(i, e)| {
-                    (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i), e.name.starts_with('.'))
-                })
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, e.name.starts_with('.')))
                 .collect()
         } else {
             self.local_pane
                 .entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i), e.is_hidden))
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, e.is_hidden))
                 .collect()
         };
 
@@ -2854,107 +2870,202 @@ impl App {
             self.local_pane.current_path.clone()
         };
 
-        let mut col: iced::widget::Column<Message> = column![];
+        let gallery_idx = if is_android {
+            self.android_gallery_idx
+        } else {
+            self.local_gallery_idx
+        }
+        .min(visible.len().saturating_sub(1));
 
         if visible.is_empty() {
-            col = col.push(
-                container(text("This directory is empty").size(11).color(t.text_secondary))
-                    .padding([8, 12]),
-            );
-        } else {
-            for chunk in visible.chunks(COLS) {
-                let mut tile_row: Vec<Element<Message>> = Vec::new();
-                for &(orig_idx, ref name, is_dir, is_selected, is_hidden) in chunk {
-                    let bg: Option<iced::Background> =
-                        if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
-                    let border_color = if is_selected { t.accent } else { t.border };
-                    let icon = if is_dir { "[/]" } else { "[-]" };
-                    let icon_fg = if is_dir { t.accent } else { t.text_secondary };
-                    let name_fg = if is_hidden { t.text_secondary } else { t.text };
-                    let short_name = if name.len() > 14 {
-                        format!("{}...", &name[..11])
-                    } else {
-                        name.clone()
-                    };
-                    let nav_msg = if is_android {
-                        Message::AndroidNavigateTo(current_path.join(name.as_str()))
-                    } else {
-                        Message::LocalNavigateTo(current_path.join(name.as_str()))
-                    };
-                    let sel_msg = if is_android {
-                        Message::AndroidSelectEntry(orig_idx)
-                    } else {
-                        Message::LocalSelectEntry(orig_idx)
-                    };
-                    let open_msg = if is_dir { nav_msg } else { sel_msg.clone() };
-                    let sel_chk = sel_msg;
-                    let tile = container(
-                        column![
-                            // Checkbox row — width(Fill) so the column knows its own width
-                            row![
-                                checkbox("", is_selected)
-                                    .on_toggle(move |_| sel_chk.clone())
-                                    .size(12),
-                            ]
-                            .width(Fill),
-                            // Icon + name button — fills remaining vertical space
-                            button(
-                                column![
-                                    text(icon).size(14).color(icon_fg),
-                                    text(short_name).size(10).color(name_fg),
-                                ]
-                                .spacing(2)
-                                .width(Fill)
-                                .align_x(iced::Alignment::Center),
-                            )
-                            .width(Fill)
-                            .height(Fill)
-                            .padding(2)
-                            .on_press(open_msg)
-                            .style(|_t, _s| button::Style {
-                                background: None,
-                                ..Default::default()
-                            }),
-                        ]
-                        .width(Fill)   // ← propagates fixed container width to Fill children
-                        .spacing(2),
-                    )
-                    .width(TILE_W)
-                    .height(TILE_H)
-                    .padding(4)
-                    .style(move |_t: &Theme| container::Style {
-                        background: bg,
-                        border: Border {
-                            color: border_color,
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    });
-                    tile_row.push(tile.into());
-                }
-                // Pad incomplete last row so alignment is consistent
-                while tile_row.len() < COLS {
-                    tile_row.push(
-                        container(iced::widget::Space::new(TILE_W, TILE_H)).into(),
-                    );
-                }
-                col = col.push(
-                    iced::widget::Row::from_vec(tile_row).spacing(8).padding([4, 8]),
-                );
-            }
+            return container(
+                text("This directory is empty").size(11).color(t.text_secondary),
+            )
+            .padding([20, 20])
+            .width(Fill)
+            .height(Fill)
+            .into();
         }
 
-        scrollable(col.width(Fill)).height(Fill).into()
+        // ── Large preview pane ────────────────────────────────────────────────
+        let (_, preview_name, preview_is_dir, _) = visible[gallery_idx].clone();
+        let preview_fg = if preview_is_dir { t.accent } else { t.text_secondary };
+
+        let ext = preview_name.rsplit('.').next()
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        let is_image = !preview_is_dir && !is_android
+            && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
+
+        let large_preview: Element<Message> = if is_image {
+            image(image::Handle::from_path(current_path.join(preview_name.as_str())))
+                .width(Fill)
+                .height(Fill)
+                .into()
+        } else {
+            let big_art = if preview_is_dir {
+                "╔═══════════╗\n║           ║\n║     /     ║\n║           ║\n╚═══════════╝"
+            } else {
+                "╔═══════════╗\n║           ║\n║    ───    ║\n║           ║\n╚═══════════╝"
+            };
+            column![
+                text(big_art)
+                    .size(14)
+                    .font(iced::Font::MONOSPACE)
+                    .color(preview_fg),
+                text(preview_name.clone())
+                    .size(13)
+                    .font(iced::Font::MONOSPACE)
+                    .color(t.text),
+            ]
+            .spacing(12)
+            .align_x(iced::Alignment::Center)
+            .into()
+        };
+
+        let preview_area = container(large_preview)
+            .width(Fill)
+            .height(Fill)
+            .padding(20)
+            .style(move |_th| container::Style {
+                background: Some(t.background_secondary.into()),
+                ..Default::default()
+            });
+
+        // ── Filmstrip at bottom ───────────────────────────────────────────────
+        let mut strip_tiles: Vec<Element<Message>> = Vec::new();
+        for (strip_pos, &(orig_idx, ref name, is_dir, is_hidden)) in visible.iter().enumerate() {
+            let is_focused = strip_pos == gallery_idx;
+            let icon_fg = if is_dir { t.accent } else { t.text_secondary };
+            let name_fg = if is_hidden { t.text_secondary } else { t.text };
+            let short = if name.len() > 11 {
+                format!("{}…", &name[..8])
+            } else {
+                name.clone()
+            };
+            let ext2 = name.rsplit('.').next()
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+            let is_img = !is_dir && !is_android
+                && matches!(ext2.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
+
+            let thumb: Element<Message> = if is_img {
+                image(image::Handle::from_path(current_path.join(name.as_str())))
+                    .width(STRIP_TILE_W - 8)
+                    .height(STRIP_TILE_H - 22)
+                    .into()
+            } else {
+                let art = if is_dir { "┌──┐\n│/ │\n└──┘" } else { "┌──┐\n│──│\n└──┘" };
+                text(art)
+                    .size(9)
+                    .font(iced::Font::MONOSPACE)
+                    .color(icon_fg)
+                    .into()
+            };
+
+            let gallery_sel_msg = if is_android {
+                Message::AndroidGallerySelect(strip_pos)
+            } else {
+                Message::LocalGallerySelect(strip_pos)
+            };
+            let nav_msg = if is_android {
+                Message::AndroidNavigateTo(current_path.join(name.as_str()))
+            } else {
+                Message::LocalNavigateTo(current_path.join(name.as_str()))
+            };
+            let sel_msg = if is_android {
+                Message::AndroidSelectEntry(orig_idx)
+            } else {
+                Message::LocalSelectEntry(orig_idx)
+            };
+            let focused_clone = gallery_sel_msg.clone();
+
+            let tile = container(
+                button(
+                    column![
+                        thumb,
+                        text(short).size(9).font(iced::Font::MONOSPACE).color(name_fg),
+                    ]
+                    .spacing(2)
+                    .width(Fill)
+                    .align_x(iced::Alignment::Center),
+                )
+                .width(Fill)
+                .height(Fill)
+                .padding(3)
+                .on_press({
+                    // Single click → focus in gallery; if dir double-click not needed,
+                    // let navigation happen via the "open" button in the preview pane.
+                    // Here: click focuses, and if already focused + dir → navigate.
+                    if is_focused && is_dir {
+                        nav_msg
+                    } else if is_focused {
+                        sel_msg
+                    } else {
+                        focused_clone
+                    }
+                })
+                .style(|_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                }),
+            )
+            .width(STRIP_TILE_W)
+            .height(STRIP_TILE_H)
+            .padding(4)
+            .style(move |_t: &Theme| container::Style {
+                background: if is_focused {
+                    Some(t.accent.scale_alpha(0.2).into())
+                } else {
+                    None
+                },
+                border: Border {
+                    color: if is_focused { t.accent } else { t.border },
+                    width: if is_focused { 2.0 } else { 1.0 },
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+
+            strip_tiles.push(tile.into());
+        }
+
+        let filmstrip = scrollable(
+            iced::widget::Row::from_vec(strip_tiles)
+                .spacing(6)
+                .padding([4, 8]),
+        )
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default(),
+        ))
+        .width(Fill);
+
+        let filmstrip_container = container(filmstrip)
+            .width(Fill)
+            .height(STRIP_TILE_H + 16)
+            .style(move |_th| container::Style {
+                background: Some(t.background.into()),
+                border: Border {
+                    color: t.border,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+
+        column![preview_area, filmstrip_container]
+            .width(Fill)
+            .height(Fill)
+            .into()
     }
 
     fn view_icon_impl(&self, is_android: bool) -> Element<Message> {
-        const COLS: usize = 3;
-        const TILE_W: u16 = 140;
-        const TILE_H: u16 = 90;
+        // Finder "As Icons": large icon art + filename centered below, 4 per row.
+        const COLS: usize = 4;
+        const TILE_W: u16 = 130;
+        const TILE_H: u16 = 105;
         let t = self.theme;
 
-        // (original_index, name, is_dir, is_selected, is_hidden)
         let visible: Vec<(usize, String, bool, bool, bool)> = if is_android {
             self.android_pane
                 .entries
@@ -2980,7 +3091,7 @@ impl App {
             self.local_pane.current_path.clone()
         };
 
-        let mut col: iced::widget::Column<Message> = column![];
+        let mut col: iced::widget::Column<Message> = column![].spacing(8).padding([8, 8]);
 
         if visible.is_empty() {
             col = col.push(
@@ -2992,12 +3103,14 @@ impl App {
                 let mut tile_row: Vec<Element<Message>> = Vec::new();
                 for &(orig_idx, ref name, is_dir, is_selected, is_hidden) in chunk {
                     let bg: Option<iced::Background> =
-                        if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
+                        if is_selected { Some(t.accent.scale_alpha(0.18).into()) } else { None };
                     let border_color = if is_selected { t.accent } else { t.border };
                     let icon_fg = if is_dir { t.accent } else { t.text_secondary };
                     let name_fg = if is_hidden { t.text_secondary } else { t.text };
-                    let display_name = if name.len() > 16 {
-                        format!("{}...", &name[..13])
+
+                    // Truncate long names to fit the tile width
+                    let display_name = if name.len() > 18 {
+                        format!("{}…", &name[..15])
                     } else {
                         name.clone()
                     };
@@ -3012,67 +3125,73 @@ impl App {
                     } else {
                         Message::LocalSelectEntry(orig_idx)
                     };
-                    let open_msg = if is_dir { nav_msg } else { sel_msg.clone() };
+                    // Folders navigate on single click; files select
+                    let press_msg = if is_dir { nav_msg } else { sel_msg.clone() };
                     let sel_chk = sel_msg;
 
-                    // For local image files show a live thumbnail; otherwise ASCII art.
+                    // Thumbnail for local images; ASCII icon art for everything else
                     let ext = name.rsplit('.').next()
                         .map(|e| e.to_lowercase())
                         .unwrap_or_default();
                     let is_image = !is_dir && !is_android
-                        && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp");
+                        && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
 
-                    let thumb: Element<Message> = if is_image {
-                        let handle = image::Handle::from_path(
-                            current_path.join(name.as_str()),
-                        );
-                        image(handle)
-                            .width(TILE_W - 20)
-                            .height(TILE_H - 30)
+                    // Big ASCII icon — 5 rows tall for visual weight
+                    let icon_art: Element<Message> = if is_image {
+                        image(image::Handle::from_path(current_path.join(name.as_str())))
+                            .width(60)
+                            .height(52)
                             .into()
                     } else {
-                        let icon_art = if is_dir {
-                            "+---+\n| / |\n+---+"
+                        let art = if is_dir {
+                            "  ╔═══╗  \n  ║   ║  \n  ║ / ║  \n  ║   ║  \n  ╚═══╝  "
                         } else {
-                            "+---+\n| - |\n+---+"
+                            "  ╔═══╗  \n  ║   ║  \n  ║───║  \n  ║   ║  \n  ╚═══╝  "
                         };
-                        text(icon_art).size(11).color(icon_fg).into()
+                        text(art)
+                            .size(10)
+                            .font(iced::Font::MONOSPACE)
+                            .color(icon_fg)
+                            .into()
                     };
 
                     let tile = container(
                         column![
-                            // Checkbox row
+                            // Selection checkbox in top-left corner
                             row![
                                 checkbox("", is_selected)
                                     .on_toggle(move |_| sel_chk.clone())
-                                    .size(12),
+                                    .size(11),
                             ]
                             .width(Fill),
-                            // Thumbnail/icon + name button — fills remaining space
+                            // Clickable icon + label
                             button(
                                 column![
-                                    thumb,
-                                    text(display_name).size(10).color(name_fg),
+                                    icon_art,
+                                    text(display_name)
+                                        .size(10)
+                                        .font(iced::Font::MONOSPACE)
+                                        .color(name_fg),
                                 ]
-                                .spacing(4)
+                                .spacing(5)
                                 .width(Fill)
                                 .align_x(iced::Alignment::Center),
                             )
                             .width(Fill)
                             .height(Fill)
                             .padding(2)
-                            .on_press(open_msg)
+                            .on_press(press_msg)
                             .style(|_t, _s| button::Style {
                                 background: None,
                                 ..Default::default()
                             }),
                         ]
-                        .width(Fill)   // ← gives Fill children a known width to expand into
+                        .width(Fill)
                         .spacing(2),
                     )
                     .width(TILE_W)
                     .height(TILE_H)
-                    .padding(4)
+                    .padding(6)
                     .style(move |_t: &Theme| container::Style {
                         background: bg,
                         border: Border {
@@ -3135,14 +3254,8 @@ impl App {
                 Message::LocalNavigateTo,
                 Message::LocalSelectEntry,
             ),
-            // Full column table with sortable Name/Size/Modified headers
-            ViewMode::Details => self.local_pane.view(
-                self.theme,
-                Message::LocalNavigateTo,
-                Message::LocalSelectEntry,
-                Message::LocalToggleHidden,
-                Message::LocalSortBy,
-            ),
+            // Finder-style column view: path ancestors on left, entries on right
+            ViewMode::Details => self.view_columns_impl(false),
             ViewMode::Grid => self.view_local_grid(),
             ViewMode::Icon => self.view_local_icon(),
         };
@@ -3175,14 +3288,8 @@ impl App {
                 Message::AndroidNavigateTo,
                 Message::AndroidSelectEntry,
             ),
-            // Full column view with device header, rename support, size/date info
-            ViewMode::Details => self.android_pane.view(
-                self.theme,
-                Message::AndroidNavigateTo,
-                Message::AndroidSelectEntry,
-                Message::AndroidRenameInput,
-                Message::AndroidRenameCommit,
-            ),
+            // Finder-style column view: path ancestors on left, entries on right
+            ViewMode::Details => self.view_columns_impl(true),
             ViewMode::Grid => self.view_android_grid(),
             ViewMode::Icon => self.view_android_icon(),
         };
@@ -3222,6 +3329,106 @@ impl App {
             });
 
         row![left, divider, right].width(Fill).height(Fill).into()
+    }
+
+    /// Finder "As Columns": path ancestors on the left, current entries on the right.
+    ///
+    /// Left column shows all ancestor directories of the current path as clickable
+    /// entries. Right column renders the current directory as a list view.
+    fn view_columns_impl(&self, is_android: bool) -> Element<Message> {
+        let t = self.theme;
+
+        let current_path = if is_android {
+            self.android_pane.current_path.clone()
+        } else {
+            self.local_pane.current_path.clone()
+        };
+
+        // ── Left: ancestor path hierarchy ──────────────────────────────────────
+        // Collect ancestors from root → parent (reverse of .ancestors() output).
+        let ancestors: Vec<std::path::PathBuf> = current_path
+            .ancestors()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .skip(1) // skip root "/"
+            .map(|p| p.to_path_buf())
+            .collect();
+
+        let mut ancestor_col: iced::widget::Column<Message> = column![].spacing(0);
+        for anc in &ancestors {
+            let label = anc
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "/".to_string());
+
+            let is_current = anc == &current_path;
+            let nav_target = anc.clone();
+            let nav_msg = if is_android {
+                Message::AndroidNavigateTo(nav_target)
+            } else {
+                Message::LocalNavigateTo(nav_target)
+            };
+            let fg = if is_current { t.accent } else { t.text };
+            let bg: Option<iced::Background> = if is_current {
+                Some(t.accent.scale_alpha(0.15).into())
+            } else {
+                None
+            };
+            let indent = "  ".repeat(anc.components().count().saturating_sub(1));
+            let row_label = format!("{indent}{label}");
+
+            ancestor_col = ancestor_col.push(
+                button(
+                    text(row_label)
+                        .size(11)
+                        .font(iced::Font::MONOSPACE)
+                        .color(fg),
+                )
+                .width(Fill)
+                .padding([3, 8])
+                .on_press(nav_msg)
+                .style(move |_t, _s| button::Style {
+                    background: bg,
+                    ..Default::default()
+                }),
+            );
+        }
+
+        let ancestor_panel = container(
+            scrollable(ancestor_col.width(Fill)).height(Fill),
+        )
+        .width(180)
+        .height(Fill)
+        .style(move |_th| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // ── Right: current directory entry list ───────────────────────────────
+        let entry_list: Element<Message> = if is_android {
+            self.android_pane.view_list(
+                self.theme,
+                Message::AndroidNavigateTo,
+                Message::AndroidSelectEntry,
+            )
+        } else {
+            self.local_pane.view_list(
+                self.theme,
+                Message::LocalNavigateTo,
+                Message::LocalSelectEntry,
+            )
+        };
+
+        row![ancestor_panel, entry_list]
+            .width(Fill)
+            .height(Fill)
+            .into()
     }
 
     /// Box-drawing title bar rendered above each file-browser pane.
