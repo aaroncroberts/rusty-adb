@@ -41,6 +41,26 @@ use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 32.0;
 
+// ─── View Mode ─────────────────────────────────────────────────────────────────
+
+/// Rendering style for directory entries in each pane.
+///
+/// Each pane (local and android) holds its own `ViewMode` independently so
+/// the user can, for example, view local files in Details mode while browsing
+/// the android device in List mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ViewMode {
+    /// Single-column filename rows — the default, highest-density view.
+    #[default]
+    List,
+    /// Tabular view with Name, Size, Modified, and Type columns.
+    Details,
+    /// Multi-column compact tiles (4 per row) with type icon and filename.
+    Grid,
+    /// Large tiles (2–3 per row) with a big type icon and filename below.
+    Icon,
+}
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -51,6 +71,12 @@ enum Message {
     DevicesLoaded(Arc<Vec<AdbDevice>>),
     AdbError(String),
 
+    // ── View Modes ────────────────────────────────────────────────────────────
+    /// Switch the local pane to the given view mode
+    SetLocalViewMode(ViewMode),
+    /// Switch the android pane to the given view mode
+    SetAndroidViewMode(ViewMode),
+
     // ── Local Pane ────────────────────────────────────────────────────────────
     LocalNavigateTo(PathBuf),
     LocalSelectEntry(usize),
@@ -58,6 +84,7 @@ enum Message {
     LocalSortBy(SortField),
 
     // ── Android Pane ──────────────────────────────────────────────────────────
+    AndroidToggleHidden,
     AndroidNavigateTo(PathBuf),
     AndroidEntriesLoaded {
         path: PathBuf,
@@ -243,6 +270,11 @@ struct App {
     local_pane: LocalPane,
     android_pane: AndroidPane,
 
+    /// Active view mode for the local pane (persists during navigation)
+    local_view_mode: ViewMode,
+    /// Active view mode for the android pane (persists during navigation)
+    android_view_mode: ViewMode,
+
     /// Currently active transfer (drives the streaming subscription)
     active_transfer: Option<TransferJob>,
     /// Monotonic counter used to give each transfer a unique subscription ID
@@ -303,6 +335,8 @@ impl Default for App {
             active_serial: None,
             local_pane: LocalPane::new(start_path),
             android_pane: AndroidPane::default(),
+            local_view_mode: ViewMode::default(),
+            android_view_mode: ViewMode::default(),
             active_transfer: None,
             transfer_id: 0,
             transfer_status: None,
@@ -531,6 +565,16 @@ impl App {
 impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            // ── View Modes ────────────────────────────────────────────────────
+            Message::SetLocalViewMode(mode) => {
+                self.local_view_mode = mode;
+                Task::none()
+            }
+            Message::SetAndroidViewMode(mode) => {
+                self.android_view_mode = mode;
+                Task::none()
+            }
+
             // ── ADB ──────────────────────────────────────────────────────────
             Message::AdbReady(client) => {
                 self.adb_client = Some((*client).clone());
@@ -636,6 +680,10 @@ impl App {
             }
 
             // ── Android Pane ──────────────────────────────────────────────────
+            Message::AndroidToggleHidden => {
+                self.android_pane.toggle_hidden();
+                Task::none()
+            }
             Message::AndroidNavigateTo(path) => {
                 let Some(client) = self.adb_client.clone() else {
                     return Task::none();
@@ -2238,31 +2286,127 @@ impl App {
             .into()
     }
 
-    /// Slim contextual action bar rendered at the bottom of a pane.
-    fn view_action_bar<'a>(
+    // ── Pane Menu Bar ──────────────────────────────────────────────────────────
+
+    /// Horizontal menu bar rendered at the top of each directory pane.
+    ///
+    /// Contains (left to right):
+    /// - View mode toggle group: [List] [Details] [Grid] [Icon]
+    /// - Spacer
+    /// - File command buttons (pane-specific, enabled/disabled by selection)
+    /// - Hidden files toggle: [.Hidden] / [.Shown]
+    fn view_pane_menu_bar<'a>(
         &'a self,
-        actions: Vec<(&'static str, iced::Color, Option<Message>)>,
+        is_android: bool,
+        view_mode: ViewMode,
+        show_hidden: bool,
+        local_sel_has_files: bool,
+        android_sel_has_files: bool,
+        android_sel_single: bool,
+        android_sel_nonempty: bool,
+        has_device: bool,
+        no_transfer: bool,
     ) -> Element<'a, Message> {
         let t = self.theme;
-        let btn = move |label: &'static str, color: iced::Color, msg: Option<Message>| {
-            let b = button(text(label).size(12).color(color))
-                .padding([3, 10])
+
+        // ── view mode toggle button ─────────────────────────────────────────
+        let vm_btn = move |label: &'static str, mode: ViewMode| {
+            let active = view_mode == mode;
+            let fg = if active { t.accent } else { t.text_secondary };
+            let msg: Message = if is_android {
+                Message::SetAndroidViewMode(mode)
+            } else {
+                Message::SetLocalViewMode(mode)
+            };
+            button(text(label).size(11).color(fg))
+                .padding([2, 8])
                 .style(move |_t, _s| button::Style {
-                    background: None,
+                    background: if active {
+                        Some(t.accent.scale_alpha(0.15).into())
+                    } else {
+                        None
+                    },
+                    border: if active {
+                        Border {
+                            color: t.accent.scale_alpha(0.4),
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        }
+                    } else {
+                        Border::default()
+                    },
                     ..Default::default()
-                });
-            if let Some(m) = msg { b.on_press(m) } else { b }
+                })
+                .on_press(msg)
         };
 
-        let mut row_items: Vec<Element<Message>> = Vec::new();
-        for (label, color, msg) in actions {
-            row_items.push(btn(label, color, msg).into());
+        // ── file command button ─────────────────────────────────────────────
+        let cmd_btn =
+            move |label: &'static str, color: iced::Color, msg: Option<Message>| {
+                let b = button(text(label).size(11).color(color))
+                    .padding([2, 8])
+                    .style(move |_t, _s| button::Style {
+                        background: None,
+                        ..Default::default()
+                    });
+                if let Some(m) = msg { b.on_press(m) } else { b }
+            };
+
+        // ── hidden toggle button ────────────────────────────────────────────
+        let hidden_msg: Message = if is_android {
+            Message::AndroidToggleHidden
+        } else {
+            Message::LocalToggleHidden
+        };
+        let hidden_label = if show_hidden { ".Shown" } else { ".Hidden" };
+        let hidden_fg = if show_hidden { t.accent } else { t.text_secondary };
+
+        // ── file commands ───────────────────────────────────────────────────
+        let mut cmd_items: Vec<Element<Message>> = Vec::new();
+        if is_android {
+            if has_device && no_transfer && android_sel_has_files {
+                cmd_items.push(
+                    cmd_btn("To Local", t.accent, Some(Message::CopyToLocal)).into(),
+                );
+            }
+            if has_device && android_sel_single {
+                cmd_items.push(
+                    cmd_btn("Rename", t.accent, Some(Message::AndroidBeginRename)).into(),
+                );
+            }
+            if has_device && android_sel_nonempty {
+                cmd_items.push(
+                    cmd_btn("Delete", t.error, Some(Message::AndroidBeginDelete)).into(),
+                );
+            }
+        } else {
+            // local pane
+            if has_device && no_transfer && local_sel_has_files {
+                cmd_items.push(
+                    cmd_btn("To Android", t.accent, Some(Message::CopyToAndroid)).into(),
+                );
+            }
         }
 
-        let content = iced::widget::Row::from_vec(row_items)
+        let cmd_row = iced::widget::Row::from_vec(cmd_items)
             .spacing(4)
-            .padding([0, 10])
             .align_y(iced::Alignment::Center);
+
+        let content = row![
+            vm_btn("List", ViewMode::List),
+            vm_btn("Details", ViewMode::Details),
+            vm_btn("Grid", ViewMode::Grid),
+            vm_btn("Icon", ViewMode::Icon),
+            iced::widget::horizontal_space(),
+            cmd_row,
+            button(text(hidden_label).size(11).color(hidden_fg))
+                .padding([2, 8])
+                .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                .on_press(hidden_msg),
+        ]
+        .spacing(2)
+        .padding([2, 8])
+        .align_y(iced::Alignment::Center);
 
         container(content)
             .width(Fill)
@@ -2279,73 +2423,426 @@ impl App {
             .into()
     }
 
+    // ── Details view renderers ─────────────────────────────────────────────────
+
+    /// Render the local pane entries as a Details table (Name, Size, Modified, Type).
+    fn view_local_details(&self) -> Element<Message> {
+        let t = self.theme;
+
+        let header: Element<Message> = container(
+            row![
+                text("Name").size(11).color(t.text_secondary).width(Fill),
+                text("Size").size(11).color(t.text_secondary).width(70),
+                text("Modified").size(11).color(t.text_secondary).width(90),
+                text("Type").size(11).color(t.text_secondary).width(40),
+            ]
+            .spacing(8)
+            .padding([2, 12]),
+        )
+        .width(Fill)
+        .style(move |_t: &Theme| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border { color: t.border, width: 1.0, ..Default::default() },
+            ..Default::default()
+        })
+        .into();
+
+        let mut col: iced::widget::Column<Message> = column![header];
+
+        if self.local_pane.entries.is_empty() {
+            col = col.push(
+                container(text("This directory is empty").size(11).color(t.text_secondary))
+                    .padding([8, 12]),
+            );
+        } else {
+            for (i, entry) in self.local_pane.entries.iter().enumerate() {
+                let is_selected = self.local_pane.selected.contains(&i);
+                let bg: Option<iced::Background> =
+                    if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
+                let fg = if entry.is_dir { t.accent } else { t.text };
+                let type_label = if entry.is_dir { "Dir" } else { "File" };
+                let name = entry.name.clone();
+                let size = entry.size_display();
+                let modified = entry.modified_display();
+                col = col.push(
+                    container(
+                        row![
+                            text(name).size(11).color(fg).width(Fill),
+                            text(size).size(11).color(t.text_secondary).width(70),
+                            text(modified).size(11).color(t.text_secondary).width(90),
+                            text(type_label).size(11).color(t.text_secondary).width(40),
+                        ]
+                        .spacing(8)
+                        .padding([3, 12]),
+                    )
+                    .width(Fill)
+                    .style(move |_t: &Theme| container::Style {
+                        background: bg,
+                        ..Default::default()
+                    }),
+                );
+            }
+        }
+
+        scrollable(col.width(Fill)).height(Fill).into()
+    }
+
+    /// Render the android pane entries as a Details table (Name, Size, Modified, Type).
+    fn view_android_details(&self) -> Element<Message> {
+        let t = self.theme;
+
+        let header: Element<Message> = container(
+            row![
+                text("Name").size(11).color(t.text_secondary).width(Fill),
+                text("Size").size(11).color(t.text_secondary).width(70),
+                text("Modified").size(11).color(t.text_secondary).width(90),
+                text("Type").size(11).color(t.text_secondary).width(40),
+            ]
+            .spacing(8)
+            .padding([2, 12]),
+        )
+        .width(Fill)
+        .style(move |_t: &Theme| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border { color: t.border, width: 1.0, ..Default::default() },
+            ..Default::default()
+        })
+        .into();
+
+        let mut col: iced::widget::Column<Message> = column![header];
+        let mut visible = 0usize;
+
+        for (i, entry) in self.android_pane.entries.iter().enumerate() {
+            if !self.android_pane.show_hidden && entry.name.starts_with('.') {
+                continue;
+            }
+            visible += 1;
+            let is_selected = self.android_pane.selected.contains(&i);
+            let bg: Option<iced::Background> =
+                if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
+            let fg = if entry.is_dir { t.accent } else { t.text };
+            let type_label =
+                if entry.is_symlink { "Link" } else if entry.is_dir { "Dir" } else { "File" };
+            let name = entry.name.clone();
+            let size = if entry.is_dir { "--".to_string() } else { local_pane::format_size(entry.size) };
+            let modified = entry.modified.clone();
+            col = col.push(
+                container(
+                    row![
+                        text(name).size(11).color(fg).width(Fill),
+                        text(size).size(11).color(t.text_secondary).width(70),
+                        text(modified).size(11).color(t.text_secondary).width(90),
+                        text(type_label).size(11).color(t.text_secondary).width(40),
+                    ]
+                    .spacing(8)
+                    .padding([3, 12]),
+                )
+                .width(Fill)
+                .style(move |_t: &Theme| container::Style {
+                    background: bg,
+                    ..Default::default()
+                }),
+            );
+        }
+
+        if visible == 0 {
+            let msg = if self.android_pane.entries.is_empty() {
+                "This directory is empty"
+            } else {
+                "All entries are hidden  (.hidden toggle to show)"
+            };
+            col = col
+                .push(container(text(msg).size(11).color(t.text_secondary)).padding([8, 12]));
+        }
+
+        scrollable(col.width(Fill)).height(Fill).into()
+    }
+
+    // ── Grid / Icon view renderers ─────────────────────────────────────────────
+
+    /// Render local entries as 4-column compact tiles (Grid view).
+    fn view_local_grid(&self) -> Element<Message> {
+        self.view_grid_impl(false)
+    }
+
+    /// Render android entries as 4-column compact tiles (Grid view).
+    fn view_android_grid(&self) -> Element<Message> {
+        self.view_grid_impl(true)
+    }
+
+    /// Render local entries as 2-column large tiles (Icon view).
+    fn view_local_icon(&self) -> Element<Message> {
+        self.view_icon_impl(false)
+    }
+
+    /// Render android entries as 2-column large tiles (Icon view).
+    fn view_android_icon(&self) -> Element<Message> {
+        self.view_icon_impl(true)
+    }
+
+    fn view_grid_impl(&self, is_android: bool) -> Element<Message> {
+        const COLS: usize = 4;
+        const TILE_W: u16 = 120;
+        const TILE_H: u16 = 52;
+        let t = self.theme;
+
+        // Collect visible entries as (original_index, name, is_dir, is_selected)
+        let visible: Vec<(usize, String, bool, bool)> = if is_android {
+            self.android_pane
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i)))
+                .collect()
+        } else {
+            self.local_pane
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i)))
+                .collect()
+        };
+
+        let mut col: iced::widget::Column<Message> = column![];
+
+        if visible.is_empty() {
+            col = col.push(
+                container(text("This directory is empty").size(11).color(t.text_secondary))
+                    .padding([8, 12]),
+            );
+        } else {
+            for chunk in visible.chunks(COLS) {
+                let mut tile_row: Vec<Element<Message>> = Vec::new();
+                for &(_, ref name, is_dir, is_selected) in chunk {
+                    let bg: Option<iced::Background> =
+                        if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
+                    let border_color =
+                        if is_selected { t.accent } else { t.border };
+                    let icon = if is_dir { "[D]" } else { "[F]" };
+                    let fg = if is_dir { t.accent } else { t.text };
+                    let short_name = if name.len() > 14 {
+                        format!("{}...", &name[..11])
+                    } else {
+                        name.clone()
+                    };
+                    tile_row.push(
+                        container(
+                            column![
+                                text(icon).size(14).color(fg),
+                                text(short_name).size(10).color(t.text),
+                            ]
+                            .spacing(2)
+                            .align_x(iced::Alignment::Center),
+                        )
+                        .width(TILE_W)
+                        .height(TILE_H)
+                        .padding(6)
+                        .style(move |_t: &Theme| container::Style {
+                            background: bg,
+                            border: Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        })
+                        .into(),
+                    );
+                }
+                // Pad incomplete last row so alignment is consistent
+                while tile_row.len() < COLS {
+                    tile_row.push(
+                        container(iced::widget::Space::new(TILE_W, TILE_H)).into(),
+                    );
+                }
+                col = col.push(
+                    iced::widget::Row::from_vec(tile_row).spacing(8).padding([4, 8]),
+                );
+            }
+        }
+
+        scrollable(col.width(Fill)).height(Fill).into()
+    }
+
+    fn view_icon_impl(&self, is_android: bool) -> Element<Message> {
+        const COLS: usize = 3;
+        const TILE_W: u16 = 140;
+        const TILE_H: u16 = 90;
+        let t = self.theme;
+
+        let visible: Vec<(usize, String, bool, bool)> = if is_android {
+            self.android_pane
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i)))
+                .collect()
+        } else {
+            self.local_pane
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i)))
+                .collect()
+        };
+
+        let mut col: iced::widget::Column<Message> = column![];
+
+        if visible.is_empty() {
+            col = col.push(
+                container(text("This directory is empty").size(11).color(t.text_secondary))
+                    .padding([8, 12]),
+            );
+        } else {
+            for chunk in visible.chunks(COLS) {
+                let mut tile_row: Vec<Element<Message>> = Vec::new();
+                for &(_, ref name, is_dir, is_selected) in chunk {
+                    let bg: Option<iced::Background> =
+                        if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
+                    let border_color = if is_selected { t.accent } else { t.border };
+                    // Big ASCII art icon
+                    let icon_art = if is_dir {
+                        "+---+\n| D |\n+---+"
+                    } else {
+                        "+---+\n| F |\n+---+"
+                    };
+                    let fg = if is_dir { t.accent } else { t.text };
+                    // Wrap name if long
+                    let display_name = if name.len() > 16 {
+                        format!("{}...", &name[..13])
+                    } else {
+                        name.clone()
+                    };
+                    tile_row.push(
+                        container(
+                            column![
+                                text(icon_art).size(11).color(fg),
+                                text(display_name).size(10).color(t.text),
+                            ]
+                            .spacing(4)
+                            .align_x(iced::Alignment::Center),
+                        )
+                        .width(TILE_W)
+                        .height(TILE_H)
+                        .padding(8)
+                        .style(move |_t: &Theme| container::Style {
+                            background: bg,
+                            border: Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..Default::default()
+                        })
+                        .into(),
+                    );
+                }
+                while tile_row.len() < COLS {
+                    tile_row.push(
+                        container(iced::widget::Space::new(TILE_W, TILE_H)).into(),
+                    );
+                }
+                col = col.push(
+                    iced::widget::Row::from_vec(tile_row).spacing(10).padding([6, 8]),
+                );
+            }
+        }
+
+        scrollable(col.width(Fill)).height(Fill).into()
+    }
+
     fn view_panes(&self) -> Element<Message> {
         let t = self.theme;
         let has_device = self.active_serial.is_some();
         let no_transfer = self.active_transfer.is_none();
 
-        // ── Local pane + optional "To Android" action bar ────────────────────
-        let can_copy_to_android = has_device
-            && no_transfer
-            && self.local_pane.selected.iter().any(|&i| {
-                self.local_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
-            });
+        // ── Precompute selection flags ────────────────────────────────────────
+        let local_sel_has_files = self.local_pane.selected.iter().any(|&i| {
+            self.local_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
+        });
+        let android_sel_has_files = self.android_pane.selected.iter().any(|&i| {
+            self.android_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
+        });
+        let android_sel_single =
+            self.android_pane.selected.len() == 1 && self.android_pane.rename_pending.is_none();
+        let android_sel_nonempty =
+            !self.android_pane.selected.is_empty() && self.android_pane.rename_pending.is_none();
 
-        let local_inner = self.local_pane.view(
-            self.theme,
-            Message::LocalNavigateTo,
-            Message::LocalSelectEntry,
-            Message::LocalToggleHidden,
-            Message::LocalSortBy,
+        // ── Local pane ────────────────────────────────────────────────────────
+        let local_menu = self.view_pane_menu_bar(
+            false,
+            self.local_view_mode,
+            self.local_pane.show_hidden,
+            local_sel_has_files,
+            android_sel_has_files,
+            android_sel_single,
+            android_sel_nonempty,
+            has_device,
+            no_transfer,
         );
 
-        let left: Element<Message> = if can_copy_to_android {
-            column![
-                local_inner,
-                self.view_action_bar(vec![(
-                    "Copy to Android",
-                    t.accent,
-                    Some(Message::CopyToAndroid),
-                )]),
-            ]
-            .width(Fill)
-            .height(Fill)
-            .into()
-        } else {
-            local_inner
+        // The local_pane.view() provides the List view (path header + entry list)
+        // For other modes we supply our own renderers
+        let local_content: Element<Message> = match self.local_view_mode {
+            ViewMode::List => self.local_pane.view(
+                self.theme,
+                Message::LocalNavigateTo,
+                Message::LocalSelectEntry,
+                Message::LocalToggleHidden,
+                Message::LocalSortBy,
+            ),
+            ViewMode::Details => self.view_local_details(),
+            ViewMode::Grid => self.view_local_grid(),
+            ViewMode::Icon => self.view_local_icon(),
         };
 
-        // ── Android pane + optional contextual action bar ─────────────────────
-        let can_copy_to_local = has_device
-            && no_transfer
-            && self.android_pane.selected.iter().any(|&i| {
-                self.android_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
-            });
-        let can_rename = has_device
-            && self.android_pane.selected.len() == 1
-            && self.android_pane.rename_pending.is_none();
-        let can_delete = has_device
-            && !self.android_pane.selected.is_empty()
-            && self.android_pane.rename_pending.is_none();
+        let left: Element<Message> = column![local_menu, local_content]
+            .width(Fill)
+            .height(Fill)
+            .into();
 
-        let android_inner = self.android_pane.view(
-            self.theme,
-            Message::AndroidNavigateTo,
-            Message::AndroidSelectEntry,
-            Message::AndroidRenameInput,
-            Message::AndroidRenameCommit,
+        // ── Android pane ──────────────────────────────────────────────────────
+        let android_menu = self.view_pane_menu_bar(
+            true,
+            self.android_view_mode,
+            self.android_pane.show_hidden,
+            local_sel_has_files,
+            android_sel_has_files,
+            android_sel_single,
+            android_sel_nonempty,
+            has_device,
+            no_transfer,
         );
 
-        let android_has_actions = can_copy_to_local || can_rename || can_delete;
+        // android_pane.view() provides the full pane (header + list + states)
+        // For other modes, we show just the content area
+        let android_content: Element<Message> = match self.android_view_mode {
+            ViewMode::List => self.android_pane.view(
+                self.theme,
+                Message::AndroidNavigateTo,
+                Message::AndroidSelectEntry,
+                Message::AndroidRenameInput,
+                Message::AndroidRenameCommit,
+            ),
+            ViewMode::Details => self.view_android_details(),
+            ViewMode::Grid => self.view_android_grid(),
+            ViewMode::Icon => self.view_android_icon(),
+        };
 
-        // Wrap the android pane with a drop-zone highlight while a file hovers
+        // Wrap android content with drop-zone highlight
         let hover = self.file_hover_active;
-        let android_inner: Element<Message> = container(android_inner)
+        let android_content: Element<Message> = container(android_content)
             .width(Fill)
             .height(Fill)
             .style(move |_theme| container::Style {
                 border: Border {
-                    color: if hover { t.accent.scale_alpha(0.8) } else { iced::Color::TRANSPARENT },
+                    color: if hover {
+                        t.accent.scale_alpha(0.8)
+                    } else {
+                        iced::Color::TRANSPARENT
+                    },
                     width: if hover { 2.0 } else { 0.0 },
                     ..Default::default()
                 },
@@ -2353,24 +2850,10 @@ impl App {
             })
             .into();
 
-        let right: Element<Message> = if android_has_actions {
-            let mut actions = Vec::new();
-            if can_copy_to_local {
-                actions.push(("Copy to Local", t.accent, Some(Message::CopyToLocal)));
-            }
-            if can_rename {
-                actions.push(("Rename", t.accent, Some(Message::AndroidBeginRename)));
-            }
-            if can_delete {
-                actions.push(("Delete", t.error, Some(Message::AndroidBeginDelete)));
-            }
-            column![android_inner, self.view_action_bar(actions)]
-                .width(Fill)
-                .height(Fill)
-                .into()
-        } else {
-            android_inner
-        };
+        let right: Element<Message> = column![android_menu, android_content]
+            .width(Fill)
+            .height(Fill)
+            .into();
 
         let divider = container(vertical_rule(1))
             .height(Fill)

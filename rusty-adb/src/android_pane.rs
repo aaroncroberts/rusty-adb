@@ -55,6 +55,8 @@ pub struct AndroidPane {
     pub spinner_frame: u8,
     /// Active inline rename: (entry_index, current_text_input_value)
     pub rename_pending: Option<(usize, String)>,
+    /// Whether to show hidden files (entries starting with '.')
+    pub show_hidden: bool,
 }
 
 impl Default for AndroidPane {
@@ -67,11 +69,19 @@ impl Default for AndroidPane {
             storage_roots: Vec::new(),
             spinner_frame: 0,
             rename_pending: None,
+            show_hidden: false,
         }
     }
 }
 
 impl AndroidPane {
+    /// Toggle visibility of hidden files (entries whose name starts with '.').
+    ///
+    /// The filtered view is applied at render time so no ADB re-fetch is needed.
+    pub fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+    }
+
     /// Called when a device connects — begin loading /sdcard.
     pub fn on_device_connected(&mut self) {
         tracing::info!("android pane: device connected, transitioning to Loading");
@@ -486,21 +496,30 @@ impl AndroidPane {
             }
         }
 
-        // Empty directory message
-        if self.entries.is_empty() {
+        // Empty directory message (also shown when all entries are filtered as hidden)
+        let visible_count = if self.show_hidden {
+            self.entries.len()
+        } else {
+            self.entries.iter().filter(|e| !e.name.starts_with('.')).count()
+        };
+        if visible_count == 0 {
+            let msg = if self.entries.is_empty() {
+                "This directory is empty"
+            } else {
+                "All entries are hidden  (.hidden toggle to show)"
+            };
             rows.push(
-                container(
-                    text("This directory is empty")
-                        .size(11)
-                        .color(theme.text_secondary),
-                )
-                .padding([8, 12])
-                .into(),
+                container(text(msg).size(11).color(theme.text_secondary))
+                    .padding([8, 12])
+                    .into(),
             );
         }
 
-        // File/directory entries
+        // File/directory entries (skip hidden entries when show_hidden is false)
         for (i, entry) in self.entries.iter().enumerate() {
+            if !self.show_hidden && entry.name.starts_with('.') {
+                continue;
+            }
             let is_selected = self.selected.contains(&i);
             let row_bg: Option<Color> = if is_selected {
                 Some(theme.accent.scale_alpha(0.2))
