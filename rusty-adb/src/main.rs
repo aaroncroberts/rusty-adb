@@ -3060,10 +3060,16 @@ impl App {
     }
 
     fn view_icon_impl(&self, is_android: bool) -> Element<Message> {
-        // Finder "As Icons": large icon art + filename centered below, 4 per row.
+        // Finder "As Icons": 3-line icon art + filename below, 4 per row.
+        // Layout: one flat button IS the tile — avoids nested height overflow.
+        //   icon art  ≈ 3 × 15px = 45px
+        //   spacing   = 5px
+        //   filename  ≈ 13px
+        //   btn pad   = 8px × 2 = 16px
+        //   ──────────────────  79px → TILE_H = 90
         const COLS: usize = 4;
         const TILE_W: u16 = 130;
-        const TILE_H: u16 = 105;
+        const TILE_H: u16 = 90;
         let t = self.theme;
 
         let visible: Vec<(usize, String, bool, bool, bool)> = if is_android {
@@ -3091,7 +3097,7 @@ impl App {
             self.local_pane.current_path.clone()
         };
 
-        let mut col: iced::widget::Column<Message> = column![].spacing(8).padding([8, 8]);
+        let mut col: iced::widget::Column<Message> = column![].spacing(10).padding([10, 10]);
 
         if visible.is_empty() {
             col = col.push(
@@ -3103,14 +3109,14 @@ impl App {
                 let mut tile_row: Vec<Element<Message>> = Vec::new();
                 for &(orig_idx, ref name, is_dir, is_selected, is_hidden) in chunk {
                     let bg: Option<iced::Background> =
-                        if is_selected { Some(t.accent.scale_alpha(0.18).into()) } else { None };
+                        if is_selected { Some(t.accent.scale_alpha(0.20).into()) } else { None };
                     let border_color = if is_selected { t.accent } else { t.border };
+                    let border_width = if is_selected { 2.0 } else { 1.0 };
                     let icon_fg = if is_dir { t.accent } else { t.text_secondary };
                     let name_fg = if is_hidden { t.text_secondary } else { t.text };
 
-                    // Truncate long names to fit the tile width
-                    let display_name = if name.len() > 18 {
-                        format!("{}…", &name[..15])
+                    let display_name = if name.len() > 16 {
+                        format!("{}…", &name[..13])
                     } else {
                         name.clone()
                     };
@@ -3125,78 +3131,51 @@ impl App {
                     } else {
                         Message::LocalSelectEntry(orig_idx)
                     };
-                    // Folders navigate on single click; files select
-                    let press_msg = if is_dir { nav_msg } else { sel_msg.clone() };
-                    let sel_chk = sel_msg;
+                    let press_msg = if is_dir { nav_msg } else { sel_msg };
 
-                    // Thumbnail for local images; ASCII icon art for everything else
                     let ext = name.rsplit('.').next()
                         .map(|e| e.to_lowercase())
                         .unwrap_or_default();
                     let is_image = !is_dir && !is_android
                         && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
 
-                    // Big ASCII icon — 5 rows tall for visual weight
+                    // 3-line icon art — compact enough to leave room for the filename
                     let icon_art: Element<Message> = if is_image {
                         image(image::Handle::from_path(current_path.join(name.as_str())))
-                            .width(60)
-                            .height(52)
+                            .width(56)
+                            .height(44)
                             .into()
                     } else {
-                        let art = if is_dir {
-                            "  ╔═══╗  \n  ║   ║  \n  ║ / ║  \n  ║   ║  \n  ╚═══╝  "
-                        } else {
-                            "  ╔═══╗  \n  ║   ║  \n  ║───║  \n  ║   ║  \n  ╚═══╝  "
-                        };
+                        let art = if is_dir { "┌───┐\n│ / │\n└───┘" } else { "┌───┐\n│───│\n└───┘" };
                         text(art)
-                            .size(10)
+                            .size(13)
                             .font(iced::Font::MONOSPACE)
                             .color(icon_fg)
                             .into()
                     };
 
-                    let tile = container(
+                    // The button IS the tile: icon + name, no nested containers
+                    let tile = button(
                         column![
-                            // Selection checkbox in top-left corner
-                            row![
-                                checkbox("", is_selected)
-                                    .on_toggle(move |_| sel_chk.clone())
-                                    .size(11),
-                            ]
-                            .width(Fill),
-                            // Clickable icon + label
-                            button(
-                                column![
-                                    icon_art,
-                                    text(display_name)
-                                        .size(10)
-                                        .font(iced::Font::MONOSPACE)
-                                        .color(name_fg),
-                                ]
-                                .spacing(5)
-                                .width(Fill)
-                                .align_x(iced::Alignment::Center),
-                            )
-                            .width(Fill)
-                            .height(Fill)
-                            .padding(2)
-                            .on_press(press_msg)
-                            .style(|_t, _s| button::Style {
-                                background: None,
-                                ..Default::default()
-                            }),
+                            icon_art,
+                            text(display_name)
+                                .size(11)
+                                .font(iced::Font::MONOSPACE)
+                                .color(name_fg),
                         ]
+                        .spacing(5)
                         .width(Fill)
-                        .spacing(2),
+                        .align_x(iced::Alignment::Center),
                     )
                     .width(TILE_W)
                     .height(TILE_H)
-                    .padding(6)
-                    .style(move |_t: &Theme| container::Style {
+                    .padding(8)
+                    .on_press(press_msg)
+                    .style(move |_t, _s| button::Style {
                         background: bg,
                         border: Border {
                             color: border_color,
-                            width: 1.0,
+                            width: border_width,
                             radius: 0.0.into(),
                         },
                         ..Default::default()
@@ -3204,12 +3183,10 @@ impl App {
                     tile_row.push(tile.into());
                 }
                 while tile_row.len() < COLS {
-                    tile_row.push(
-                        container(iced::widget::Space::new(TILE_W, TILE_H)).into(),
-                    );
+                    tile_row.push(iced::widget::Space::new(TILE_W, TILE_H).into());
                 }
                 col = col.push(
-                    iced::widget::Row::from_vec(tile_row).spacing(10).padding([6, 8]),
+                    iced::widget::Row::from_vec(tile_row).spacing(10).padding([0, 2]),
                 );
             }
         }
