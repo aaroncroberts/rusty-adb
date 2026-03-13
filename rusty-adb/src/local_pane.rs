@@ -205,18 +205,48 @@ impl LocalPane {
         on_navigate: impl Fn(PathBuf) -> Message + 'a,
         on_select: impl Fn(usize) -> Message + 'a,
     ) -> Element<'a, Message> {
+        // Column pixel widths — must match between header and every data row.
+        const W_ICON: u16 = 24;
+        const W_TYPE: u16 = 52;
+        const W_SIZE: u16 = 72;
+        const W_DATE: u16 = 90;
+
+        let t = theme;
         let breadcrumb = view_breadcrumb(&self.current_path, theme, &on_navigate);
 
+        // ── Sticky column header ──────────────────────────────────────────────
+        let header = container(
+            row![
+                iced::widget::Space::new(20, 1),  // checkbox placeholder
+                text("").width(W_ICON),           // icon placeholder
+                text("Name").size(10).color(t.text_secondary).width(Fill),
+                text("Type").size(10).color(t.text_secondary).width(W_TYPE),
+                text("Size").size(10).color(t.text_secondary).width(W_SIZE),
+                text("Modified").size(10).color(t.text_secondary).width(W_DATE),
+            ]
+            .spacing(6)
+            .padding([3, 8])
+            .align_y(iced::Alignment::Center),
+        )
+        .width(Fill)
+        .style(move |_t| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border { color: t.border, width: 1.0, radius: 0.0.into() },
+            ..Default::default()
+        });
+
+        // ── Rows ──────────────────────────────────────────────────────────────
         let mut rows: Vec<Element<Message>> = Vec::new();
 
-        // ".." up-navigation entry
+        // ".." up-navigation
         if let Some(parent) = self.current_path.parent() {
             let parent = parent.to_path_buf();
             rows.push(
                 button(
-                    row![text("..").size(12).color(theme.text)]
-                        .spacing(6)
-                        .padding([1, 4]),
+                    row![
+                        text("..").size(12).color(t.text_secondary).width(Fill),
+                    ]
+                    .padding([2, 8]),
                 )
                 .width(Fill)
                 .style(|_t, _s| button::Style { background: None, ..Default::default() })
@@ -227,7 +257,7 @@ impl LocalPane {
 
         if self.entries.is_empty() {
             rows.push(
-                container(text("This folder is empty").size(11).color(theme.text_secondary))
+                container(text("This folder is empty").size(11).color(t.text_secondary))
                     .padding([8, 12])
                     .into(),
             );
@@ -236,39 +266,48 @@ impl LocalPane {
         for (i, entry) in self.entries.iter().enumerate() {
             let is_selected = self.selected.contains(&i);
             let bg: Option<iced::Background> =
-                if is_selected { Some(theme.accent.scale_alpha(0.2).into()) } else { None };
-            let fg = if entry.is_hidden { theme.text_secondary } else { theme.text };
-            let icon_fg = if entry.is_dir { theme.accent } else { theme.text_secondary };
+                if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
+            let fg = if entry.is_hidden { t.text_secondary } else { t.text };
+            let icon_fg = if entry.is_dir { t.accent } else { t.text_secondary };
             let icon = if entry.is_dir { "[/]" } else { "[-]" };
+            let type_label = if entry.is_dir { "Folder" } else {
+                entry.name.rsplit('.').next()
+                    .filter(|e| !e.is_empty() && *e != &entry.name)
+                    .map(|e| e)
+                    .unwrap_or("File")
+            };
+            let size_str = entry.size_display();
+            let date_str = entry.modified_display();
             let name = entry.name.clone();
             let entry_path = entry.path.clone();
             let entry_is_dir = entry.is_dir;
             let on_nav = on_navigate(entry_path);
             let on_sel_btn = on_select(i);
             let on_sel_chk = on_select(i);
-            // Checkbox and name-button are siblings so each handles its own events.
+
             rows.push(
                 container(
                     row![
                         checkbox("", is_selected)
                             .on_toggle(move |_| on_sel_chk.clone())
-                            .size(14),
+                            .size(12),
                         button(
                             row![
-                                text(icon).size(11).color(icon_fg).width(28),
-                                text(name).size(12).color(fg).width(Fill),
+                                text(icon).size(11).color(icon_fg).width(W_ICON),
+                                text(name).size(11).color(fg).width(Fill),
+                                text(type_label).size(10).color(t.text_secondary).width(W_TYPE),
+                                text(size_str).size(10).color(t.text_secondary).width(W_SIZE),
+                                text(date_str).size(10).color(t.text_secondary).width(W_DATE),
                             ]
-                            .spacing(4),
+                            .spacing(6)
+                            .align_y(iced::Alignment::Center),
                         )
                         .width(Fill)
-                        .style(|_t, _s| button::Style {
-                            background: None,
-                            ..Default::default()
-                        })
+                        .style(|_t, _s| button::Style { background: None, ..Default::default() })
                         .on_press(if entry_is_dir { on_nav } else { on_sel_btn }),
                     ]
-                    .spacing(6)
-                    .padding([1, 4])
+                    .spacing(4)
+                    .padding([2, 8])
                     .align_y(iced::Alignment::Center),
                 )
                 .width(Fill)
@@ -281,18 +320,18 @@ impl LocalPane {
         }
 
         let body = container(
-            scrollable(column(rows).width(Fill).padding([0, 4]))
+            scrollable(column(rows).width(Fill))
                 .width(Fill)
                 .height(Fill),
         )
         .width(Fill)
         .height(Fill)
         .style(move |_t| container::Style {
-            background: Some(theme.background.into()),
+            background: Some(t.background.into()),
             ..Default::default()
         });
 
-        column![breadcrumb, body].width(Fill).height(Fill).into()
+        column![breadcrumb, header, body].width(Fill).height(Fill).into()
     }
 
     fn view_header<'a, Message: 'a + Clone>(
