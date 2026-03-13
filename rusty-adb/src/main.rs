@@ -83,6 +83,55 @@ impl std::fmt::Display for ViewMode {
     }
 }
 
+/// Minimum log level shown in the in-app log viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LogLevel {
+    Trace,
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    const ALL: &'static [LogLevel] =
+        &[LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error];
+
+    /// Returns `true` if a raw log line's level is at or above `self`.
+    fn matches(self, line: &str) -> bool {
+        let line_upper = line.to_uppercase();
+        // Detect the level of this line, then check if it meets the threshold
+        let line_level = if line_upper.contains(" ERROR") || line_upper.contains("[ERROR]") {
+            LogLevel::Error
+        } else if line_upper.contains(" WARN") || line_upper.contains("[WARN]") {
+            LogLevel::Warn
+        } else if line_upper.contains(" INFO") || line_upper.contains("[INFO]") {
+            LogLevel::Info
+        } else if line_upper.contains(" DEBUG") || line_upper.contains("[DEBUG]") {
+            LogLevel::Debug
+        } else if line_upper.contains(" TRACE") || line_upper.contains("[TRACE]") {
+            LogLevel::Trace
+        } else {
+            // Continuation / unrecognised lines — include unless we're at Error level only
+            return self != LogLevel::Error;
+        };
+        line_level as u8 >= self as u8
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Trace => f.write_str("TRACE+"),
+            LogLevel::Debug => f.write_str("DEBUG+"),
+            LogLevel::Info  => f.write_str("INFO+"),
+            LogLevel::Warn  => f.write_str("WARN+"),
+            LogLevel::Error => f.write_str("ERROR"),
+        }
+    }
+}
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -197,6 +246,18 @@ enum Message {
     SaveSettings,
     /// Open the app data directory in the OS file manager
     OpenLogFolder,
+    /// Open the in-app log viewer
+    OpenLogViewer,
+    /// Close the in-app log viewer
+    CloseLogViewer,
+    /// Populate log viewer with the list of log files found in the app dir
+    LogViewerFilesLoaded(Vec<std::path::PathBuf>),
+    /// User picked a different log file to view
+    LogViewerSelectFile(std::path::PathBuf),
+    /// Raw content of the selected log file loaded from disk
+    LogViewerFileLoaded(String),
+    /// User changed the level filter in the log viewer
+    LogViewerSetLevel(LogLevel),
     /// Show a transient success/info toast (auto-dismisses after 3 s)
     ShowToast(String),
     /// Dismiss the info toast
@@ -343,6 +404,18 @@ struct App {
     toast: Option<String>,
     /// Whether the About modal is currently open
     about_open: bool,
+
+    // ── Log viewer ────────────────────────────────────────────────────────────
+    /// Whether the log viewer modal is open
+    log_viewer_open: bool,
+    /// Log files found in the app data directory
+    log_viewer_files: Vec<std::path::PathBuf>,
+    /// Currently selected log file path
+    log_viewer_selected: Option<std::path::PathBuf>,
+    /// Raw content of the currently selected log file
+    log_viewer_content: String,
+    /// Minimum level filter applied to displayed lines
+    log_viewer_level: LogLevel,
 }
 
 impl Default for App {
@@ -374,6 +447,11 @@ impl Default for App {
             delete_confirm_paths: None,
             preview_modal: None,
             android_last_click: None,
+            log_viewer_open: false,
+            log_viewer_files: Vec::new(),
+            log_viewer_selected: None,
+            log_viewer_content: String::new(),
+            log_viewer_level: LogLevel::Info,
             config: config::AppConfig::default(),
             config_path: PathBuf::new(),
             settings_open: false,
@@ -1467,6 +1545,72 @@ impl App {
                 Task::none()
             }
 
+            // ── Log Viewer ────────────────────────────────────────────────────
+            Message::OpenLogViewer => {
+                self.log_viewer_open = true;
+                // Scan the app dir for *.log files and load the most-recent one
+                let log_dir = self
+                    .config_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .to_path_buf();
+                Task::perform(
+                    async move {
+                        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&log_dir)
+                            .ok()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|e| e.ok())
+                            .map(|e| e.path())
+                            .filter(|p| {
+                                p.extension().and_then(|e| e.to_str()) == Some("log")
+                            })
+                            .collect();
+                        // Sort newest-first by filename (date is embedded: rusty-adb.YYYY-MM-DD.log)
+                        files.sort_by(|a, b| b.cmp(a));
+                        files
+                    },
+                    Message::LogViewerFilesLoaded,
+                )
+            }
+
+            Message::CloseLogViewer => {
+                self.log_viewer_open = false;
+                Task::none()
+            }
+
+            Message::LogViewerFilesLoaded(files) => {
+                self.log_viewer_files = files;
+                // Auto-load the first (newest) file
+                if let Some(first) = self.log_viewer_files.first().cloned() {
+                    self.update(Message::LogViewerSelectFile(first))
+                } else {
+                    self.log_viewer_content = "(No log files found)".to_string();
+                    Task::none()
+                }
+            }
+
+            Message::LogViewerSelectFile(path) => {
+                self.log_viewer_selected = Some(path.clone());
+                Task::perform(
+                    async move {
+                        std::fs::read_to_string(&path)
+                            .unwrap_or_else(|e| format!("(Failed to read log: {e})"))
+                    },
+                    Message::LogViewerFileLoaded,
+                )
+            }
+
+            Message::LogViewerFileLoaded(content) => {
+                self.log_viewer_content = content;
+                Task::none()
+            }
+
+            Message::LogViewerSetLevel(level) => {
+                self.log_viewer_level = level;
+                Task::none()
+            }
+
             Message::ShowToast(msg) => {
                 tracing::info!(toast = %msg, "showing info toast");
                 self.toast = Some(msg);
@@ -1483,6 +1627,9 @@ impl App {
 
             // ── Escape routing ────────────────────────────────────────────────
             Message::EscapePressed => {
+                if self.log_viewer_open {
+                    return self.update(Message::CloseLogViewer);
+                }
                 if self.settings_open {
                     return self.update(Message::CloseSettings);
                 }
@@ -1612,8 +1759,10 @@ impl App {
 
         let base: Element<Message> = column(items).into();
 
-        // Stack-based modal overlays (settings > about > preview in priority)
-        if self.settings_open {
+        // Stack-based modal overlays (log viewer > settings > about > preview)
+        if self.log_viewer_open {
+            stack![base, self.view_log_viewer()].into()
+        } else if self.settings_open {
             stack![base, self.view_settings_modal()].into()
         } else if self.about_open {
             stack![base, self.view_about_modal()].into()
@@ -2050,6 +2199,167 @@ impl App {
         Self::modal_backdrop(card)
     }
 
+    /// Log viewer modal overlay.
+    ///
+    /// Shows a file picker (drop-down), a level filter, and the log content.
+    fn view_log_viewer(&self) -> Element<Message> {
+        let t = self.theme;
+
+        // ── File picker ────────────────────────────────────────────────────
+        // We pass paths directly to pick_list — PathBuf implements Display via its Debug.
+        // To show just the filename, wrap in a newtype or use the file_name component.
+        // Simplest approach: build a Vec<String> of basenames and find the path by name on select.
+        let file_names: Vec<String> = self
+            .log_viewer_files
+            .iter()
+            .map(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("(unknown)")
+                    .to_string()
+            })
+            .collect();
+
+        let selected_name: Option<String> = self.log_viewer_selected.as_ref().and_then(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+        });
+
+        // Build the file pick_list — map chosen name back to path on selection
+        let files_for_closure = self.log_viewer_files.clone();
+        let file_picker = pick_list(file_names, selected_name, move |chosen: String| {
+            let path = files_for_closure
+                .iter()
+                .find(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n == chosen)
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .unwrap_or_default();
+            Message::LogViewerSelectFile(path)
+        })
+        .text_size(11)
+        .padding([2, 8]);
+
+        // ── Level filter ───────────────────────────────────────────────────
+        let level_picker = pick_list(
+            LogLevel::ALL,
+            Some(self.log_viewer_level),
+            Message::LogViewerSetLevel,
+        )
+        .text_size(11)
+        .padding([2, 8]);
+
+        // ── Filter log lines by level ──────────────────────────────────────
+        let level = self.log_viewer_level;
+        let filtered_lines: String = self
+            .log_viewer_content
+            .lines()
+            .filter(|l| level.matches(l))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let log_display = if filtered_lines.is_empty() {
+            "(No lines match the selected level filter)".to_string()
+        } else {
+            filtered_lines
+        };
+
+        let log_scroll = scrollable(
+            container(
+                text(log_display).size(11).font(iced::Font::MONOSPACE).color(t.text),
+            )
+            .padding(8)
+            .width(Fill),
+        )
+        .height(Fill);
+
+        // ── Toolbar row ───────────────────────────────────────────────────
+        let toolbar = row![
+            text("File:").size(11).color(t.text_secondary),
+            file_picker,
+            iced::widget::horizontal_space(),
+            text("Level:").size(11).color(t.text_secondary),
+            level_picker,
+            button(text("Close").size(11).color(t.text))
+                .style(move |_th: &Theme, _s| button::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .padding([2, 10])
+                .on_press(Message::CloseLogViewer),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .padding([6, 10]);
+
+        let card = container(
+            column![
+                // Header
+                container(
+                    row![
+                        text("Log Viewer").size(14).color(t.text).width(Fill),
+                    ]
+                    .padding([6, 10]),
+                )
+                .width(Fill)
+                .style(move |_th| container::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+                // Toolbar
+                container(toolbar)
+                    .width(Fill)
+                    .style(move |_th| container::Style {
+                        background: Some(t.background_secondary.scale_alpha(0.5).into()),
+                        border: Border {
+                            color: t.border,
+                            width: 1.0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                // Log content
+                log_scroll,
+            ]
+            .width(Fill)
+            .height(Fill),
+        )
+        .width(iced::Length::FillPortion(9))
+        .height(iced::Length::FillPortion(8))
+        .max_width(1100.0)
+        .max_height(700.0)
+        .style(move |_th| container::Style {
+            background: Some(t.background.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: iced::Color::BLACK.scale_alpha(0.5),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 24.0,
+            },
+            ..Default::default()
+        });
+
+        Self::modal_backdrop(card)
+    }
+
     /// About modal overlay — app info, version, GitHub link, license.
     fn view_about_modal(&self) -> Element<Message> {
         let t = self.theme;
@@ -2200,6 +2510,13 @@ impl App {
             })
             .on_press(Message::OpenLogFolder);
 
+        let view_logs_btn = button(text("View Logs").size(12).color(t.accent))
+            .style(move |_th: &Theme, _s| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .on_press(Message::OpenLogViewer);
+
         let save_btn = button(text("Save").size(12).color(iced::Color::WHITE))
             .style(move |_th, _s| button::Style {
                 background: Some(t.accent.into()),
@@ -2253,7 +2570,7 @@ impl App {
                         level_row,
                         console_row,
                         file_row,
-                        open_folder_btn,
+                        row![open_folder_btn, view_logs_btn].spacing(8),
                         text("Changes apply on next launch.")
                             .size(11)
                             .color(t.text_secondary),

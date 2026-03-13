@@ -91,6 +91,16 @@ pub enum RotationPolicy {
 }
 
 impl LoggingConfig {
+    /// Directory where log files are written.
+    pub fn file_directory(&self) -> &std::path::Path {
+        &self.file_directory
+    }
+
+    /// File name prefix used for log files (e.g. `"rusty-adb"` → `rusty-adb.2026-03-13.log`).
+    pub fn file_prefix(&self) -> &str {
+        &self.file_prefix
+    }
+
     /// Create a new builder for logging configuration
     ///
     /// # Examples
@@ -157,8 +167,12 @@ impl LoggingConfig {
                     RotationPolicy::Never => Rotation::NEVER,
                 };
 
-                let file_appender =
-                    RollingFileAppender::new(rotation, &self.file_directory, &self.file_prefix);
+                let file_appender = RollingFileAppender::builder()
+                    .rotation(rotation)
+                    .filename_prefix(&self.file_prefix)
+                    .filename_suffix("log")
+                    .build(&self.file_directory)
+                    .map_err(|e| LoggingError::ConfigError(format!("Failed to build file appender: {e}")))?;
 
                 // Handle all combinations of console and file formats
                 match (self.console_format, self.console_writer, self.file_format) {
@@ -426,8 +440,12 @@ impl LoggingConfig {
                     RotationPolicy::Never => Rotation::NEVER,
                 };
 
-                let file_appender =
-                    RollingFileAppender::new(rotation, &self.file_directory, &self.file_prefix);
+                let file_appender = RollingFileAppender::builder()
+                    .rotation(rotation)
+                    .filename_prefix(&self.file_prefix)
+                    .filename_suffix("log")
+                    .build(&self.file_directory)
+                    .map_err(|e| LoggingError::ConfigError(format!("Failed to build file appender: {e}")))?;
 
                 // Build file layer based on format
                 match self.file_format {
