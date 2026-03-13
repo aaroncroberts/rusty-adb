@@ -5,7 +5,7 @@
 //! - File transfer progress bar + speed (when a transfer is active)
 
 use crate::theme::ThemeColors;
-use iced::widget::{container, progress_bar, row, text};
+use iced::widget::{button, container, progress_bar, row, text};
 use iced::{Border, Element, Fill};
 
 /// Height of the status bar in pixels
@@ -59,6 +59,10 @@ pub struct TransferStatus {
     pub percent: u8,
     /// Human-readable speed e.g. "12.3 MB/s" (empty until adb reports it)
     pub speed_display: String,
+    /// 1-based index of the current job in the queue
+    pub job_index: usize,
+    /// Total jobs in the queue
+    pub job_total: usize,
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
@@ -112,11 +116,12 @@ impl StatusBar {
     /// Render the status bar.
     ///
     /// When `transfer` is `Some`, shows a progress bar + speed instead of
-    /// the connection status text.
+    /// the connection status text. `on_cancel` enables the Cancel button.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         status: &AdbStatus,
         transfer: Option<&TransferStatus>,
+        on_cancel: Option<Message>,
     ) -> Element<'a, Message> {
         let theme = self.theme;
 
@@ -130,13 +135,30 @@ impl StatusBar {
                     border: iced::Border::default(),
                 });
 
-            let label = if xfer.speed_display.is_empty() {
-                format!("  {}  {}%", xfer.filename, xfer.percent)
+            let queue_label = if xfer.job_total > 1 {
+                format!("[{}/{}]  ", xfer.job_index, xfer.job_total)
             } else {
-                format!("  {}  {}%  {}", xfer.filename, xfer.percent, xfer.speed_display)
+                String::new()
             };
 
-            row![bar, text(label).size(12).color(theme.text_secondary)]
+            let label = if xfer.speed_display.is_empty() {
+                format!("  {}{}  {}%", queue_label, xfer.filename, xfer.percent)
+            } else {
+                format!("  {}{}  {}%  {}", queue_label, xfer.filename, xfer.percent, xfer.speed_display)
+            };
+
+            let cancel_btn = button(text("✕ Cancel").size(11).color(theme.error))
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                });
+            let cancel_btn = if let Some(msg) = on_cancel {
+                cancel_btn.on_press(msg)
+            } else {
+                cancel_btn
+            };
+
+            row![bar, text(label).size(12).color(theme.text_secondary), cancel_btn]
                 .spacing(8)
                 .align_y(iced::Alignment::Center)
                 .into()

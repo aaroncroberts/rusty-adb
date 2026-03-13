@@ -64,8 +64,8 @@ pub struct LocalPane {
     pub current_path: PathBuf,
     /// All entries in `current_path` (after filtering)
     pub entries: Vec<FileEntry>,
-    /// Index into `entries` of the selected entry (None = no selection)
-    pub selected: Option<usize>,
+    /// Selected entry indices (multi-select; click toggles in/out)
+    pub selected: Vec<usize>,
     /// Whether to show hidden files (names starting with '.')
     pub show_hidden: bool,
     /// Active sort field (always dirs-first within sort)
@@ -82,7 +82,7 @@ impl LocalPane {
         let mut pane = Self {
             current_path: path,
             entries: Vec::new(),
-            selected: None,
+            selected: Vec::new(),
             show_hidden: false,
             sort_by: SortField::Name,
             sort_ascending: true,
@@ -94,7 +94,7 @@ impl LocalPane {
 
     /// Re-read the current directory from disk and update `entries`.
     pub fn reload(&mut self) {
-        self.selected = None;
+        self.selected.clear();
         self.error = None;
 
         match load_entries(&self.current_path, self.show_hidden, self.sort_by, self.sort_ascending) {
@@ -130,10 +130,19 @@ impl LocalPane {
         self.reload();
     }
 
-    /// Select an entry by index.
+    /// Toggle selection of an entry by index (multi-select).
+    ///
+    /// - If index is already in `selected`, it is removed (deselect).
+    /// - Otherwise it is added.
+    /// - Out-of-bounds indices are ignored.
     pub fn select(&mut self, index: usize) {
-        if index < self.entries.len() {
-            self.selected = Some(index);
+        if index >= self.entries.len() {
+            return;
+        }
+        if let Some(pos) = self.selected.iter().position(|&i| i == index) {
+            self.selected.remove(pos);
+        } else {
+            self.selected.push(index);
         }
     }
 
@@ -314,7 +323,7 @@ impl LocalPane {
 
         // File/directory entries
         for (i, entry) in self.entries.iter().enumerate() {
-            let is_selected = self.selected == Some(i);
+            let is_selected = self.selected.contains(&i);
             let row_bg: Option<Color> = if is_selected {
                 Some(theme.accent.scale_alpha(0.2))
             } else {
@@ -671,7 +680,7 @@ mod tests {
         let pane = LocalPane::new(path.clone());
         assert_eq!(pane.current_path, path);
         assert!(pane.error.is_none(), "should have no error on temp dir");
-        assert!(pane.selected.is_none());
+        assert!(pane.selected.is_empty(), "no selection on new pane");
         assert!(!pane.show_hidden);
         assert!(pane.sort_ascending, "default sort should be ascending");
     }
@@ -690,7 +699,7 @@ mod tests {
         let new_path = tmp.join("..").canonicalize().unwrap_or(tmp.clone());
         pane.navigate_to(new_path.clone());
         assert_eq!(pane.current_path, new_path);
-        assert!(pane.selected.is_none(), "selection should clear on navigation");
+        assert!(pane.selected.is_empty(), "selection should clear on navigation");
     }
 
     #[test]
@@ -753,12 +762,25 @@ mod tests {
     }
 
     #[test]
-    fn select_updates_index() {
+    fn select_toggles_entry() {
         let tmp = std::env::temp_dir();
         let mut pane = LocalPane::new(tmp);
         if !pane.entries.is_empty() {
             pane.select(0);
-            assert_eq!(pane.selected, Some(0));
+            assert!(pane.selected.contains(&0), "should be selected after first click");
+            pane.select(0);
+            assert!(!pane.selected.contains(&0), "should be deselected after second click");
+        }
+    }
+
+    #[test]
+    fn select_multi_adds_both() {
+        let tmp = std::env::temp_dir();
+        let mut pane = LocalPane::new(tmp);
+        if pane.entries.len() >= 2 {
+            pane.select(0);
+            pane.select(1);
+            assert_eq!(pane.selected.len(), 2);
         }
     }
 
@@ -767,6 +789,6 @@ mod tests {
         let tmp = std::env::temp_dir();
         let mut pane = LocalPane::new(tmp);
         pane.select(usize::MAX);
-        assert!(pane.selected.is_none());
+        assert!(pane.selected.is_empty());
     }
 }

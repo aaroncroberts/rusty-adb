@@ -12,6 +12,8 @@
 //! ```
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -56,6 +58,8 @@ pub enum TransferEvent {
     Progress { percent: u8 },
     /// Transfer finished successfully
     Complete { speed_display: String },
+    /// Transfer was cancelled by the user
+    Cancelled,
     /// Transfer failed with a human-readable error
     Failed(String),
 }
@@ -96,10 +100,12 @@ pub fn parse_speed(line: &str) -> Option<String> {
 
 // ─── Transfer runner ───────────────────────────────────────────────────────────
 
-/// Run a single transfer job and emit events via the provided sender.
+/// Run a single transfer job, emitting events via the provided callback.
 ///
-/// This is designed to be called from inside `iced::subscription::channel`.
-pub async fn run_transfer<F>(job: &TransferJob, mut emit: F) -> Result<()>
+/// `cancel` is an `Arc<AtomicBool>` shared with the caller; setting it to `true`
+/// from another task will cause the transfer to stop cleanly after the current
+/// stderr line is processed and kill the child adb process.
+pub async fn run_transfer<F>(job: &TransferJob, cancel: Arc<AtomicBool>, mut emit: F) -> Result<()>
 where
     F: FnMut(TransferEvent),
 {
@@ -138,6 +144,14 @@ where
     let mut speed_display = String::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
+        // Check cancel flag after each line — zero cost when not cancelled
+        if cancel.load(Ordering::Relaxed) {
+            tracing::info!("transfer cancelled by user");
+            let _ = child.kill().await;
+            emit(TransferEvent::Cancelled);
+            return Ok(());
+        }
+
         tracing::trace!(line = %line, "adb stderr");
 
         if let Some(pct) = parse_progress_line(&line) {
@@ -148,6 +162,13 @@ where
         } else if let Some(speed) = parse_speed(&line) {
             speed_display = speed;
         }
+    }
+
+    // One final cancel check before reporting success
+    if cancel.load(Ordering::Relaxed) {
+        tracing::info!("transfer cancelled after completion");
+        emit(TransferEvent::Cancelled);
+        return Ok(());
     }
 
     let status = child.wait().await?;

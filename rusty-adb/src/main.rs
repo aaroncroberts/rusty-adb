@@ -18,7 +18,9 @@ mod status_bar;
 mod theme;
 mod transfer;
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,6 +75,10 @@ enum Message {
     TransferComplete { speed_display: String },
     /// Transfer failed
     TransferFailed(String),
+    /// User pressed the Cancel button during a transfer
+    CancelTransfer,
+    /// Transfer was cancelled (emitted by the subscription)
+    TransferCancelled,
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -95,6 +101,14 @@ struct App {
     transfer_id: u64,
     /// Live progress shown in the status bar
     transfer_status: Option<TransferStatus>,
+    /// Pending transfers waiting behind the active one
+    transfer_queue: VecDeque<TransferJob>,
+    /// Shared cancel flag — write `true` to abort the active transfer
+    cancel_flag: Option<Arc<AtomicBool>>,
+    /// How many jobs have completed in the current batch (for queue display)
+    transfer_queue_done: usize,
+    /// Total jobs in the current batch (for queue display)
+    transfer_queue_total: usize,
 }
 
 impl Default for App {
@@ -112,6 +126,10 @@ impl Default for App {
             active_transfer: None,
             transfer_id: 0,
             transfer_status: None,
+            transfer_queue: VecDeque::new(),
+            cancel_flag: None,
+            transfer_queue_done: 0,
+            transfer_queue_total: 0,
             theme,
         }
     }
@@ -177,10 +195,14 @@ impl App {
         // same stream alive rather than restarting it on every view pass.
         let maybe_transfer = self.active_transfer.as_ref().map(|job| {
             let job = job.clone();
+            let cancel = self
+                .cancel_flag
+                .clone()
+                .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
             Subscription::run_with_id(
                 job.id,
                 iced::stream::channel(32, move |mut sender| async move {
-                    let result = transfer::run_transfer(&job, |event| {
+                    let result = transfer::run_transfer(&job, cancel, |event| {
                         let msg = match &event {
                             TransferEvent::Progress { percent } => {
                                 Message::TransferProgress { percent: *percent }
@@ -190,6 +212,7 @@ impl App {
                                     speed_display: speed_display.clone(),
                                 }
                             }
+                            TransferEvent::Cancelled => Message::TransferCancelled,
                             TransferEvent::Failed(e) => Message::TransferFailed(e.clone()),
                         };
                         // try_send: channel has capacity 32, ample for ≤100 progress ticks
@@ -373,41 +396,52 @@ impl App {
                 let Some(serial) = &self.active_serial else {
                     return Task::none();
                 };
-                let Some(idx) = self.local_pane.selected else {
-                    tracing::warn!("CopyToAndroid: no local file selected");
-                    return Task::none();
-                };
-                let local_entry = &self.local_pane.entries[idx];
-                if local_entry.is_dir {
-                    tracing::warn!("CopyToAndroid: directory copy not yet supported");
+                let android_dir = self.android_pane.current_path.clone();
+
+                // Build a job for each selected non-directory local file
+                let mut jobs: VecDeque<TransferJob> = self
+                    .local_pane
+                    .selected
+                    .iter()
+                    .filter_map(|&i| self.local_pane.entries.get(i))
+                    .filter(|e| !e.is_dir)
+                    .map(|e| {
+                        self.transfer_id += 1;
+                        TransferJob {
+                            id: self.transfer_id,
+                            adb_path: client.adb_path.clone(),
+                            serial: serial.clone(),
+                            source: e.path.clone(),
+                            destination: android_dir.clone(),
+                            direction: TransferDirection::ToAndroid,
+                            filename: e.name.clone(),
+                        }
+                    })
+                    .collect();
+
+                if jobs.is_empty() {
+                    tracing::warn!("CopyToAndroid: no files selected");
                     return Task::none();
                 }
 
-                self.transfer_id += 1;
-                let android_dir = self.android_pane.current_path.clone();
-                let filename = local_entry.name.clone();
+                let total = jobs.len();
+                let first = jobs.pop_front().unwrap();
+                tracing::info!(total, file = %first.source.display(), "starting copy → android");
 
-                tracing::info!(
-                    file = %local_entry.path.display(),
-                    dest = %android_dir.display(),
-                    "queuing copy → android"
-                );
+                let cancel = Arc::new(AtomicBool::new(false));
+                self.cancel_flag = Some(cancel);
+                self.transfer_queue = jobs;
+                self.transfer_queue_done = 0;
+                self.transfer_queue_total = total;
 
-                let job = TransferJob {
-                    id: self.transfer_id,
-                    adb_path: client.adb_path.clone(),
-                    serial: serial.clone(),
-                    source: local_entry.path.clone(),
-                    destination: android_dir,
-                    direction: TransferDirection::ToAndroid,
-                    filename: filename.clone(),
-                };
-
-                self.active_transfer = Some(job);
+                let filename = first.filename.clone();
+                self.active_transfer = Some(first);
                 self.transfer_status = Some(TransferStatus {
                     filename,
                     percent: 0,
                     speed_display: String::new(),
+                    job_index: 1,
+                    job_total: total,
                 });
 
                 Task::none()
@@ -420,41 +454,52 @@ impl App {
                 let Some(serial) = &self.active_serial else {
                     return Task::none();
                 };
-                let Some(idx) = self.android_pane.selected else {
-                    tracing::warn!("CopyToLocal: no android file selected");
-                    return Task::none();
-                };
-                let android_entry = &self.android_pane.entries[idx];
-                if android_entry.is_dir {
-                    tracing::warn!("CopyToLocal: directory copy not yet supported");
+                let local_dir = self.local_pane.current_path.clone();
+
+                // Build a job for each selected non-directory android file
+                let mut jobs: VecDeque<TransferJob> = self
+                    .android_pane
+                    .selected
+                    .iter()
+                    .filter_map(|&i| self.android_pane.entries.get(i))
+                    .filter(|e| !e.is_dir)
+                    .map(|e| {
+                        self.transfer_id += 1;
+                        TransferJob {
+                            id: self.transfer_id,
+                            adb_path: client.adb_path.clone(),
+                            serial: serial.clone(),
+                            source: e.path.clone(),
+                            destination: local_dir.clone(),
+                            direction: TransferDirection::ToLocal,
+                            filename: e.name.clone(),
+                        }
+                    })
+                    .collect();
+
+                if jobs.is_empty() {
+                    tracing::warn!("CopyToLocal: no files selected");
                     return Task::none();
                 }
 
-                self.transfer_id += 1;
-                let local_dir = self.local_pane.current_path.clone();
-                let filename = android_entry.name.clone();
+                let total = jobs.len();
+                let first = jobs.pop_front().unwrap();
+                tracing::info!(total, file = %first.source.display(), "starting copy ← android");
 
-                tracing::info!(
-                    file = %android_entry.path.display(),
-                    dest = %local_dir.display(),
-                    "queuing copy ← android"
-                );
+                let cancel = Arc::new(AtomicBool::new(false));
+                self.cancel_flag = Some(cancel);
+                self.transfer_queue = jobs;
+                self.transfer_queue_done = 0;
+                self.transfer_queue_total = total;
 
-                let job = TransferJob {
-                    id: self.transfer_id,
-                    adb_path: client.adb_path.clone(),
-                    serial: serial.clone(),
-                    source: android_entry.path.clone(),
-                    destination: local_dir,
-                    direction: TransferDirection::ToLocal,
-                    filename: filename.clone(),
-                };
-
-                self.active_transfer = Some(job);
+                let filename = first.filename.clone();
+                self.active_transfer = Some(first);
                 self.transfer_status = Some(TransferStatus {
                     filename,
                     percent: 0,
                     speed_display: String::new(),
+                    job_index: 1,
+                    job_total: total,
                 });
 
                 Task::none()
@@ -474,8 +519,32 @@ impl App {
                     .as_ref()
                     .map(|j| j.direction.clone());
 
+                self.transfer_queue_done += 1;
+
+                // Pop the next queued job, if any
+                if let Some(next) = self.transfer_queue.pop_front() {
+                    let total = self.transfer_queue_total;
+                    let done = self.transfer_queue_done;
+                    let filename = next.filename.clone();
+
+                    // Fresh cancel flag for the next job
+                    let cancel = Arc::new(AtomicBool::new(false));
+                    self.cancel_flag = Some(cancel);
+                    self.active_transfer = Some(next);
+                    self.transfer_status = Some(TransferStatus {
+                        filename,
+                        percent: 0,
+                        speed_display: String::new(),
+                        job_index: done + 1,
+                        job_total: total,
+                    });
+                    return Task::none();
+                }
+
+                // All done
                 self.active_transfer = None;
                 self.transfer_status = None;
+                self.cancel_flag = None;
 
                 // Refresh the destination pane so the new file is visible
                 match direction {
@@ -497,7 +566,28 @@ impl App {
                 tracing::warn!(error = %msg, "transfer failed");
                 self.active_transfer = None;
                 self.transfer_status = None;
+                self.transfer_queue.clear();
+                self.cancel_flag = None;
                 self.adb_status = AdbStatus::Error(format!("Transfer failed: {msg}"));
+                Task::none()
+            }
+
+            Message::CancelTransfer => {
+                if let Some(flag) = &self.cancel_flag {
+                    flag.store(true, Ordering::Relaxed);
+                    tracing::info!("cancel requested");
+                }
+                // Clear queue so no more jobs start after this one stops
+                self.transfer_queue.clear();
+                Task::none()
+            }
+
+            Message::TransferCancelled => {
+                tracing::info!("transfer cancelled");
+                self.active_transfer = None;
+                self.transfer_status = None;
+                self.transfer_queue.clear();
+                self.cancel_flag = None;
                 Task::none()
             }
         }
@@ -528,7 +618,11 @@ impl App {
         column![
             self.view_toolbar(),
             self.view_panes(),
-            self.status_bar.view(&self.adb_status, self.transfer_status.as_ref()),
+            self.status_bar.view(
+                &self.adb_status,
+                self.transfer_status.as_ref(),
+                self.active_transfer.as_ref().map(|_| Message::CancelTransfer),
+            ),
         ]
         .into()
     }
@@ -537,21 +631,27 @@ impl App {
         let t = self.theme;
         let label = text("rusty-adb").size(14).color(t.accent);
 
-        // Copy buttons — enabled only when there's an active device and a
-        // selected file on the appropriate side.
+        // Copy buttons — enabled when there's an active device and at least one
+        // non-directory file selected on the appropriate side.
         let can_copy_to_android = self.active_serial.is_some()
             && self.active_transfer.is_none()
-            && self.local_pane.selected
-                .and_then(|i| self.local_pane.entries.get(i))
-                .map(|e| !e.is_dir)
-                .unwrap_or(false);
+            && self.local_pane.selected.iter().any(|&i| {
+                self.local_pane
+                    .entries
+                    .get(i)
+                    .map(|e| !e.is_dir)
+                    .unwrap_or(false)
+            });
 
         let can_copy_to_local = self.active_serial.is_some()
             && self.active_transfer.is_none()
-            && self.android_pane.selected
-                .and_then(|i| self.android_pane.entries.get(i))
-                .map(|e| !e.is_dir)
-                .unwrap_or(false);
+            && self.android_pane.selected.iter().any(|&i| {
+                self.android_pane
+                    .entries
+                    .get(i)
+                    .map(|e| !e.is_dir)
+                    .unwrap_or(false)
+            });
 
         let copy_to_android_btn = {
             let lbl = text("Copy →").size(12).color(if can_copy_to_android {

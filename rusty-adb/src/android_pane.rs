@@ -44,8 +44,8 @@ pub struct AndroidPane {
     pub current_path: PathBuf,
     /// Entries returned by the last successful `adb shell ls -la`
     pub entries: Vec<AndroidEntry>,
-    /// Selected entry index
-    pub selected: Option<usize>,
+    /// Selected entry indices (multi-select)
+    pub selected: Vec<usize>,
     /// Storage roots discovered on the connected device
     pub storage_roots: Vec<PathBuf>,
     /// Spinner frame counter (incremented by SpinnerTick messages)
@@ -58,7 +58,7 @@ impl Default for AndroidPane {
             state: AndroidPaneState::NoDevice,
             current_path: PathBuf::from("/sdcard"),
             entries: Vec::new(),
-            selected: None,
+            selected: Vec::new(),
             storage_roots: Vec::new(),
             spinner_frame: 0,
         }
@@ -71,7 +71,7 @@ impl AndroidPane {
         tracing::info!("android pane: device connected, transitioning to Loading");
         self.current_path = PathBuf::from("/sdcard");
         self.entries.clear();
-        self.selected = None;
+        self.selected.clear();
         self.state = AndroidPaneState::Loading;
     }
 
@@ -79,7 +79,7 @@ impl AndroidPane {
     pub fn on_device_disconnected(&mut self) {
         tracing::info!("android pane: device disconnected, transitioning to NoDevice");
         self.entries.clear();
-        self.selected = None;
+        self.selected.clear();
         self.storage_roots.clear();
         self.state = AndroidPaneState::NoDevice;
     }
@@ -92,7 +92,7 @@ impl AndroidPane {
             "android pane: navigating"
         );
         self.current_path = path;
-        self.selected = None;
+        self.selected.clear();
         self.state = AndroidPaneState::Loading;
     }
 
@@ -139,10 +139,15 @@ impl AndroidPane {
         self.state = AndroidPaneState::Error(msg);
     }
 
-    /// Select an entry by index.
+    /// Toggle selection of an entry by index (multi-select).
     pub fn select(&mut self, index: usize) {
-        if index < self.entries.len() {
-            self.selected = Some(index);
+        if index >= self.entries.len() {
+            return;
+        }
+        if let Some(pos) = self.selected.iter().position(|&i| i == index) {
+            self.selected.remove(pos);
+        } else {
+            self.selected.push(index);
         }
     }
 
@@ -365,7 +370,7 @@ impl AndroidPane {
 
         // File/directory entries
         for (i, entry) in self.entries.iter().enumerate() {
-            let is_selected = self.selected == Some(i);
+            let is_selected = self.selected.contains(&i);
             let row_bg: Option<Color> = if is_selected {
                 Some(theme.accent.scale_alpha(0.2))
             } else {
@@ -490,7 +495,7 @@ mod tests {
         pane.begin_navigate(PathBuf::from("/sdcard/DCIM"));
         assert_eq!(pane.state, AndroidPaneState::Loading);
         assert_eq!(pane.current_path, PathBuf::from("/sdcard/DCIM"));
-        assert!(pane.selected.is_none());
+        assert!(pane.selected.is_empty());
     }
 
     #[test]
@@ -532,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn select_updates_index() {
+    fn select_toggles_entry() {
         let mut pane = AndroidPane::default();
         let path = PathBuf::from("/sdcard");
         pane.begin_navigate(path.clone());
@@ -542,15 +547,37 @@ mod tests {
             vec![],
         );
 
+        // First click — selects
         pane.select(1);
-        assert_eq!(pane.selected, Some(1));
+        assert!(pane.selected.contains(&1));
+
+        // Second click — deselects
+        pane.select(1);
+        assert!(!pane.selected.contains(&1));
+    }
+
+    #[test]
+    fn select_multi_adds_both() {
+        let mut pane = AndroidPane::default();
+        let path = PathBuf::from("/sdcard");
+        pane.begin_navigate(path.clone());
+        pane.on_entries_loaded(
+            path,
+            vec![make_entry("DCIM", true), make_entry("Music", true)],
+            vec![],
+        );
+
+        pane.select(0);
+        pane.select(1);
+        assert!(pane.selected.contains(&0));
+        assert!(pane.selected.contains(&1));
     }
 
     #[test]
     fn select_out_of_bounds_ignored() {
         let mut pane = AndroidPane::default();
         pane.select(99);
-        assert!(pane.selected.is_none());
+        assert!(pane.selected.is_empty());
     }
 
     #[test]
