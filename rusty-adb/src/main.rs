@@ -2423,141 +2423,6 @@ impl App {
             .into()
     }
 
-    // ── Details view renderers ─────────────────────────────────────────────────
-
-    /// Render the local pane entries as a Details table (Name, Size, Modified, Type).
-    fn view_local_details(&self) -> Element<Message> {
-        let t = self.theme;
-
-        let header: Element<Message> = container(
-            row![
-                text("Name").size(11).color(t.text_secondary).width(Fill),
-                text("Size").size(11).color(t.text_secondary).width(70),
-                text("Modified").size(11).color(t.text_secondary).width(90),
-                text("Type").size(11).color(t.text_secondary).width(40),
-            ]
-            .spacing(8)
-            .padding([2, 12]),
-        )
-        .width(Fill)
-        .style(move |_t: &Theme| container::Style {
-            background: Some(t.background_secondary.into()),
-            border: Border { color: t.border, width: 1.0, ..Default::default() },
-            ..Default::default()
-        })
-        .into();
-
-        let mut col: iced::widget::Column<Message> = column![header];
-
-        if self.local_pane.entries.is_empty() {
-            col = col.push(
-                container(text("This directory is empty").size(11).color(t.text_secondary))
-                    .padding([8, 12]),
-            );
-        } else {
-            for (i, entry) in self.local_pane.entries.iter().enumerate() {
-                let is_selected = self.local_pane.selected.contains(&i);
-                let bg: Option<iced::Background> =
-                    if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
-                let fg = if entry.is_dir { t.accent } else { t.text };
-                let type_label = if entry.is_dir { "Dir" } else { "File" };
-                let name = entry.name.clone();
-                let size = entry.size_display();
-                let modified = entry.modified_display();
-                col = col.push(
-                    container(
-                        row![
-                            text(name).size(11).color(fg).width(Fill),
-                            text(size).size(11).color(t.text_secondary).width(70),
-                            text(modified).size(11).color(t.text_secondary).width(90),
-                            text(type_label).size(11).color(t.text_secondary).width(40),
-                        ]
-                        .spacing(8)
-                        .padding([3, 12]),
-                    )
-                    .width(Fill)
-                    .style(move |_t: &Theme| container::Style {
-                        background: bg,
-                        ..Default::default()
-                    }),
-                );
-            }
-        }
-
-        scrollable(col.width(Fill)).height(Fill).into()
-    }
-
-    /// Render the android pane entries as a Details table (Name, Size, Modified, Type).
-    fn view_android_details(&self) -> Element<Message> {
-        let t = self.theme;
-
-        let header: Element<Message> = container(
-            row![
-                text("Name").size(11).color(t.text_secondary).width(Fill),
-                text("Size").size(11).color(t.text_secondary).width(70),
-                text("Modified").size(11).color(t.text_secondary).width(90),
-                text("Type").size(11).color(t.text_secondary).width(40),
-            ]
-            .spacing(8)
-            .padding([2, 12]),
-        )
-        .width(Fill)
-        .style(move |_t: &Theme| container::Style {
-            background: Some(t.background_secondary.into()),
-            border: Border { color: t.border, width: 1.0, ..Default::default() },
-            ..Default::default()
-        })
-        .into();
-
-        let mut col: iced::widget::Column<Message> = column![header];
-        let mut visible = 0usize;
-
-        for (i, entry) in self.android_pane.entries.iter().enumerate() {
-            if !self.android_pane.show_hidden && entry.name.starts_with('.') {
-                continue;
-            }
-            visible += 1;
-            let is_selected = self.android_pane.selected.contains(&i);
-            let bg: Option<iced::Background> =
-                if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
-            let fg = if entry.is_dir { t.accent } else { t.text };
-            let type_label =
-                if entry.is_symlink { "Link" } else if entry.is_dir { "Dir" } else { "File" };
-            let name = entry.name.clone();
-            let size = if entry.is_dir { "--".to_string() } else { local_pane::format_size(entry.size) };
-            let modified = entry.modified.clone();
-            col = col.push(
-                container(
-                    row![
-                        text(name).size(11).color(fg).width(Fill),
-                        text(size).size(11).color(t.text_secondary).width(70),
-                        text(modified).size(11).color(t.text_secondary).width(90),
-                        text(type_label).size(11).color(t.text_secondary).width(40),
-                    ]
-                    .spacing(8)
-                    .padding([3, 12]),
-                )
-                .width(Fill)
-                .style(move |_t: &Theme| container::Style {
-                    background: bg,
-                    ..Default::default()
-                }),
-            );
-        }
-
-        if visible == 0 {
-            let msg = if self.android_pane.entries.is_empty() {
-                "This directory is empty"
-            } else {
-                "All entries are hidden  (.hidden toggle to show)"
-            };
-            col = col
-                .push(container(text(msg).size(11).color(t.text_secondary)).padding([8, 12]));
-        }
-
-        scrollable(col.width(Fill)).height(Fill).into()
-    }
-
     // ── Grid / Icon view renderers ─────────────────────────────────────────────
 
     /// Render local entries as 4-column compact tiles (Grid view).
@@ -2586,22 +2451,30 @@ impl App {
         const TILE_H: u16 = 52;
         let t = self.theme;
 
-        // Collect visible entries as (original_index, name, is_dir, is_selected)
-        let visible: Vec<(usize, String, bool, bool)> = if is_android {
+        // (original_index, name, is_dir, is_selected, is_hidden)
+        let visible: Vec<(usize, String, bool, bool, bool)> = if is_android {
             self.android_pane
                 .entries
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i)))
+                .map(|(i, e)| {
+                    (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i), e.name.starts_with('.'))
+                })
                 .collect()
         } else {
             self.local_pane
                 .entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i)))
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i), e.is_hidden))
                 .collect()
+        };
+
+        let current_path = if is_android {
+            self.android_pane.current_path.clone()
+        } else {
+            self.local_pane.current_path.clone()
         };
 
         let mut col: iced::widget::Column<Message> = column![];
@@ -2614,40 +2487,58 @@ impl App {
         } else {
             for chunk in visible.chunks(COLS) {
                 let mut tile_row: Vec<Element<Message>> = Vec::new();
-                for &(_, ref name, is_dir, is_selected) in chunk {
+                for &(orig_idx, ref name, is_dir, is_selected, is_hidden) in chunk {
                     let bg: Option<iced::Background> =
                         if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
-                    let border_color =
-                        if is_selected { t.accent } else { t.border };
-                    let icon = if is_dir { "[D]" } else { "[F]" };
-                    let fg = if is_dir { t.accent } else { t.text };
+                    let border_color = if is_selected { t.accent } else { t.border };
+                    let icon = if is_dir { "[/]" } else { "[-]" };
+                    let icon_fg = if is_dir { t.accent } else { t.text_secondary };
+                    let name_fg = if is_hidden { t.text_secondary } else { t.text };
                     let short_name = if name.len() > 14 {
                         format!("{}...", &name[..11])
                     } else {
                         name.clone()
                     };
+                    let tile = container(
+                        column![
+                            text(icon).size(14).color(icon_fg),
+                            text(short_name).size(10).color(name_fg),
+                        ]
+                        .spacing(2)
+                        .align_x(iced::Alignment::Center),
+                    )
+                    .width(TILE_W)
+                    .height(TILE_H)
+                    .padding(6)
+                    .style(move |_t: &Theme| container::Style {
+                        background: bg,
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    });
+                    let msg = if is_dir {
+                        if is_android {
+                            Message::AndroidNavigateTo(current_path.join(name.as_str()))
+                        } else {
+                            Message::LocalNavigateTo(current_path.join(name.as_str()))
+                        }
+                    } else if is_android {
+                        Message::AndroidSelectEntry(orig_idx)
+                    } else {
+                        Message::LocalSelectEntry(orig_idx)
+                    };
                     tile_row.push(
-                        container(
-                            column![
-                                text(icon).size(14).color(fg),
-                                text(short_name).size(10).color(t.text),
-                            ]
-                            .spacing(2)
-                            .align_x(iced::Alignment::Center),
-                        )
-                        .width(TILE_W)
-                        .height(TILE_H)
-                        .padding(6)
-                        .style(move |_t: &Theme| container::Style {
-                            background: bg,
-                            border: Border {
-                                color: border_color,
-                                width: 1.0,
-                                radius: 3.0.into(),
-                            },
-                            ..Default::default()
-                        })
-                        .into(),
+                        button(tile)
+                            .on_press(msg)
+                            .padding(0)
+                            .style(|_t, _s| button::Style {
+                                background: None,
+                                ..Default::default()
+                            })
+                            .into(),
                     );
                 }
                 // Pad incomplete last row so alignment is consistent
@@ -2671,21 +2562,30 @@ impl App {
         const TILE_H: u16 = 90;
         let t = self.theme;
 
-        let visible: Vec<(usize, String, bool, bool)> = if is_android {
+        // (original_index, name, is_dir, is_selected, is_hidden)
+        let visible: Vec<(usize, String, bool, bool, bool)> = if is_android {
             self.android_pane
                 .entries
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i)))
+                .map(|(i, e)| {
+                    (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i), e.name.starts_with('.'))
+                })
                 .collect()
         } else {
             self.local_pane
                 .entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i)))
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i), e.is_hidden))
                 .collect()
+        };
+
+        let current_path = if is_android {
+            self.android_pane.current_path.clone()
+        } else {
+            self.local_pane.current_path.clone()
         };
 
         let mut col: iced::widget::Column<Message> = column![];
@@ -2698,45 +2598,62 @@ impl App {
         } else {
             for chunk in visible.chunks(COLS) {
                 let mut tile_row: Vec<Element<Message>> = Vec::new();
-                for &(_, ref name, is_dir, is_selected) in chunk {
+                for &(orig_idx, ref name, is_dir, is_selected, is_hidden) in chunk {
                     let bg: Option<iced::Background> =
                         if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
                     let border_color = if is_selected { t.accent } else { t.border };
-                    // Big ASCII art icon
                     let icon_art = if is_dir {
-                        "+---+\n| D |\n+---+"
+                        "+---+\n| / |\n+---+"
                     } else {
-                        "+---+\n| F |\n+---+"
+                        "+---+\n| - |\n+---+"
                     };
-                    let fg = if is_dir { t.accent } else { t.text };
-                    // Wrap name if long
+                    let icon_fg = if is_dir { t.accent } else { t.text_secondary };
+                    let name_fg = if is_hidden { t.text_secondary } else { t.text };
                     let display_name = if name.len() > 16 {
                         format!("{}...", &name[..13])
                     } else {
                         name.clone()
                     };
+                    let tile = container(
+                        column![
+                            text(icon_art).size(11).color(icon_fg),
+                            text(display_name).size(10).color(name_fg),
+                        ]
+                        .spacing(4)
+                        .align_x(iced::Alignment::Center),
+                    )
+                    .width(TILE_W)
+                    .height(TILE_H)
+                    .padding(8)
+                    .style(move |_t: &Theme| container::Style {
+                        background: bg,
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    });
+                    let msg = if is_dir {
+                        if is_android {
+                            Message::AndroidNavigateTo(current_path.join(name.as_str()))
+                        } else {
+                            Message::LocalNavigateTo(current_path.join(name.as_str()))
+                        }
+                    } else if is_android {
+                        Message::AndroidSelectEntry(orig_idx)
+                    } else {
+                        Message::LocalSelectEntry(orig_idx)
+                    };
                     tile_row.push(
-                        container(
-                            column![
-                                text(icon_art).size(11).color(fg),
-                                text(display_name).size(10).color(t.text),
-                            ]
-                            .spacing(4)
-                            .align_x(iced::Alignment::Center),
-                        )
-                        .width(TILE_W)
-                        .height(TILE_H)
-                        .padding(8)
-                        .style(move |_t: &Theme| container::Style {
-                            background: bg,
-                            border: Border {
-                                color: border_color,
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        })
-                        .into(),
+                        button(tile)
+                            .on_press(msg)
+                            .padding(0)
+                            .style(|_t, _s| button::Style {
+                                background: None,
+                                ..Default::default()
+                            })
+                            .into(),
                     );
                 }
                 while tile_row.len() < COLS {
@@ -2783,17 +2700,21 @@ impl App {
             no_transfer,
         );
 
-        // The local_pane.view() provides the List view (path header + entry list)
-        // For other modes we supply our own renderers
         let local_content: Element<Message> = match self.local_view_mode {
-            ViewMode::List => self.local_pane.view(
+            // Name-only rows with type icons — compact, maximum density
+            ViewMode::List => self.local_pane.view_list(
+                self.theme,
+                Message::LocalNavigateTo,
+                Message::LocalSelectEntry,
+            ),
+            // Full column table with sortable Name/Size/Modified headers
+            ViewMode::Details => self.local_pane.view(
                 self.theme,
                 Message::LocalNavigateTo,
                 Message::LocalSelectEntry,
                 Message::LocalToggleHidden,
                 Message::LocalSortBy,
             ),
-            ViewMode::Details => self.view_local_details(),
             ViewMode::Grid => self.view_local_grid(),
             ViewMode::Icon => self.view_local_icon(),
         };
@@ -2816,17 +2737,21 @@ impl App {
             no_transfer,
         );
 
-        // android_pane.view() provides the full pane (header + list + states)
-        // For other modes, we show just the content area
         let android_content: Element<Message> = match self.android_view_mode {
-            ViewMode::List => self.android_pane.view(
+            // Name-only rows with type icons
+            ViewMode::List => self.android_pane.view_list(
+                self.theme,
+                Message::AndroidNavigateTo,
+                Message::AndroidSelectEntry,
+            ),
+            // Full column view with device header, rename support, size/date info
+            ViewMode::Details => self.android_pane.view(
                 self.theme,
                 Message::AndroidNavigateTo,
                 Message::AndroidSelectEntry,
                 Message::AndroidRenameInput,
                 Message::AndroidRenameCommit,
             ),
-            ViewMode::Details => self.view_android_details(),
             ViewMode::Grid => self.view_android_grid(),
             ViewMode::Icon => self.view_android_icon(),
         };

@@ -176,7 +176,9 @@ impl LocalPane {
 
     // ─── View ─────────────────────────────────────────────────────────────
 
-    /// Render the local pane (header + breadcrumb + scrollable file list).
+    /// Render the local pane with full columns (header + breadcrumb + Name/Size/Modified table).
+    ///
+    /// Used for the **Details** view mode — sortable columns, size and date visible.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         theme: ThemeColors,
@@ -186,13 +188,95 @@ impl LocalPane {
         on_sort: impl Fn(SortField) -> Message + 'a,
     ) -> Element<'a, Message> {
         let header = self.view_header(theme, on_toggle_hidden);
-        // breadcrumb is a free function — its lifetime is independent of &'a self
         let breadcrumb = view_breadcrumb(&self.current_path, theme, &on_navigate);
         let body = self.view_body(theme, on_navigate, on_select, on_sort);
         column![header, breadcrumb, body]
             .width(Fill)
             .height(Fill)
             .into()
+    }
+
+    /// Render the local pane in compact **List** mode: breadcrumb + name-only rows.
+    ///
+    /// No size or date columns — maximum entry density.
+    pub fn view_list<'a, Message: 'a + Clone>(
+        &'a self,
+        theme: ThemeColors,
+        on_navigate: impl Fn(PathBuf) -> Message + 'a,
+        on_select: impl Fn(usize) -> Message + 'a,
+    ) -> Element<'a, Message> {
+        let breadcrumb = view_breadcrumb(&self.current_path, theme, &on_navigate);
+
+        let mut rows: Vec<Element<Message>> = Vec::new();
+
+        // ".." up-navigation entry
+        if let Some(parent) = self.current_path.parent() {
+            let parent = parent.to_path_buf();
+            rows.push(
+                button(
+                    row![text("..").size(12).color(theme.text)]
+                        .spacing(6)
+                        .padding([1, 4]),
+                )
+                .width(Fill)
+                .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                .on_press(on_navigate(parent))
+                .into(),
+            );
+        }
+
+        if self.entries.is_empty() {
+            rows.push(
+                container(text("This folder is empty").size(11).color(theme.text_secondary))
+                    .padding([8, 12])
+                    .into(),
+            );
+        }
+
+        for (i, entry) in self.entries.iter().enumerate() {
+            let is_selected = self.selected.contains(&i);
+            let bg: Option<iced::Background> =
+                if is_selected { Some(theme.accent.scale_alpha(0.2).into()) } else { None };
+            let fg = if entry.is_hidden { theme.text_secondary } else { theme.text };
+            let icon_fg = if entry.is_dir { theme.accent } else { theme.text_secondary };
+            let icon = if entry.is_dir { "[/]" } else { "[-]" };
+            let name = entry.name.clone();
+            let entry_path = entry.path.clone();
+            let entry_is_dir = entry.is_dir;
+            let on_nav = on_navigate(entry_path);
+            let on_sel = on_select(i);
+            rows.push(
+                button(
+                    row![
+                        text(icon).size(11).color(icon_fg).width(28),
+                        text(name).size(12).color(fg).width(Fill),
+                    ]
+                    .spacing(4)
+                    .padding([1, 4]),
+                )
+                .width(Fill)
+                .style(move |_t, _s| button::Style {
+                    background: bg,
+                    ..Default::default()
+                })
+                .on_press(if entry_is_dir { on_nav } else { on_sel })
+                .into(),
+            );
+        }
+
+        let body = container(
+            scrollable(column(rows).width(Fill).padding([0, 4]))
+                .width(Fill)
+                .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(move |_t| container::Style {
+            background: Some(theme.background.into()),
+            ..Default::default()
+        });
+
+        column![breadcrumb, body].width(Fill).height(Fill).into()
     }
 
     fn view_header<'a, Message: 'a + Clone>(
@@ -374,7 +458,8 @@ impl LocalPane {
                 None
             };
 
-            let icon = if entry.is_dir { "📁" } else { "📄" };
+            let icon = if entry.is_dir { "[/]" } else { "[-]" };
+            let icon_fg = if entry.is_dir { theme.accent } else { theme.text_secondary };
             let name_color = if entry.is_hidden {
                 theme.text_secondary
             } else {
@@ -385,7 +470,7 @@ impl LocalPane {
             let entry_is_dir = entry.is_dir;
 
             let row_content = row![
-                text(icon).size(12),
+                text(icon).size(11).color(icon_fg).width(28),
                 text(entry.name.clone())
                     .size(12)
                     .color(name_color)

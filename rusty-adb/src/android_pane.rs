@@ -198,6 +198,9 @@ impl AndroidPane {
     ///
     /// `on_rename_input` is called on every keystroke while an inline rename is active.
     /// `on_rename_commit` fires when the user presses Enter to commit the rename.
+    /// Full android pane view: device header + scrollable entry list with rename support.
+    ///
+    /// Used for the **Details** view mode.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         theme: ThemeColors,
@@ -214,6 +217,107 @@ impl AndroidPane {
             on_rename_input,
             on_rename_commit,
         );
+        column![header, body].width(Fill).height(Fill).into()
+    }
+
+    /// Compact **List** mode view: device header + name-only rows, no size/date columns.
+    pub fn view_list<'a, Message: 'a + Clone>(
+        &'a self,
+        theme: ThemeColors,
+        on_navigate: impl Fn(PathBuf) -> Message + 'a,
+        on_select: impl Fn(usize) -> Message + 'a,
+    ) -> Element<'a, Message> {
+        let header = self.view_header(theme);
+
+        // When not browsing (no device, loading, error) fall back to the header only
+        if self.state != AndroidPaneState::Browsing {
+            return column![
+                header,
+                container(
+                    text(match &self.state {
+                        AndroidPaneState::NoDevice => "No Android device connected".to_string(),
+                        AndroidPaneState::Loading => "Loading...".to_string(),
+                        AndroidPaneState::Error(e) => format!("Error: {e}"),
+                        AndroidPaneState::Browsing => unreachable!(),
+                    })
+                    .size(12)
+                    .color(theme.text_secondary)
+                )
+                .padding([12, 16])
+            ]
+            .width(Fill)
+            .height(Fill)
+            .into();
+        }
+
+        let mut rows: Vec<Element<Message>> = Vec::new();
+
+        let visible_count = if self.show_hidden {
+            self.entries.len()
+        } else {
+            self.entries.iter().filter(|e| !e.name.starts_with('.')).count()
+        };
+
+        if visible_count == 0 {
+            let msg = if self.entries.is_empty() {
+                "This directory is empty"
+            } else {
+                "All entries are hidden  (.hidden toggle to show)"
+            };
+            rows.push(
+                container(text(msg).size(11).color(theme.text_secondary))
+                    .padding([8, 12])
+                    .into(),
+            );
+        }
+
+        for (i, entry) in self.entries.iter().enumerate() {
+            if !self.show_hidden && entry.name.starts_with('.') {
+                continue;
+            }
+            let is_selected = self.selected.contains(&i);
+            let bg: Option<iced::Background> =
+                if is_selected { Some(theme.accent.scale_alpha(0.2).into()) } else { None };
+            let is_hidden = entry.name.starts_with('.');
+            let fg = if is_hidden { theme.text_secondary } else if entry.is_dir { theme.accent } else { theme.text };
+            let icon_fg = if entry.is_dir { theme.accent } else { theme.text_secondary };
+            let icon = if entry.is_symlink { "[@]" } else if entry.is_dir { "[/]" } else { "[-]" };
+            let name = entry.name.clone();
+            let entry_path = self.current_path.join(&name);
+            let entry_is_dir = entry.is_dir;
+            let on_nav = on_navigate(entry_path);
+            let on_sel = on_select(i);
+            rows.push(
+                button(
+                    row![
+                        text(icon).size(11).color(icon_fg).width(28),
+                        text(name).size(12).color(fg).width(Fill),
+                    ]
+                    .spacing(4)
+                    .padding([1, 4]),
+                )
+                .width(Fill)
+                .style(move |_t, _s| button::Style {
+                    background: bg,
+                    ..Default::default()
+                })
+                .on_press(if entry_is_dir { on_nav } else { on_sel })
+                .into(),
+            );
+        }
+
+        let body = container(
+            scrollable(column(rows).width(Fill).padding([0, 4]))
+                .width(Fill)
+                .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(move |_t| container::Style {
+            background: Some(theme.background.into()),
+            ..Default::default()
+        });
+
         column![header, body].width(Fill).height(Fill).into()
     }
 
@@ -408,14 +512,14 @@ impl AndroidPane {
                     .get(*idx)
                     .map(|e| {
                         if e.is_symlink {
-                            "🔗"
+                            "[@]"
                         } else if e.is_dir {
-                            "📁"
+                            "[/]"
                         } else {
-                            "📄"
+                            "[-]"
                         }
                     })
-                    .unwrap_or("📄");
+                    .unwrap_or("[-]");
                 let input = text_input("New name…", val.as_str())
                     .id(text_input::Id::new(RENAME_INPUT_ID))
                     .on_input(on_rename_input)
@@ -443,7 +547,7 @@ impl AndroidPane {
                 let parent_path = parent.to_path_buf();
                 let up_btn = button(
                     row![
-                        text("📁").size(12),
+                        text("[/]").size(11).color(theme.accent).width(28),
                         text("..").size(12).color(theme.text),
                         iced::widget::Space::with_width(Fill),
                         text("").size(12).width(80),
@@ -528,11 +632,16 @@ impl AndroidPane {
             };
 
             let icon = if entry.is_symlink {
-                "🔗"
+                "[@]"
             } else if entry.is_dir {
-                "📁"
+                "[/]"
             } else {
-                "📄"
+                "[-]"
+            };
+            let icon_fg = if entry.is_dir || entry.is_symlink {
+                theme.accent
+            } else {
+                theme.text_secondary
             };
 
             let name_color = if entry.is_hidden {
@@ -555,7 +664,7 @@ impl AndroidPane {
                 rename_row.take().unwrap().1
             } else {
                 let row_content = row![
-                    text(icon).size(12),
+                    text(icon).size(11).color(icon_fg).width(28),
                     text(entry.name.clone())
                         .size(12)
                         .color(name_color)
