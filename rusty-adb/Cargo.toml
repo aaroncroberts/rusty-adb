@@ -13,7 +13,7 @@ path = "src/main.rs"
 rusty-logging = { path = "../rusty-logging" }
 
 # UI framework
-iced = { version = "0.13", features = ["tokio"] }
+iced = { version = "0.13", features = ["tokio", "image"] }
 
 # Async runtime
 tokio = { workspace = true }

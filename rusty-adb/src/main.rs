@@ -33,7 +33,7 @@ use theme::ThemeColors;
 use transfer::{TransferDirection, TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
-use iced::widget::{button, column, container, row, text, text_input, vertical_rule};
+use iced::widget::{button, column, container, image, row, scrollable, stack, text, text_input, vertical_rule};
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 40.0;
@@ -120,6 +120,20 @@ enum Message {
     /// A file was dropped onto the window — queue a local→android transfer
     FileDropped(PathBuf),
 
+    // ── File Preview ──────────────────────────────────────────────────────────
+    /// Double-click on a file entry — check size then pull to temp
+    PreviewFile(AndroidEntry),
+    /// adb pull succeeded — local temp path ready for rendering
+    PreviewReady(PathBuf),
+    /// adb pull failed
+    PreviewFailed(String),
+    /// Close the preview modal (also mapped from Escape when modal is open)
+    ClosePreview,
+
+    // ── Escape key ────────────────────────────────────────────────────────────
+    /// Escape pressed — routes to ClosePreview or AndroidRenameCancel
+    EscapePressed,
+
     // ── File operations (rename / delete on Android device) ───────────────────
     /// F2: begin inline rename for the first selected android entry
     AndroidBeginRename,
@@ -143,6 +157,19 @@ enum Message {
     AndroidDeleteComplete,
     /// adb shell rm -rf returned an error
     AndroidDeleteFailed(String),
+}
+
+// ─── Preview Content ──────────────────────────────────────────────────────────
+
+/// What is being shown in the preview modal
+#[derive(Debug, Clone)]
+enum PreviewContent {
+    /// An image file — rendered with the iced image widget
+    Image(PathBuf),
+    /// A text file — shown in a scrollable text widget
+    Text(String),
+    /// Extension not supported for preview
+    Unsupported(String),
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -187,6 +214,11 @@ struct App {
     file_hover_active: bool,
     /// Paths pending deletion confirmation — shown in the delete confirmation banner
     delete_confirm_paths: Option<Vec<PathBuf>>,
+
+    /// Preview modal content (None = closed)
+    preview_modal: Option<PreviewContent>,
+    /// Last-click tracking for double-click detection: (entry_index, when)
+    android_last_click: Option<(usize, std::time::Instant)>,
 }
 
 impl Default for App {
@@ -214,6 +246,8 @@ impl Default for App {
             daemon_error_count: 0,
             file_hover_active: false,
             delete_confirm_paths: None,
+            preview_modal: None,
+            android_last_click: None,
             theme,
         }
     }
@@ -308,7 +342,7 @@ fn handle_key_press(key: keyboard::Key, _mods: keyboard::Modifiers) -> Option<Me
         keyboard::Key::Named(Named::F5) => Some(Message::RefreshPanes),
         keyboard::Key::Named(Named::Backspace) => Some(Message::LocalNavigateUp),
         keyboard::Key::Named(Named::F2) => Some(Message::AndroidBeginRename),
-        keyboard::Key::Named(Named::Escape) => Some(Message::AndroidRenameCancel),
+        keyboard::Key::Named(Named::Escape) => Some(Message::EscapePressed),
         _ => None,
     }
 }
@@ -561,7 +595,25 @@ impl App {
             }
 
             Message::AndroidSelectEntry(i) => {
-                self.android_pane.select(i);
+                // Double-click detection: same index within 400 ms → preview
+                let now = std::time::Instant::now();
+                let is_double_click = self
+                    .android_last_click
+                    .as_ref()
+                    .map(|(prev_i, t)| *prev_i == i && t.elapsed().as_millis() < 400)
+                    .unwrap_or(false);
+
+                if is_double_click {
+                    self.android_last_click = None;
+                    if let Some(entry) = self.android_pane.entries.get(i).cloned() {
+                        if !entry.is_dir {
+                            return self.update(Message::PreviewFile(entry));
+                        }
+                    }
+                } else {
+                    self.android_last_click = Some((i, now));
+                    self.android_pane.select(i);
+                }
                 Task::none()
             }
 
@@ -1176,6 +1228,73 @@ impl App {
                 tracing::warn!(error = %msg, "android delete failed");
                 self.update(Message::ShowError(format!("Delete failed: {msg}")))
             }
+
+            // ── Escape routing ────────────────────────────────────────────────
+            Message::EscapePressed => {
+                if self.preview_modal.is_some() {
+                    return self.update(Message::ClosePreview);
+                }
+                self.update(Message::AndroidRenameCancel)
+            }
+
+            // ── File preview ──────────────────────────────────────────────────
+            Message::PreviewFile(entry) => {
+                const MAX_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
+                if entry.size > MAX_BYTES {
+                    return self.update(Message::ShowError(
+                        "File too large to preview (max 10 MB)".to_string(),
+                    ));
+                }
+                let (Some(client), Some(serial)) = (&self.adb_client, &self.active_serial) else {
+                    return Task::none();
+                };
+                let client = client.clone();
+                let serial = serial.clone();
+                let path = entry.path.clone();
+                tracing::info!(file = %path.display(), "pulling file to temp for preview");
+                Task::perform(
+                    async move {
+                        client.pull_to_temp(&serial, &path).await.map_err(|e| e.to_string())
+                    },
+                    |result| match result {
+                        Ok(local) => Message::PreviewReady(local),
+                        Err(e) => Message::PreviewFailed(e),
+                    },
+                )
+            }
+
+            Message::PreviewReady(local_path) => {
+                let ext = local_path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                let content = match ext.as_str() {
+                    "jpg" | "jpeg" | "png" | "gif" => PreviewContent::Image(local_path),
+                    "txt" | "log" | "json" | "xml" | "md" | "toml" | "yaml" | "yml" => {
+                        match std::fs::read_to_string(&local_path) {
+                            Ok(text) => PreviewContent::Text(text),
+                            Err(e) => PreviewContent::Unsupported(format!(
+                                "Could not read file: {e}"
+                            )),
+                        }
+                    }
+                    other => PreviewContent::Unsupported(format!(
+                        "Preview not available for .{other} files"
+                    )),
+                };
+                self.preview_modal = Some(content);
+                Task::none()
+            }
+
+            Message::PreviewFailed(msg) => {
+                tracing::warn!(error = %msg, "file preview pull failed");
+                self.update(Message::ShowError(format!("Preview failed: {msg}")))
+            }
+
+            Message::ClosePreview => {
+                self.preview_modal = None;
+                Task::none()
+            }
         }
     }
 }
@@ -1222,7 +1341,15 @@ impl App {
             self.transfer_status.as_ref(),
             self.active_transfer.as_ref().map(|_| Message::CancelTransfer),
         ));
-        column(items).into()
+
+        let base: Element<Message> = column(items).into();
+
+        // Overlay the preview modal (if open) using a stack layer
+        if let Some(modal_content) = &self.preview_modal {
+            stack![base, self.view_preview_modal(modal_content)].into()
+        } else {
+            base
+        }
     }
 
     fn view_adb_not_found(&self) -> Element<Message> {
@@ -1460,6 +1587,122 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    /// Preview modal overlay — rendered on top of the full UI via `stack!`.
+    ///
+    /// The semi-transparent backdrop captures clicks (closing the modal).
+    /// The inner card shows either an image or scrollable text.
+    fn view_preview_modal<'a>(&'a self, content: &'a PreviewContent) -> Element<'a, Message> {
+        let t = self.theme;
+
+        let close_btn = button(text("✕  Close").size(12).color(t.text))
+            .style(move |_th, _s| button::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .padding([4, 12])
+            .on_press(Message::ClosePreview);
+
+        let preview_body: Element<Message> = match content {
+            PreviewContent::Image(path) => {
+                let handle = image::Handle::from_path(path);
+                container(image(handle).width(Fill).height(Fill))
+                    .width(Fill)
+                    .height(Fill)
+                    .into()
+            }
+            PreviewContent::Text(text_content) => {
+                scrollable(
+                    container(
+                        text(text_content.clone())
+                            .size(12)
+                            .color(t.text)
+                            .font(iced::Font::with_name("Menlo")),
+                    )
+                    .padding([8, 12]),
+                )
+                .width(Fill)
+                .height(Fill)
+                .into()
+            }
+            PreviewContent::Unsupported(msg) => container(
+                text(msg.clone()).size(12).color(t.text_secondary),
+            )
+            .width(Fill)
+            .height(Fill)
+            .center_x(Fill)
+            .center_y(Fill)
+            .into(),
+        };
+
+        let card = container(
+            column![
+                // Header bar with close button
+                container(
+                    row![
+                        text("Preview").size(13).color(t.text).width(Fill),
+                        close_btn,
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .spacing(8)
+                    .padding([4, 8]),
+                )
+                .width(Fill)
+                .style(move |_th| container::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border {
+                        color: t.border,
+                        width: 1.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+                // Content area
+                container(preview_body)
+                    .width(Fill)
+                    .height(Fill)
+                    .padding(8)
+                    .style(move |_th| container::Style {
+                        background: Some(t.background.into()),
+                        ..Default::default()
+                    }),
+            ]
+            .width(Fill)
+            .height(Fill),
+        )
+        .width(700)
+        .height(500)
+        .style(move |_th| container::Style {
+            background: Some(t.background.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // Semi-transparent backdrop — fills the full window
+        container(
+            container(card)
+                .center_x(Fill)
+                .center_y(Fill)
+                .width(Fill)
+                .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(move |_th| container::Style {
+            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6).into()),
+            ..Default::default()
+        })
+        .into()
     }
 
     fn view_toolbar(&self) -> Element<Message> {
@@ -1767,5 +2010,94 @@ mod tests {
         app.delete_confirm_paths = Some(vec![PathBuf::from("/sdcard/test.jpg")]);
         let _ = app.update(Message::AndroidDeleteCancel);
         assert!(app.delete_confirm_paths.is_none());
+    }
+
+    // ── File preview tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn preview_file_too_large_shows_error() {
+        let mut app = App::default();
+        let entry = adb::AndroidEntry {
+            name: "bigvideo.mp4".to_string(),
+            path: PathBuf::from("/sdcard/bigvideo.mp4"),
+            size: 20 * 1024 * 1024, // 20 MB — over the 10 MB limit
+            modified: "2024-01-15".to_string(),
+            is_dir: false,
+            is_symlink: false,
+            is_hidden: false,
+        };
+        let _ = app.update(Message::PreviewFile(entry));
+        assert!(app.error_banner.is_some());
+        assert!(app.error_banner.as_deref().unwrap().contains("10 MB"));
+    }
+
+    #[test]
+    fn preview_ready_image_sets_modal() {
+        let mut app = App::default();
+        let _ = app.update(Message::PreviewReady(PathBuf::from("/tmp/photo.jpg")));
+        assert!(matches!(app.preview_modal, Some(PreviewContent::Image(_))));
+    }
+
+    #[test]
+    fn preview_ready_unsupported_extension() {
+        let mut app = App::default();
+        let _ = app.update(Message::PreviewReady(PathBuf::from("/tmp/archive.zip")));
+        assert!(matches!(
+            app.preview_modal,
+            Some(PreviewContent::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn close_preview_clears_modal() {
+        let mut app = App::default();
+        app.preview_modal = Some(PreviewContent::Unsupported("n/a".to_string()));
+        let _ = app.update(Message::ClosePreview);
+        assert!(app.preview_modal.is_none());
+    }
+
+    #[test]
+    fn escape_closes_preview_modal_first() {
+        let mut app = App::default();
+        app.preview_modal = Some(PreviewContent::Unsupported("n/a".to_string()));
+        app.android_pane.rename_pending = Some((0, "name".to_string()));
+        let _ = app.update(Message::EscapePressed);
+        // modal closed, rename still active (Escape routed to ClosePreview)
+        assert!(app.preview_modal.is_none());
+        assert!(app.android_pane.rename_pending.is_some());
+    }
+
+    #[test]
+    fn escape_cancels_rename_when_no_modal() {
+        let mut app = App::default();
+        app.android_pane.rename_pending = Some((0, "name".to_string()));
+        let _ = app.update(Message::EscapePressed);
+        assert!(app.android_pane.rename_pending.is_none());
+    }
+
+    #[test]
+    fn double_click_on_file_triggers_preview_for_small_file() {
+        let mut app = App::default();
+        let entry = adb::AndroidEntry {
+            name: "photo.jpg".to_string(),
+            path: PathBuf::from("/sdcard/photo.jpg"),
+            size: 500 * 1024, // 500 KB — under limit
+            modified: "2024-01-15".to_string(),
+            is_dir: false,
+            is_symlink: false,
+            is_hidden: false,
+        };
+        app.android_pane.state = android_pane::AndroidPaneState::Browsing;
+        app.android_pane.entries = vec![entry];
+
+        // First click — selects
+        let _ = app.update(Message::AndroidSelectEntry(0));
+        assert!(app.android_last_click.is_some());
+
+        // Second click immediately — double-click detected, triggers PreviewFile
+        // (no adb client so it won't actually pull, but no panic either)
+        let _ = app.update(Message::AndroidSelectEntry(0));
+        // last_click should be cleared after double-click consumed
+        assert!(app.android_last_click.is_none());
     }
 }

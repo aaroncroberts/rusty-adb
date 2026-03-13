@@ -411,6 +411,45 @@ impl AdbClient {
         Ok(())
     }
 
+    /// Pull a single file from the device to the OS temp directory.
+    ///
+    /// Returns the local path of the pulled file.  The temp directory
+    /// (`<tmp>/rusty-adb-preview/`) is created on first use.
+    pub async fn pull_to_temp(&self, serial: &str, remote: &std::path::Path) -> Result<PathBuf> {
+        let filename = remote
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("remote path has no filename"))?
+            .to_string_lossy()
+            .into_owned();
+
+        let tmp_dir = std::env::temp_dir().join("rusty-adb-preview");
+        tokio::fs::create_dir_all(&tmp_dir)
+            .await
+            .context("failed to create preview temp dir")?;
+
+        let local_path = tmp_dir.join(&filename);
+        let remote_str = remote.to_string_lossy();
+        let local_str = local_path.to_string_lossy().into_owned();
+
+        let output = Command::new(&self.adb_path)
+            .args(["-s", serial, "pull", &*remote_str, &*local_str])
+            .output()
+            .await
+            .context("failed to run adb pull")?;
+
+        if !output.status.success() {
+            let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim();
+            anyhow::bail!("adb pull failed: {}", stderr);
+        }
+
+        tracing::info!(
+            remote = %remote_str,
+            local = %local_path.display(),
+            "pulled file to temp for preview"
+        );
+        Ok(local_path)
+    }
+
     /// Discover Android storage roots: always includes `/sdcard`; also
     /// returns any SD-card entries from `/storage/` that are not `emulated`
     /// or `self`.
