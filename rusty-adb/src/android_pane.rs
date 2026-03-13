@@ -395,6 +395,7 @@ impl AndroidPane {
 
         let col_header = container(
             iced::widget::Row::from_vec(hdr_cells)
+            .width(Fill)
             .spacing(6)
             .padding([2, 8])
             .align_y(iced::Alignment::Center),
@@ -456,6 +457,7 @@ impl AndroidPane {
                             .size(12),
                         button(
                             iced::widget::Row::from_vec(cells)
+                            .width(Fill)
                             .spacing(6)
                             .align_y(iced::Alignment::Center),
                         )
