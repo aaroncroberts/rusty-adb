@@ -2792,6 +2792,7 @@ impl App {
             .align_y(iced::Alignment::Center);
 
         let content = row![
+            text("View").size(11).color(t.text_secondary),
             view_picker,
             iced::widget::horizontal_space(),
             cmd_row,
@@ -2847,13 +2848,15 @@ impl App {
         const STRIP_TILE_H: u16 = 80;
         let t = self.theme;
 
+        // tuple: (orig_idx, name, can_navigate, is_hidden)
+        // can_navigate = is_dir OR is_symlink (Android /sdcard etc. are symlinks)
         let visible: Vec<(usize, String, bool, bool)> = if is_android {
             self.android_pane
                 .entries
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, e.name.starts_with('.')))
+                .map(|(i, e)| (i, e.name.clone(), e.is_dir || e.is_symlink, e.name.starts_with('.')))
                 .collect()
         } else {
             self.local_pane
@@ -3072,6 +3075,8 @@ impl App {
         const TILE_H: u16 = 90;
         let t = self.theme;
 
+        // tuple: (orig_idx, name, can_navigate, is_selected, is_hidden)
+        // can_navigate includes symlinks for Android (e.g. /sdcard at root)
         let visible: Vec<(usize, String, bool, bool, bool)> = if is_android {
             self.android_pane
                 .entries
@@ -3079,7 +3084,7 @@ impl App {
                 .enumerate()
                 .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
                 .map(|(i, e)| {
-                    (i, e.name.clone(), e.is_dir, self.android_pane.selected.contains(&i), e.name.starts_with('.'))
+                    (i, e.name.clone(), e.is_dir || e.is_symlink, self.android_pane.selected.contains(&i), e.name.starts_with('.'))
                 })
                 .collect()
         } else {
@@ -3107,12 +3112,12 @@ impl App {
         } else {
             for chunk in visible.chunks(COLS) {
                 let mut tile_row: Vec<Element<Message>> = Vec::new();
-                for &(orig_idx, ref name, is_dir, is_selected, is_hidden) in chunk {
+                for &(orig_idx, ref name, can_navigate, is_selected, is_hidden) in chunk {
                     let bg: Option<iced::Background> =
                         if is_selected { Some(t.accent.scale_alpha(0.20).into()) } else { None };
                     let border_color = if is_selected { t.accent } else { t.border };
                     let border_width = if is_selected { 2.0 } else { 1.0 };
-                    let icon_fg = if is_dir { t.accent } else { t.text_secondary };
+                    let icon_fg = if can_navigate { t.accent } else { t.text_secondary };
                     let name_fg = if is_hidden { t.text_secondary } else { t.text };
 
                     let display_name = if name.len() > 16 {
@@ -3131,12 +3136,12 @@ impl App {
                     } else {
                         Message::LocalSelectEntry(orig_idx)
                     };
-                    let press_msg = if is_dir { nav_msg } else { sel_msg };
+                    let press_msg = if can_navigate { nav_msg } else { sel_msg };
 
                     let ext = name.rsplit('.').next()
                         .map(|e| e.to_lowercase())
                         .unwrap_or_default();
-                    let is_image = !is_dir && !is_android
+                    let is_image = !can_navigate && !is_android
                         && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
 
                     // 3-line icon art — compact enough to leave room for the filename
@@ -3146,7 +3151,7 @@ impl App {
                             .height(44)
                             .into()
                     } else {
-                        let art = if is_dir { "┌───┐\n│ / │\n└───┘" } else { "┌───┐\n│───│\n└───┘" };
+                        let art = if can_navigate { "┌───┐\n│ / │\n└───┘" } else { "┌───┐\n│───│\n└───┘" };
                         text(art)
                             .size(13)
                             .font(iced::Font::MONOSPACE)

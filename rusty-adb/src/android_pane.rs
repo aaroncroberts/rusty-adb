@@ -343,7 +343,9 @@ impl AndroidPane {
             let date_str = entry.modified.clone();
             let name = entry.name.clone();
             let entry_path = self.current_path.join(&name);
-            let entry_is_dir = entry.is_dir;
+            // Treat symlinks as navigable — on Android, /sdcard and storage
+            // mount points are symlinks that point to directories.
+            let can_navigate = entry.is_dir || entry.is_symlink;
             let on_nav = on_navigate(entry_path);
             let on_sel_btn = on_select(i);
             let on_sel_chk = on_select(i);
@@ -366,7 +368,7 @@ impl AndroidPane {
                         )
                         .width(Fill)
                         .style(|_t, _s| button::Style { background: None, ..Default::default() })
-                        .on_press(if entry_is_dir { on_nav } else { on_sel_btn }),
+                        .on_press(if can_navigate { on_nav } else { on_sel_btn }),
                     ]
                     .spacing(4)
                     .padding([2, 8])
