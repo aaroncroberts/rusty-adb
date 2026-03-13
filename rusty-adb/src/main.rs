@@ -2513,29 +2513,33 @@ impl App {
                     let sel_chk = sel_msg;
                     let tile = container(
                         column![
-                            // Checkbox in top-left for selection
+                            // Checkbox row — width(Fill) so the column knows its own width
                             row![
                                 checkbox("", is_selected)
                                     .on_toggle(move |_| sel_chk.clone())
                                     .size(12),
-                                iced::widget::Space::with_width(Fill),
-                            ],
-                            // Icon + name as a clickable button
+                            ]
+                            .width(Fill),
+                            // Icon + name button — fills remaining vertical space
                             button(
                                 column![
                                     text(icon).size(14).color(icon_fg),
                                     text(short_name).size(10).color(name_fg),
                                 ]
                                 .spacing(2)
+                                .width(Fill)
                                 .align_x(iced::Alignment::Center),
                             )
                             .width(Fill)
+                            .height(Fill)
+                            .padding(2)
                             .on_press(open_msg)
                             .style(|_t, _s| button::Style {
                                 background: None,
                                 ..Default::default()
                             }),
                         ]
+                        .width(Fill)   // ← propagates fixed container width to Fill children
                         .spacing(2),
                     )
                     .width(TILE_W)
@@ -2660,29 +2664,33 @@ impl App {
 
                     let tile = container(
                         column![
-                            // Checkbox row at top
+                            // Checkbox row
                             row![
                                 checkbox("", is_selected)
                                     .on_toggle(move |_| sel_chk.clone())
                                     .size(12),
-                                iced::widget::Space::with_width(Fill),
-                            ],
-                            // Thumbnail/icon + name as clickable button
+                            ]
+                            .width(Fill),
+                            // Thumbnail/icon + name button — fills remaining space
                             button(
                                 column![
                                     thumb,
                                     text(display_name).size(10).color(name_fg),
                                 ]
                                 .spacing(4)
+                                .width(Fill)
                                 .align_x(iced::Alignment::Center),
                             )
                             .width(Fill)
+                            .height(Fill)
+                            .padding(2)
                             .on_press(open_msg)
                             .style(|_t, _s| button::Style {
                                 background: None,
                                 ..Default::default()
                             }),
                         ]
+                        .width(Fill)   // ← gives Fill children a known width to expand into
                         .spacing(2),
                     )
                     .width(TILE_W)
