@@ -99,9 +99,12 @@ enum Message {
     AdbNotFound,
     /// User clicked "Retry" on the install screen — re-run AdbClient::find()
     RetryAdbFind,
-    /// User clicked a platform package manager install button
-    /// (actual implementation wired in task 3m2.1.2)
+    /// User clicked a platform package manager install button — starts background install
     InstallAdb,
+    /// Package manager install completed successfully → triggers RetryAdbFind
+    InstallComplete,
+    /// Package manager install failed with an error message
+    InstallFailed(String),
     /// Open a URL in the system default browser
     OpenUrl(String),
 }
@@ -768,8 +771,66 @@ impl App {
                 )
             }
 
-            // Actual install logic wired in task 3m2.1.2
-            Message::InstallAdb => Task::none(),
+            Message::InstallAdb => {
+                if self.installing {
+                    return Task::none(); // guard against double-tap
+                }
+                self.installing = true;
+                self.install_log.clear();
+                self.install_log
+                    .push("Starting installation…".to_string());
+                tracing::info!("starting platform-tools install via package manager");
+
+                Task::perform(
+                    async {
+                        #[cfg(target_os = "macos")]
+                        let mut child = tokio::process::Command::new("brew")
+                            .args(["install", "--cask", "android-platform-tools"])
+                            .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                            .map_err(|e| format!("brew not found: {e}. Install Homebrew from https://brew.sh"))?;
+
+                        #[cfg(target_os = "windows")]
+                        let mut child = tokio::process::Command::new("winget")
+                            .args(["install", "--id", "Google.PlatformTools", "--accept-source-agreements", "--accept-package-agreements"])
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                            .map_err(|e| format!("winget not found: {e}. Install App Installer from the Microsoft Store"))?;
+
+                        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                        return Err("Automatic install not supported on this platform. Download from developer.android.com/tools/releases/platform-tools".to_string());
+
+                        let status = child.wait().await.map_err(|e| e.to_string())?;
+                        if status.success() {
+                            Ok(())
+                        } else {
+                            let code = status.code().unwrap_or(-1);
+                            Err(format!("Package manager exited with code {code}. Check the log above for details."))
+                        }
+                    },
+                    |result| match result {
+                        Ok(()) => Message::InstallComplete,
+                        Err(e) => Message::InstallFailed(e),
+                    },
+                )
+            }
+
+            Message::InstallComplete => {
+                tracing::info!("platform-tools install succeeded, retrying adb detection");
+                self.install_log.push("✓ Installation complete. Detecting adb…".to_string());
+                self.installing = false;
+                self.update(Message::RetryAdbFind)
+            }
+
+            Message::InstallFailed(err) => {
+                tracing::warn!(error = %err, "platform-tools install failed");
+                self.installing = false;
+                self.install_log.push(format!("✗ {err}"));
+                Task::none()
+            }
 
             Message::OpenUrl(url) => {
                 tracing::info!(url = %url, "opening URL in browser");
