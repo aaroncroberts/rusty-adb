@@ -14,6 +14,8 @@ pub const STATUS_BAR_HEIGHT: f32 = 30.0;
 /// ADB device connection status
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdbStatus {
+    /// ADB binary not found on this system — install screen is shown
+    NotFound,
     /// No device connected
     Disconnected,
     /// Device found but user hasn't authorized USB debugging yet
@@ -31,6 +33,7 @@ impl AdbStatus {
     /// Human-readable status text shown in the status bar
     pub fn text(&self) -> String {
         match self {
+            AdbStatus::NotFound => "ADB not installed — follow the setup guide".to_string(),
             AdbStatus::Disconnected => "No device connected".to_string(),
             AdbStatus::Unauthorized => {
                 "Device found — check your phone screen and tap Allow".to_string()
@@ -165,6 +168,7 @@ impl StatusBar {
         } else {
             // ── Connection status ─────────────────────────────────────────────
             let status_color = match status {
+                AdbStatus::NotFound => theme.warning,
                 AdbStatus::Disconnected => theme.text_secondary,
                 AdbStatus::Unauthorized => theme.warning,
                 AdbStatus::Connecting(_) => theme.accent,

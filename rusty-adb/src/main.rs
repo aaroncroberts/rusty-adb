@@ -93,6 +93,17 @@ enum Message {
     ShowError(String),
     /// Dismiss the error banner (fired by the 3-second Task)
     DismissError,
+
+    // ── ADB install flow ──────────────────────────────────────────────────────
+    /// ADB binary not found — show the install guide screen
+    AdbNotFound,
+    /// User clicked "Retry" on the install screen — re-run AdbClient::find()
+    RetryAdbFind,
+    /// User clicked a platform package manager install button
+    /// (actual implementation wired in task 3m2.1.2)
+    InstallAdb,
+    /// Open a URL in the system default browser
+    OpenUrl(String),
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -125,6 +136,11 @@ struct App {
     transfer_queue_total: usize,
     /// Transient error message shown in a dismissible banner (None = hidden)
     error_banner: Option<String>,
+
+    /// Lines of output from an in-progress package manager install
+    install_log: Vec<String>,
+    /// Whether a package manager install is currently running
+    installing: bool,
 }
 
 impl Default for App {
@@ -147,6 +163,8 @@ impl Default for App {
             transfer_queue_done: 0,
             transfer_queue_total: 0,
             error_banner: None,
+            install_log: Vec::new(),
+            installing: false,
             theme,
         }
     }
@@ -214,7 +232,15 @@ pub fn main() -> iced::Result {
                         tracing::info!(adb = %client.adb_path.display(), "adb ready");
                         Message::AdbReady(Arc::new(client))
                     }
-                    Err(e) => Message::AdbError(e),
+                    Err(e) => {
+                        // "adb not found" is a known, actionable state — show install UI
+                        if e.starts_with("adb not found") {
+                            tracing::warn!("adb binary not found — showing install guide");
+                            Message::AdbNotFound
+                        } else {
+                            Message::AdbError(e)
+                        }
+                    }
                 },
             );
             (App::default(), init_task)
@@ -709,6 +735,52 @@ impl App {
                 self.error_banner = None;
                 Task::none()
             }
+
+            // ── ADB install flow ──────────────────────────────────────────────
+            Message::AdbNotFound => {
+                self.adb_status = AdbStatus::NotFound;
+                Task::none()
+            }
+
+            Message::RetryAdbFind => {
+                tracing::info!("retrying adb detection after install");
+                self.install_log.clear();
+                self.installing = false;
+                Task::perform(
+                    async {
+                        let client = AdbClient::find().await.map_err(|e| e.to_string())?;
+                        let _ = client.start_server().await;
+                        Ok::<AdbClient, String>(client)
+                    },
+                    |result| match result {
+                        Ok(client) => {
+                            tracing::info!(adb = %client.adb_path.display(), "adb found on retry");
+                            Message::AdbReady(Arc::new(client))
+                        }
+                        Err(e) => {
+                            if e.starts_with("adb not found") {
+                                Message::AdbNotFound
+                            } else {
+                                Message::AdbError(e)
+                            }
+                        }
+                    },
+                )
+            }
+
+            // Actual install logic wired in task 3m2.1.2
+            Message::InstallAdb => Task::none(),
+
+            Message::OpenUrl(url) => {
+                tracing::info!(url = %url, "opening URL in browser");
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("open").arg(&url).spawn();
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("explorer").arg(&url).spawn();
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                Task::none()
+            }
         }
     }
 }
@@ -734,6 +806,14 @@ fn derive_status(devices: &[AdbDevice]) -> AdbStatus {
 
 impl App {
     fn view(&self) -> Element<Message> {
+        // ADB not installed — replace panes with the setup guide
+        if self.adb_status == AdbStatus::NotFound {
+            let mut items: Vec<Element<Message>> = vec![self.view_toolbar()];
+            items.push(self.view_adb_not_found());
+            items.push(self.status_bar.view(&self.adb_status, None, None));
+            return column(items).into();
+        }
+
         let mut items: Vec<Element<Message>> = vec![self.view_toolbar()];
         if let Some(msg) = &self.error_banner {
             items.push(self.view_error_banner(msg));
@@ -745,6 +825,162 @@ impl App {
             self.active_transfer.as_ref().map(|_| Message::CancelTransfer),
         ));
         column(items).into()
+    }
+
+    fn view_adb_not_found(&self) -> Element<Message> {
+        use iced::widget::{scrollable, Space};
+        use iced::Alignment;
+
+        let t = self.theme;
+
+        // ── Install button (platform-specific) ───────────────────────────────
+        #[cfg(target_os = "macos")]
+        let install_label = "Install via Homebrew";
+        #[cfg(target_os = "windows")]
+        let install_label = "Install via winget";
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let install_label = "Download Platform Tools";
+
+        let install_btn = button(
+            text(install_label).size(13).color(iced::Color::WHITE),
+        )
+        .style(move |_t, _s| button::Style {
+            background: Some(t.accent.into()),
+            border: Border { radius: 4.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .padding([8, 16])
+        .on_press(Message::InstallAdb);
+
+        let retry_btn = button(text("↺  Retry Detection").size(13).color(t.text))
+            .style(move |_t, _s| button::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .padding([8, 16])
+            .on_press(Message::RetryAdbFind);
+
+        let download_btn = button(text("⬇  Download Manually").size(13).color(t.accent))
+            .style(move |_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .on_press(Message::OpenUrl(
+                "https://developer.android.com/tools/releases/platform-tools".to_string(),
+            ));
+
+        // ── Install log output (shown during/after install attempt) ──────────
+        let log_section: Element<Message> = if self.install_log.is_empty() {
+            Space::with_height(0).into()
+        } else {
+            let log_text = self.install_log.join("\n");
+            scrollable(
+                container(text(log_text).size(11).color(t.text_secondary).font(
+                    iced::Font::with_name("Menlo"),
+                ))
+                .width(Fill)
+                .padding([8, 12])
+                .style(move |_t| container::Style {
+                    background: Some(t.background_secondary.into()),
+                    border: Border { color: t.border, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                }),
+            )
+            .height(120)
+            .into()
+        };
+
+        // ── Platform-specific install steps ──────────────────────────────────
+        #[cfg(target_os = "macos")]
+        let steps: Element<Message> = column![
+            text("Option A — Homebrew (recommended)").size(12).color(t.text_secondary),
+            text("  brew install --cask android-platform-tools")
+                .size(12)
+                .color(t.accent)
+                .font(iced::Font::with_name("Menlo")),
+            Space::with_height(8),
+            text("Option B — Android Studio").size(12).color(t.text_secondary),
+            text("  Open SDK Manager → SDK Tools → Android SDK Platform-Tools")
+                .size(12)
+                .color(t.text_secondary),
+            text("  SDK installs to ~/Library/Android/sdk/platform-tools/")
+                .size(11)
+                .color(t.text_secondary),
+        ]
+        .spacing(4)
+        .into();
+
+        #[cfg(target_os = "windows")]
+        let steps: Element<Message> = column![
+            text("Option A — winget (recommended)").size(12).color(t.text_secondary),
+            text("  winget install Google.PlatformTools")
+                .size(12)
+                .color(t.accent)
+                .font(iced::Font::with_name("Menlo")),
+            Space::with_height(8),
+            text("Option B — Android Studio").size(12).color(t.text_secondary),
+            text("  Open SDK Manager → SDK Tools → Android SDK Platform-Tools")
+                .size(12)
+                .color(t.text_secondary),
+            text("  SDK installs to %LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\")
+                .size(11)
+                .color(t.text_secondary),
+        ]
+        .spacing(4)
+        .into();
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let steps: Element<Message> = column![
+            text("Download from developer.android.com/tools/releases/platform-tools")
+                .size(12)
+                .color(t.text_secondary),
+            text("  Extract and ensure 'adb' is on your PATH")
+                .size(12)
+                .color(t.text_secondary),
+        ]
+        .spacing(4)
+        .into();
+
+        // ── Main card layout ─────────────────────────────────────────────────
+        let card = container(
+            column![
+                text("ADB Not Found").size(24).color(t.text),
+                Space::with_height(8),
+                text("Android Debug Bridge (ADB) is required to connect to your device.")
+                    .size(13)
+                    .color(t.text_secondary),
+                Space::with_height(20),
+                steps,
+                Space::with_height(20),
+                row![install_btn, retry_btn, download_btn].spacing(12),
+                Space::with_height(12),
+                log_section,
+            ]
+            .spacing(0)
+            .width(520),
+        )
+        .padding(32)
+        .style(move |_t| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        });
+
+        container(card)
+            .width(Fill)
+            .height(Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .into()
     }
 
     fn view_error_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {

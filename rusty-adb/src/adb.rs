@@ -79,35 +79,91 @@ impl AdbClient {
     /// Locate the `adb` binary.
     ///
     /// Search order:
-    /// 1. `adb` on `$PATH` (checked via `which adb`)
-    /// 2. `~/Library/Android/sdk/platform-tools/adb` (Android Studio default)
+    /// 1. `adb` on `$PATH` (via `where` on Windows, `which` on Unix)
+    /// 2. Platform-specific Android SDK default locations
+    ///    - macOS: `~/Library/Android/sdk/platform-tools/adb`
+    ///    - Windows: `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`
+    ///              `%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe`
     pub async fn find() -> Result<Self> {
-        // 1. Try PATH first
-        if let Ok(output) = Command::new("which").arg("adb").output().await {
+        // 1. Try PATH first (cross-platform)
+        #[cfg(target_os = "windows")]
+        let which_cmd = "where";
+        #[cfg(not(target_os = "windows"))]
+        let which_cmd = "which";
+
+        if let Ok(output) = Command::new(which_cmd).arg("adb").output().await {
             if output.status.success() {
                 let path_str = str::from_utf8(&output.stdout)?.trim().to_string();
-                if !path_str.is_empty() {
-                    tracing::debug!(adb = %path_str, "found adb on PATH");
+                // `where` on Windows may return multiple lines; take the first
+                let first = path_str.lines().next().unwrap_or("").trim();
+                if !first.is_empty() {
+                    tracing::debug!(adb = %first, "found adb on PATH");
                     return Ok(Self {
-                        adb_path: PathBuf::from(path_str),
+                        adb_path: PathBuf::from(first),
                     });
                 }
             }
         }
 
-        // 2. Android Studio default location
-        if let Some(home) = dirs::home_dir() {
-            let sdk_adb = home.join("Library/Android/sdk/platform-tools/adb");
-            if sdk_adb.exists() {
-                tracing::debug!(adb = %sdk_adb.display(), "found adb via Android SDK");
-                return Ok(Self { adb_path: sdk_adb });
+        // 2. Platform-specific SDK default locations
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(home) = dirs::home_dir() {
+                let sdk_adb = home.join("Library/Android/sdk/platform-tools/adb");
+                if sdk_adb.exists() {
+                    tracing::debug!(adb = %sdk_adb.display(), "found adb via Android SDK (macOS)");
+                    return Ok(Self { adb_path: sdk_adb });
+                }
             }
         }
 
+        #[cfg(target_os = "windows")]
+        {
+            let candidates: Vec<PathBuf> = [
+                // Android Studio default (via LOCALAPPDATA)
+                std::env::var("LOCALAPPDATA")
+                    .ok()
+                    .map(|p| PathBuf::from(p).join("Android\\Sdk\\platform-tools\\adb.exe")),
+                // Fallback via USERPROFILE
+                std::env::var("USERPROFILE")
+                    .ok()
+                    .map(|p| PathBuf::from(p).join("AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe")),
+                // Program Files (x86) — older SDK installs
+                std::env::var("ProgramFiles(x86)")
+                    .ok()
+                    .map(|p| PathBuf::from(p).join("Android\\android-sdk\\platform-tools\\adb.exe")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+
+            for path in candidates {
+                if path.exists() {
+                    tracing::debug!(adb = %path.display(), "found adb via Android SDK (Windows)");
+                    return Ok(Self { adb_path: path });
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
         anyhow::bail!(
             "adb not found. Install Android platform-tools:\n  \
-             brew install --cask android-platform-tools"
-        )
+             brew install --cask android-platform-tools\n  \
+             or install Android Studio and open SDK Manager."
+        );
+
+        #[cfg(target_os = "windows")]
+        anyhow::bail!(
+            "adb not found. Install Android platform-tools:\n  \
+             winget install Google.PlatformTools\n  \
+             or install Android Studio and open SDK Manager."
+        );
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        anyhow::bail!(
+            "adb not found. Install Android platform-tools from:\n  \
+             https://developer.android.com/tools/releases/platform-tools"
+        );
     }
 
     /// Start the ADB server in the background (idempotent — safe to call multiple times).
