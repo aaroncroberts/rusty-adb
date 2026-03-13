@@ -321,6 +321,19 @@ impl LocalPane {
             rows.push(up_btn.into());
         }
 
+        // Empty directory message
+        if self.entries.is_empty() {
+            rows.push(
+                container(
+                    text("This folder is empty")
+                        .size(11)
+                        .color(theme.text_secondary),
+                )
+                .padding([8, 12])
+                .into(),
+            );
+        }
+
         // File/directory entries
         for (i, entry) in self.entries.iter().enumerate() {
             let is_selected = self.selected.contains(&i);

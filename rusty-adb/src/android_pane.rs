@@ -217,11 +217,7 @@ impl AndroidPane {
         on_select: impl Fn(usize) -> Message + 'a,
     ) -> Element<'a, Message> {
         match &self.state {
-            AndroidPaneState::NoDevice => self.view_empty(
-                theme,
-                "No Android device connected",
-                "Connect a device with USB debugging enabled",
-            ),
+            AndroidPaneState::NoDevice => self.view_no_device(theme),
 
             AndroidPaneState::Loading => self.view_loading(theme),
 
@@ -246,6 +242,39 @@ impl AndroidPane {
         .spacing(6);
 
         container(content)
+            .width(Fill)
+            .height(Fill)
+            .padding(24)
+            .style(move |_t| container::Style {
+                background: Some(theme.background.into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn view_no_device<'a, Message: 'a + Clone>(
+        &'a self,
+        theme: ThemeColors,
+    ) -> Element<'a, Message> {
+        let steps = column![
+            text("📱  No Android device connected")
+                .size(13)
+                .color(theme.text),
+            text("To get started:").size(11).color(theme.text_secondary),
+            text("  1.  Enable USB debugging on your device")
+                .size(11)
+                .color(theme.text_secondary),
+            text("      Settings → Developer Options → USB Debugging")
+                .size(11)
+                .color(theme.text_secondary),
+            text("  2.  Connect via USB cable").size(11).color(theme.text_secondary),
+            text("  3.  Tap \"Allow\" when prompted on your phone")
+                .size(11)
+                .color(theme.text_secondary),
+        ]
+        .spacing(4);
+
+        container(steps)
             .width(Fill)
             .height(Fill)
             .padding(24)
@@ -366,6 +395,19 @@ impl AndroidPane {
                 .on_press(on_navigate(root_path));
                 rows.push(btn.into());
             }
+        }
+
+        // Empty directory message
+        if self.entries.is_empty() {
+            rows.push(
+                container(
+                    text("This directory is empty")
+                        .size(11)
+                        .color(theme.text_secondary),
+                )
+                .padding([8, 12])
+                .into(),
+            );
         }
 
         // File/directory entries

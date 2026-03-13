@@ -88,6 +88,10 @@ enum Message {
     CancelTransfer,
     /// Transfer was cancelled (emitted by the subscription)
     TransferCancelled,
+    /// Show a transient error banner (auto-dismisses after 3 s)
+    ShowError(String),
+    /// Dismiss the error banner (fired by the 3-second Task)
+    DismissError,
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -118,6 +122,8 @@ struct App {
     transfer_queue_done: usize,
     /// Total jobs in the current batch (for queue display)
     transfer_queue_total: usize,
+    /// Transient error message shown in a dismissible banner (None = hidden)
+    error_banner: Option<String>,
 }
 
 impl Default for App {
@@ -139,6 +145,7 @@ impl Default for App {
             cancel_flag: None,
             transfer_queue_done: 0,
             transfer_queue_total: 0,
+            error_banner: None,
             theme,
         }
     }
@@ -341,8 +348,8 @@ impl App {
 
             Message::AdbError(msg) => {
                 tracing::warn!(error = %msg, "adb error");
-                self.adb_status = AdbStatus::Error(msg);
-                Task::none()
+                self.adb_status = AdbStatus::Error(msg.clone());
+                self.update(Message::ShowError(msg))
             }
 
             // ── Local Pane ────────────────────────────────────────────────────
@@ -641,8 +648,7 @@ impl App {
                 self.transfer_status = None;
                 self.transfer_queue.clear();
                 self.cancel_flag = None;
-                self.adb_status = AdbStatus::Error(format!("Transfer failed: {msg}"));
-                Task::none()
+                return self.update(Message::ShowError(format!("Transfer failed: {msg}")));
             }
 
             Message::CancelTransfer => {
@@ -661,6 +667,21 @@ impl App {
                 self.transfer_status = None;
                 self.transfer_queue.clear();
                 self.cancel_flag = None;
+                Task::none()
+            }
+
+            Message::ShowError(msg) => {
+                tracing::warn!(error = %msg, "showing error banner");
+                self.error_banner = Some(msg);
+                // Schedule auto-dismiss after 3 seconds
+                Task::perform(
+                    async { tokio::time::sleep(Duration::from_secs(3)).await },
+                    |_| Message::DismissError,
+                )
+            }
+
+            Message::DismissError => {
+                self.error_banner = None;
                 Task::none()
             }
         }
@@ -688,16 +709,46 @@ fn derive_status(devices: &[AdbDevice]) -> AdbStatus {
 
 impl App {
     fn view(&self) -> Element<Message> {
-        column![
-            self.view_toolbar(),
-            self.view_panes(),
-            self.status_bar.view(
-                &self.adb_status,
-                self.transfer_status.as_ref(),
-                self.active_transfer.as_ref().map(|_| Message::CancelTransfer),
-            ),
+        let mut items: Vec<Element<Message>> = vec![self.view_toolbar()];
+        if let Some(msg) = &self.error_banner {
+            items.push(self.view_error_banner(msg));
+        }
+        items.push(self.view_panes());
+        items.push(self.status_bar.view(
+            &self.adb_status,
+            self.transfer_status.as_ref(),
+            self.active_transfer.as_ref().map(|_| Message::CancelTransfer),
+        ));
+        column(items).into()
+    }
+
+    fn view_error_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
+        let t = self.theme;
+        let content = row![
+            text(format!("⚠  {msg}")).size(12).color(t.error),
+            iced::widget::Space::with_width(Fill),
+            button(text("✕").size(11).color(t.error))
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+                .on_press(Message::DismissError),
         ]
-        .into()
+        .align_y(iced::Alignment::Center)
+        .padding([4, 12]);
+
+        container(content)
+            .width(Fill)
+            .style(move |_t| container::Style {
+                background: Some(t.error.scale_alpha(0.12).into()),
+                border: Border {
+                    color: t.error.scale_alpha(0.4),
+                    width: 1.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     fn view_toolbar(&self) -> Element<Message> {
