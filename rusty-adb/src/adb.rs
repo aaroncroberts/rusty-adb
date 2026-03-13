@@ -126,6 +126,23 @@ impl AdbClient {
         Ok(())
     }
 
+    /// Disconnect a device by serial (calls `adb disconnect SERIAL`).
+    ///
+    /// ADB transport connections (USB) can't be truly disconnected this way,
+    /// but it clears the TCP connection and forces a re-authorization prompt.
+    /// Errors are non-fatal — the device poll will reflect the new state.
+    pub async fn disconnect(&self, serial: &str) -> Result<()> {
+        let status = Command::new(&self.adb_path)
+            .args(["disconnect", serial])
+            .status()
+            .await
+            .context("failed to spawn adb disconnect")?;
+        if !status.success() {
+            tracing::warn!(serial, "adb disconnect exited non-zero");
+        }
+        Ok(())
+    }
+
     /// Run `adb devices -l` and return a parsed list of devices.
     ///
     /// Returns an empty `Vec` (not an error) when the ADB server is not running

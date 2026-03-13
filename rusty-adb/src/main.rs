@@ -31,6 +31,7 @@ use status_bar::{AdbStatus, StatusBar, TransferStatus};
 use theme::ThemeColors;
 use transfer::{TransferDirection, TransferEvent, TransferJob};
 
+use iced::keyboard::{self, key::Named};
 use iced::widget::{button, column, container, row, text, vertical_rule};
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
@@ -63,6 +64,14 @@ enum Message {
     AndroidSelectEntry(usize),
     /// Drives the loading spinner animation
     SpinnerTick,
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+    /// F5: refresh local entries + reload android directory
+    RefreshPanes,
+    /// Backspace: navigate up one level in the local pane
+    LocalNavigateUp,
+    /// Disconnect the currently active device (adb disconnect SERIAL)
+    DisconnectDevice,
 
     // ── Transfer ──────────────────────────────────────────────────────────────
     /// User pressed "Copy →" (local → android)
@@ -150,7 +159,14 @@ pub fn main() -> iced::Result {
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "rusty-adb starting");
 
-    iced::application("rusty-adb", App::update, App::view)
+    iced::application(
+        |app: &App| match &app.adb_status {
+            AdbStatus::Connected(name) => format!("rusty-adb — {name}"),
+            _ => "rusty-adb".to_string(),
+        },
+        App::update,
+        App::view,
+    )
         .subscription(App::subscription)
         .theme(|_| Theme::TokyoNightStorm)
         .window_size((1280.0, 800.0))
@@ -171,6 +187,18 @@ pub fn main() -> iced::Result {
             );
             (App::default(), init_task)
         })
+}
+
+// ─── Keyboard ─────────────────────────────────────────────────────────────────
+
+/// Map key presses to messages. Called by the keyboard subscription.
+/// Returns `None` to ignore keys not bound to an action.
+fn handle_key_press(key: keyboard::Key, _mods: keyboard::Modifiers) -> Option<Message> {
+    match key.as_ref() {
+        keyboard::Key::Named(Named::F5) => Some(Message::RefreshPanes),
+        keyboard::Key::Named(Named::Backspace) => Some(Message::LocalNavigateUp),
+        _ => None,
+    }
 }
 
 // ─── Subscription ─────────────────────────────────────────────────────────────
@@ -232,13 +260,18 @@ impl App {
             )
         });
 
+        // Keyboard shortcuts — F5 refresh, Backspace navigate up
+        let keys = keyboard::on_key_press(handle_key_press);
+
         // Combine all active subscriptions
-        match (maybe_spinner, maybe_transfer) {
-            (Some(s), Some(t)) => Subscription::batch([device_poll, s, t]),
-            (Some(s), None) => Subscription::batch([device_poll, s]),
-            (None, Some(t)) => Subscription::batch([device_poll, t]),
-            (None, None) => device_poll,
+        let mut subs = vec![device_poll, keys];
+        if let Some(s) = maybe_spinner {
+            subs.push(s);
         }
+        if let Some(t) = maybe_transfer {
+            subs.push(t);
+        }
+        Subscription::batch(subs)
     }
 }
 
@@ -386,6 +419,46 @@ impl App {
             Message::SpinnerTick => {
                 self.android_pane.tick_spinner();
                 Task::none()
+            }
+
+            // ── Navigation shortcuts ───────────────────────────────────────────
+            Message::RefreshPanes => {
+                // Reload local entries in-place
+                self.local_pane.reload();
+                // Re-fetch the current android directory
+                let path = self.android_pane.current_path.clone();
+                if self.active_serial.is_some() {
+                    return self.update(Message::AndroidNavigateTo(path));
+                }
+                Task::none()
+            }
+
+            Message::LocalNavigateUp => {
+                let parent = self
+                    .local_pane
+                    .current_path
+                    .parent()
+                    .map(|p| p.to_path_buf());
+                if let Some(parent) = parent {
+                    return self.update(Message::LocalNavigateTo(parent));
+                }
+                Task::none()
+            }
+
+            Message::DisconnectDevice => {
+                let Some(client) = self.adb_client.clone() else {
+                    return Task::none();
+                };
+                let Some(serial) = self.active_serial.clone() else {
+                    return Task::none();
+                };
+                tracing::info!(serial = %serial, "user requested disconnect");
+                Task::perform(
+                    async move { client.disconnect(&serial).await.map_err(|e| e.to_string()) },
+                    |result| match result {
+                        Ok(_) | Err(_) => Message::PollDevices,
+                    },
+                )
             }
 
             // ── Transfer ──────────────────────────────────────────────────────
@@ -629,12 +702,13 @@ impl App {
 
     fn view_toolbar(&self) -> Element<Message> {
         let t = self.theme;
-        let label = text("rusty-adb").size(14).color(t.accent);
 
-        // Copy buttons — enabled when there's an active device and at least one
-        // non-directory file selected on the appropriate side.
-        let can_copy_to_android = self.active_serial.is_some()
-            && self.active_transfer.is_none()
+        // ── Availability flags ───────────────────────────────────────────────
+        let has_device = self.active_serial.is_some();
+        let no_transfer = self.active_transfer.is_none();
+
+        let can_copy_to_android = has_device
+            && no_transfer
             && self.local_pane.selected.iter().any(|&i| {
                 self.local_pane
                     .entries
@@ -643,8 +717,8 @@ impl App {
                     .unwrap_or(false)
             });
 
-        let can_copy_to_local = self.active_serial.is_some()
-            && self.active_transfer.is_none()
+        let can_copy_to_local = has_device
+            && no_transfer
             && self.android_pane.selected.iter().any(|&i| {
                 self.android_pane
                     .entries
@@ -653,52 +727,54 @@ impl App {
                     .unwrap_or(false)
             });
 
-        let copy_to_android_btn = {
-            let lbl = text("Copy →").size(12).color(if can_copy_to_android {
-                t.accent
-            } else {
-                t.text_secondary
+        // ── Button builder helper ─────────────────────────────────────────────
+        let toolbar_btn = move |label: String, color: iced::Color, msg: Option<Message>| {
+            let lbl = text(label).size(12).color(color);
+            let btn = button(lbl).style(move |_t, _s| button::Style {
+                background: None,
+                ..Default::default()
             });
-            if can_copy_to_android {
-                button(lbl).on_press(Message::CopyToAndroid).style(
-                    move |_theme, _status| button::Style {
-                        background: None,
-                        ..Default::default()
-                    },
-                )
+            if let Some(m) = msg {
+                btn.on_press(m)
             } else {
-                button(lbl).style(move |_theme, _status| button::Style {
-                    background: None,
-                    ..Default::default()
-                })
+                btn
             }
         };
 
-        let copy_to_local_btn = {
-            let lbl = text("Copy ←").size(12).color(if can_copy_to_local {
-                t.accent
-            } else {
-                t.text_secondary
-            });
-            if can_copy_to_local {
-                button(lbl).on_press(Message::CopyToLocal).style(
-                    move |_theme, _status| button::Style {
-                        background: None,
-                        ..Default::default()
-                    },
-                )
-            } else {
-                button(lbl).style(move |_theme, _status| button::Style {
-                    background: None,
-                    ..Default::default()
-                })
-            }
-        };
+        // ── Buttons ───────────────────────────────────────────────────────────
+        let refresh_btn = toolbar_btn(
+            "⟳ Refresh".to_string(),
+            t.text,
+            Some(Message::RefreshPanes),
+        );
 
-        let content = row![label, copy_to_android_btn, copy_to_local_btn]
-            .spacing(12)
-            .padding([0, 16])
-            .align_y(iced::Alignment::Center);
+        let disconnect_btn = toolbar_btn(
+            "Disconnect".to_string(),
+            if has_device { t.warning } else { t.text_secondary },
+            if has_device { Some(Message::DisconnectDevice) } else { None },
+        );
+
+        let copy_to_android_btn = toolbar_btn(
+            "Copy →".to_string(),
+            if can_copy_to_android { t.accent } else { t.text_secondary },
+            if can_copy_to_android { Some(Message::CopyToAndroid) } else { None },
+        );
+
+        let copy_to_local_btn = toolbar_btn(
+            "Copy ←".to_string(),
+            if can_copy_to_local { t.accent } else { t.text_secondary },
+            if can_copy_to_local { Some(Message::CopyToLocal) } else { None },
+        );
+
+        let content = row![
+            refresh_btn,
+            disconnect_btn,
+            copy_to_android_btn,
+            copy_to_local_btn,
+        ]
+        .spacing(8)
+        .padding([0, 16])
+        .align_y(iced::Alignment::Center);
 
         container(content)
             .width(Fill)
