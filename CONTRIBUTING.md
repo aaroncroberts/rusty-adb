@@ -1,5 +1,12 @@
 # Contributing to rusty-adb
 
+```text
+╔════════════════════════════════════════╗
+║   CONTRIBUTING TO rusty-adb           ║
+║   ─── phosphor green all the way ───  ║
+╚════════════════════════════════════════╝
+```
+
 Thanks for your interest in contributing. This document covers everything you need to go from a fresh clone to an open pull request.
 
 ---

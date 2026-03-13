@@ -1,81 +1,95 @@
-//! Dark theme color system for rusty-adb
+//! Retro terminal color system for rusty-adb
 //!
-//! Defines a consistent color palette for the application following
-//! a dark, sleek, modern aesthetic — ported from rusty-app.
+//! Phosphor-green-on-near-black palette that evokes classic CRT terminals
+//! (think Midnight Commander or a green-screen VT100).
 
 use iced::Color;
 
-/// Main color palette for the dark theme
+/// Main color palette — retro terminal aesthetic.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThemeColors {
-    /// Main background color (#23272e)
+    /// Near-black CRT background (#080c08)
     pub background: Color,
-    /// Secondary background for panels (#2d323b)
+    /// Slightly lighter panel background (#0f160f)
     pub background_secondary: Color,
-    /// Border color (#353b45)
+    /// Dark phosphor-green border (#1e3a1e)
     pub border: Color,
-    /// Accent color for highlights (#5fb3a6)
+    /// Bright phosphor-green accent (#33dd33)
     pub accent: Color,
-    /// Primary text color (#f5f6fa)
+    /// Soft green primary text (#c0ecc0)
     pub text: Color,
-    /// Secondary text color, dimmed (#9ca0a8)
+    /// Dimmer green secondary text (#5a8a5a)
     pub text_secondary: Color,
-    /// Success indicator (#50c878)
+    /// Bright mint success indicator (#00ff88)
     pub success: Color,
-    /// Warning indicator (#f39c12)
+    /// Amber warning indicator (#ccaa00)
     pub warning: Color,
-    /// Error indicator (#e74c3c)
+    /// Muted red error indicator (#dd2222)
     pub error: Color,
 }
 
 impl ThemeColors {
-    /// Create the default dark theme palette
+    /// Retro terminal palette — phosphor green on near-black.
     pub const fn dark() -> Self {
+        Self::retro()
+    }
+
+    /// Retro terminal palette — phosphor green on near-black CRT.
+    pub const fn retro() -> Self {
         Self {
+            // Near-black CRT background
             background: Color::from_rgb(
-                0x23 as f32 / 255.0,
-                0x27 as f32 / 255.0,
-                0x2e as f32 / 255.0,
+                0x08 as f32 / 255.0,
+                0x0c as f32 / 255.0,
+                0x08 as f32 / 255.0,
             ),
+            // Panel / secondary background
             background_secondary: Color::from_rgb(
-                0x2d as f32 / 255.0,
-                0x32 as f32 / 255.0,
-                0x3b as f32 / 255.0,
+                0x0f as f32 / 255.0,
+                0x16 as f32 / 255.0,
+                0x0f as f32 / 255.0,
             ),
+            // Dark green border
             border: Color::from_rgb(
-                0x35 as f32 / 255.0,
-                0x3b as f32 / 255.0,
-                0x45 as f32 / 255.0,
+                0x1e as f32 / 255.0,
+                0x3a as f32 / 255.0,
+                0x1e as f32 / 255.0,
             ),
+            // Bright phosphor green — accent highlights & icons
             accent: Color::from_rgb(
-                0x5f as f32 / 255.0,
-                0xb3 as f32 / 255.0,
-                0xa6 as f32 / 255.0,
+                0x33 as f32 / 255.0,
+                0xdd as f32 / 255.0,
+                0x33 as f32 / 255.0,
             ),
+            // Soft green — primary readable text
             text: Color::from_rgb(
-                0xf5 as f32 / 255.0,
-                0xf6 as f32 / 255.0,
-                0xfa as f32 / 255.0,
+                0xc0 as f32 / 255.0,
+                0xec as f32 / 255.0,
+                0xc0 as f32 / 255.0,
             ),
+            // Dimmer green — secondary / metadata text
             text_secondary: Color::from_rgb(
-                0x9c as f32 / 255.0,
-                0xa0 as f32 / 255.0,
-                0xa8 as f32 / 255.0,
+                0x5a as f32 / 255.0,
+                0x8a as f32 / 255.0,
+                0x5a as f32 / 255.0,
             ),
+            // Bright mint — success
             success: Color::from_rgb(
-                0x50 as f32 / 255.0,
-                0xc8 as f32 / 255.0,
-                0x78 as f32 / 255.0,
+                0x00 as f32 / 255.0,
+                0xff as f32 / 255.0,
+                0x88 as f32 / 255.0,
             ),
+            // Amber — warning (CRT yellow-orange)
             warning: Color::from_rgb(
-                0xf3 as f32 / 255.0,
-                0x9c as f32 / 255.0,
-                0x12 as f32 / 255.0,
+                0xcc as f32 / 255.0,
+                0xaa as f32 / 255.0,
+                0x00 as f32 / 255.0,
             ),
+            // Muted red — error
             error: Color::from_rgb(
-                0xe7 as f32 / 255.0,
-                0x4c as f32 / 255.0,
-                0x3c as f32 / 255.0,
+                0xdd as f32 / 255.0,
+                0x22 as f32 / 255.0,
+                0x22 as f32 / 255.0,
             ),
         }
     }
@@ -83,6 +97,6 @@ impl ThemeColors {
 
 impl Default for ThemeColors {
     fn default() -> Self {
-        Self::dark()
+        Self::retro()
     }
 }

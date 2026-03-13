@@ -1,5 +1,18 @@
 # rusty-adb
 
+```text
+╔══════════════════════════════════════════════╗
+║  ██████╗ ██╗   ██╗███████╗████████╗██╗   ██╗║
+║  ██╔══██╗██║   ██║██╔════╝╚══██╔══╝╚██╗ ██╔╝║
+║  ██████╔╝██║   ██║███████╗   ██║    ╚████╔╝ ║
+║  ██╔══██╗██║   ██║╚════██║   ██║     ╚██╔╝  ║
+║  ██║  ██║╚██████╔╝███████║   ██║      ██║   ║
+║  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝      ╚═╝   ║
+║              ─── ADB ───                     ║
+║   Android file manager · Rust · Iced         ║
+╚══════════════════════════════════════════════╝
+```
+
 A native Android file manager for the desktop, built with Rust and [Iced](https://iced.rs).
 
 Browse your Android device's file system, transfer files in both directions, preview images and text, and manage files — all without leaving your terminal workflow.

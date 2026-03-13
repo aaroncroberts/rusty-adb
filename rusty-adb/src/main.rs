@@ -1791,7 +1791,7 @@ impl App {
             .style(move |_t, _s| button::Style {
                 background: Some(t.accent.into()),
                 border: Border {
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -1805,7 +1805,7 @@ impl App {
                 border: Border {
                     color: t.border,
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                 },
                 ..Default::default()
             })
@@ -1840,7 +1840,7 @@ impl App {
                     border: Border {
                         color: t.border,
                         width: 1.0,
-                        radius: 4.0.into(),
+                        radius: 0.0.into(),
                     },
                     ..Default::default()
                 }),
@@ -1981,7 +1981,7 @@ impl App {
             border: Border {
                 color: t.border,
                 width: 1.0,
-                radius: 8.0.into(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         });
@@ -2039,7 +2039,7 @@ impl App {
             .style(move |_t, _s| button::Style {
                 background: Some(t.error.into()),
                 border: Border {
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -2111,7 +2111,7 @@ impl App {
                 border: Border {
                     color: t.border,
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                 },
                 ..Default::default()
             })
@@ -2190,7 +2190,7 @@ impl App {
             border: Border {
                 color: t.border,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         });
@@ -2290,7 +2290,7 @@ impl App {
                     border: Border {
                         color: t.border,
                         width: 1.0,
-                        radius: 4.0.into(),
+                        radius: 0.0.into(),
                     },
                     ..Default::default()
                 })
@@ -2347,7 +2347,7 @@ impl App {
             border: Border {
                 color: t.border,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: 0.0.into(),
             },
             shadow: iced::Shadow {
                 color: iced::Color::BLACK.scale_alpha(0.5),
@@ -2371,7 +2371,7 @@ impl App {
                 border: Border {
                     color: t.border,
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                 },
                 ..Default::default()
             })
@@ -2416,13 +2416,25 @@ impl App {
                 // Body
                 container(
                     column![
-                        text(format!("rusty-adb  v{version}"))
-                            .size(18)
-                            .color(t.text),
+                        // ASCII art logo
+                        column![
+                            text("╔══════════════════════════════╗").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║   ██████╗ ██╗   ██╗███████╗ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║   ██╔══██╗██║   ██║██╔════╝ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║   ██████╔╝██║   ██║███████╗ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║   ██╔══██╗██║   ██║╚════██║ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║   ██║  ██║╚██████╔╝███████║ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ║").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                            text("║          ─── ADB ───          ║").size(11).font(iced::Font::MONOSPACE).color(t.text_secondary),
+                            text(format!("║        version  v{version:<13}║")).size(11).font(iced::Font::MONOSPACE).color(t.text),
+                            text("╚══════════════════════════════╝").size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                        ]
+                        .spacing(0),
+                        text("").size(8), // spacer
                         text("Android file manager built with Rust and Iced.")
                             .size(12)
                             .color(t.text_secondary),
-                        text("").size(6), // spacer
+                        text("").size(4), // spacer
                         github_btn,
                         text("License: MIT").size(11).color(t.text_secondary),
                     ]
@@ -2439,7 +2451,7 @@ impl App {
             border: Border {
                 color: t.border,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         });
@@ -2521,7 +2533,7 @@ impl App {
             .style(move |_th, _s| button::Style {
                 background: Some(t.accent.into()),
                 border: Border {
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -2535,7 +2547,7 @@ impl App {
                 border: Border {
                     color: t.border,
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 0.0.into(),
                 },
                 ..Default::default()
             })
@@ -2604,7 +2616,7 @@ impl App {
             border: Border {
                 color: t.border,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         });
@@ -2915,7 +2927,7 @@ impl App {
                         border: Border {
                             color: border_color,
                             width: 1.0,
-                            radius: 3.0.into(),
+                            radius: 0.0.into(),
                         },
                         ..Default::default()
                     });
@@ -3066,7 +3078,7 @@ impl App {
                         border: Border {
                             color: border_color,
                             width: 1.0,
-                            radius: 4.0.into(),
+                            radius: 0.0.into(),
                         },
                         ..Default::default()
                     });
@@ -3135,7 +3147,10 @@ impl App {
             ViewMode::Icon => self.view_local_icon(),
         };
 
-        let left: Element<Message> = column![local_menu, local_content]
+        let local_path = self.local_pane.current_path.display().to_string();
+        let local_title = self.view_pane_title_bar("LOCAL", &local_path);
+
+        let left: Element<Message> = column![local_title, local_menu, local_content]
             .width(Fill)
             .height(Fill)
             .into();
@@ -3191,7 +3206,10 @@ impl App {
             })
             .into();
 
-        let right: Element<Message> = column![android_menu, android_content]
+        let android_path = self.android_pane.current_path.display().to_string();
+        let android_title = self.view_pane_title_bar("ANDROID", &android_path);
+
+        let right: Element<Message> = column![android_title, android_menu, android_content]
             .width(Fill)
             .height(Fill)
             .into();
@@ -3204,6 +3222,33 @@ impl App {
             });
 
         row![left, divider, right].width(Fill).height(Fill).into()
+    }
+
+    /// Box-drawing title bar rendered above each file-browser pane.
+    ///
+    /// Produces a single line like:  `┌─ LOCAL ─ /home/user ──`
+    /// in monospace accent color on a secondary-background strip.
+    fn view_pane_title_bar<'a>(&self, label: &str, path: &str) -> Element<'a, Message> {
+        let t = self.theme;
+        let title = format!("┌─ {label} ─ {path}");
+        container(
+            text(title)
+                .size(11)
+                .font(iced::Font::MONOSPACE)
+                .color(t.accent),
+        )
+        .width(Fill)
+        .padding([3, 8])
+        .style(move |_th| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 }
 

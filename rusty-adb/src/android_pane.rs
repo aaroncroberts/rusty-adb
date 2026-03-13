@@ -760,7 +760,7 @@ where
             border: iced::Border {
                 color: theme.border,
                 width: 1.0,
-                radius: 4.0.into(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         })
@@ -865,7 +865,7 @@ where
             border: iced::Border {
                 color: theme.border,
                 width: 1.0,
-                radius: 4.0.into(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         })
