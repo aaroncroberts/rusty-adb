@@ -107,6 +107,10 @@ enum Message {
     InstallFailed(String),
     /// Open a URL in the system default browser
     OpenUrl(String),
+    /// start_server() returned an error — show with restart option
+    DaemonStartFailed(String),
+    /// User clicked "Restart Daemon" — runs adb kill-server then start-server
+    RestartDaemon,
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -227,7 +231,9 @@ pub fn main() -> iced::Result {
             let init_task = Task::perform(
                 async {
                     let client = AdbClient::find().await.map_err(|e| e.to_string())?;
-                    let _ = client.start_server().await;
+                    if let Err(e) = client.start_server().await {
+                        return Err(format!("daemon:{}", e));
+                    }
                     Ok::<AdbClient, String>(client)
                 },
                 |result| match result {
@@ -235,15 +241,16 @@ pub fn main() -> iced::Result {
                         tracing::info!(adb = %client.adb_path.display(), "adb ready");
                         Message::AdbReady(Arc::new(client))
                     }
-                    Err(e) => {
-                        // "adb not found" is a known, actionable state — show install UI
-                        if e.starts_with("adb not found") {
-                            tracing::warn!("adb binary not found — showing install guide");
-                            Message::AdbNotFound
-                        } else {
-                            Message::AdbError(e)
-                        }
+                    Err(e) if e.starts_with("adb not found") => {
+                        tracing::warn!("adb binary not found — showing install guide");
+                        Message::AdbNotFound
                     }
+                    Err(e) if e.starts_with("daemon:") => {
+                        let msg = e["daemon:".len()..].to_string();
+                        tracing::warn!(error = %msg, "adb start-server failed");
+                        Message::DaemonStartFailed(msg)
+                    }
+                    Err(e) => Message::AdbError(e),
                 },
             );
             (App::default(), init_task)
@@ -752,7 +759,9 @@ impl App {
                 Task::perform(
                     async {
                         let client = AdbClient::find().await.map_err(|e| e.to_string())?;
-                        let _ = client.start_server().await;
+                        if let Err(e) = client.start_server().await {
+                            return Err(format!("daemon:{}", e));
+                        }
                         Ok::<AdbClient, String>(client)
                     },
                     |result| match result {
@@ -760,13 +769,11 @@ impl App {
                             tracing::info!(adb = %client.adb_path.display(), "adb found on retry");
                             Message::AdbReady(Arc::new(client))
                         }
-                        Err(e) => {
-                            if e.starts_with("adb not found") {
-                                Message::AdbNotFound
-                            } else {
-                                Message::AdbError(e)
-                            }
+                        Err(e) if e.starts_with("adb not found") => Message::AdbNotFound,
+                        Err(e) if e.starts_with("daemon:") => {
+                            Message::DaemonStartFailed(e["daemon:".len()..].to_string())
                         }
+                        Err(e) => Message::AdbError(e),
                     },
                 )
             }
@@ -830,6 +837,42 @@ impl App {
                 self.installing = false;
                 self.install_log.push(format!("✗ {err}"));
                 Task::none()
+            }
+
+            Message::DaemonStartFailed(msg) => {
+                tracing::warn!(error = %msg, "adb start-server failed");
+                self.adb_status = AdbStatus::Error(format!("Daemon error: {msg}"));
+                // Show error banner with note that user can restart daemon
+                self.update(Message::ShowError(format!(
+                    "ADB daemon failed to start: {msg}. Use 'Restart Daemon' in the toolbar."
+                )))
+            }
+
+            Message::RestartDaemon => {
+                tracing::info!("restarting adb daemon (kill-server + start-server)");
+                let client = match &self.adb_client {
+                    Some(c) => c.clone(),
+                    None => return Task::none(),
+                };
+                Task::perform(
+                    async move {
+                        // kill-server first (ignore errors — may already be dead)
+                        let _ = tokio::process::Command::new(&client.adb_path)
+                            .arg("kill-server")
+                            .status()
+                            .await;
+                        // start-server fresh
+                        client.start_server().await.map_err(|e| e.to_string())?;
+                        Ok::<AdbClient, String>(client)
+                    },
+                    |result| match result {
+                        Ok(client) => {
+                            tracing::info!("adb daemon restarted successfully");
+                            Message::AdbReady(Arc::new(client))
+                        }
+                        Err(e) => Message::DaemonStartFailed(e),
+                    },
+                )
             }
 
             Message::OpenUrl(url) => {
@@ -1139,11 +1182,19 @@ impl App {
             if can_copy_to_local { Some(Message::CopyToLocal) } else { None },
         );
 
+        let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
+        let restart_btn = toolbar_btn(
+            "↺ Restart Daemon".to_string(),
+            if daemon_error { t.warning } else { t.text_secondary },
+            if daemon_error { Some(Message::RestartDaemon) } else { None },
+        );
+
         let content = row![
             refresh_btn,
             disconnect_btn,
             copy_to_android_btn,
             copy_to_local_btn,
+            restart_btn,
         ]
         .spacing(8)
         .padding([0, 16])
