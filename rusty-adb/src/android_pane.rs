@@ -676,10 +676,12 @@ impl AndroidPane {
 
         let mut rows: Vec<Element<Message>> = Vec::new();
 
-        // ".." up-navigation — allow all the way to filesystem root "/"
-        let is_at_root = self.current_path == std::path::Path::new("/");
+        // ".." up-navigation — stop at storage roots (e.g. /sdcard) so the
+        // user doesn't end up stranded at the unlistable system "/"
+        let is_at_nav_root = self.current_path == std::path::Path::new("/")
+            || self.storage_roots.contains(&self.current_path);
 
-        if !is_at_root {
+        if !is_at_nav_root {
             if let Some(parent) = self.current_path.parent() {
                 let parent_path = parent.to_path_buf();
                 let up_btn = button(

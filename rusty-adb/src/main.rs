@@ -35,7 +35,7 @@ use transfer::{TransferDirection, TransferEvent, TransferJob};
 use iced::keyboard::{self, key::Named};
 use iced::widget::{
     button, checkbox, column, container, image, pick_list, row, scrollable, stack, text,
-    text_input, toggler, vertical_rule,
+    text_input, toggler, vertical_rule, Row,
 };
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
@@ -534,9 +534,14 @@ pub fn main() -> iced::Result {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "rusty-adb starting");
 
     iced::application(
-        |app: &App| match &app.adb_status {
-            AdbStatus::Connected(name) => format!("rusty-adb — {name}"),
-            _ => "rusty-adb".to_string(),
+        |app: &App| {
+            let version = env!("CARGO_PKG_VERSION");
+            match &app.adb_status {
+                AdbStatus::Connected(name) => {
+                    format!("rusty-adb v{version} - Android File Manager - {name}")
+                }
+                _ => format!("rusty-adb v{version} - Android File Manager"),
+            }
         },
         App::update,
         App::view,
@@ -2640,6 +2645,51 @@ impl App {
                         text("Changes apply on next launch.")
                             .size(11)
                             .color(t.text_secondary),
+                        // ── Divider ─────────────────────────────────────────
+                        container(iced::widget::horizontal_rule(1))
+                            .padding([4, 0])
+                            .width(Fill),
+                        // ── Device Actions ───────────────────────────────────
+                        text("Device Actions").size(11).color(t.text_secondary),
+                        {
+                            let has_device = self.active_serial.is_some();
+                            let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
+                            let action_btn =
+                                move |label: &str, color: iced::Color, msg: Option<Message>| {
+                                    let b = button(text(label.to_string()).size(12).color(color))
+                                        .style(move |_th, _s| button::Style {
+                                            background: Some(t.background_secondary.into()),
+                                            border: Border {
+                                                color: t.border,
+                                                width: 1.0,
+                                                radius: 0.0.into(),
+                                            },
+                                            ..Default::default()
+                                        })
+                                        .padding([5, 14]);
+                                    let elem: Element<Message> = if let Some(m) = msg {
+                                        b.on_press(m).into()
+                                    } else {
+                                        b.into()
+                                    };
+                                    elem
+                                };
+                            let refresh = action_btn("Refresh", t.text, Some(Message::RefreshPanes));
+                            let disconnect = action_btn(
+                                "Disconnect",
+                                if has_device { t.warning } else { t.text_secondary },
+                                if has_device { Some(Message::DisconnectDevice) } else { None },
+                            );
+                            let restart = action_btn(
+                                "Restart Daemon",
+                                if daemon_error { t.warning } else { t.text },
+                                Some(Message::RestartDaemon),
+                            );
+                            let r: Element<Message> = Row::from_vec(vec![refresh, disconnect, restart])
+                                .spacing(8)
+                                .into();
+                            r
+                        },
                     ]
                     .spacing(14),
                 )
@@ -2681,11 +2731,6 @@ impl App {
     fn view_toolbar(&self) -> Element<Message> {
         let t = self.theme;
 
-        // ── Availability flags ───────────────────────────────────────────────
-        let has_device = self.active_serial.is_some();
-
-        let daemon_error = matches!(&self.adb_status, AdbStatus::Error(_));
-
         // ── Button builder helper ─────────────────────────────────────────────
         let toolbar_btn = move |label: String, color: iced::Color, msg: Option<Message>| {
             let lbl = text(label).size(12).color(color);
@@ -2702,25 +2747,11 @@ impl App {
             }
         };
 
-        // ── Buttons (global actions only) ─────────────────────────────────────
-        let refresh_btn = toolbar_btn("Refresh".to_string(), t.text, Some(Message::RefreshPanes));
-
-        let disconnect_btn = toolbar_btn(
-            "Disconnect".to_string(),
-            if has_device { t.warning } else { t.text_secondary },
-            if has_device { Some(Message::DisconnectDevice) } else { None },
-        );
-
-        let restart_btn = toolbar_btn(
-            "Restart Daemon".to_string(),
-            if daemon_error { t.warning } else { t.text_secondary },
-            if daemon_error { Some(Message::RestartDaemon) } else { None },
-        );
-
+        // ── Buttons (toolbar — device actions moved to Settings modal) ────────
         let settings_btn = toolbar_btn("Settings".to_string(), t.text, Some(Message::OpenSettings));
         let about_btn = toolbar_btn("About".to_string(), t.text_secondary, Some(Message::OpenAbout));
 
-        let content = row![refresh_btn, disconnect_btn, restart_btn, settings_btn, about_btn,]
+        let content = row![settings_btn, about_btn,]
             .spacing(8)
             .padding([0, 16])
             .align_y(iced::Alignment::Center);
@@ -2767,9 +2798,10 @@ impl App {
 
         let inner = column![logo, tagline]
             .spacing(1)
-            .padding([4, 12]);
+            .padding([4, 12])
+            .align_x(iced::Alignment::End);
 
-        container(inner)
+        container(row![iced::widget::Space::with_width(Fill), inner])
             .width(Fill)
             .style(move |_| container::Style {
                 background: Some(t.background_secondary.into()),
