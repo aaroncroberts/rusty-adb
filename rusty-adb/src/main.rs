@@ -12,9 +12,11 @@
 #![allow(mismatched_lifetime_syntaxes)]
 
 mod adb;
-mod android_pane;
+mod android_fs;
 mod config;
-mod local_pane;
+mod file_pane;
+mod filesystem;
+mod local_fs;
 mod status_bar;
 mod theme;
 mod transfer;
@@ -25,16 +27,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use adb::{AdbClient, AdbDevice, AndroidEntry, DeviceState};
-use android_pane::{AndroidPane, AndroidPaneState};
-use local_pane::{LocalPane, SortField};
+use adb::{AdbClient, AdbDevice, DeviceState};
+use android_fs::{android_entry_to_dir_entry, AndroidContext, AndroidFs};
+use file_pane::{view_breadcrumb, FilePane, RenameCbs};
+use filesystem::{DirEntry, FileSystem, PaneState, SortField};
+use local_fs::LocalFs;
 use status_bar::{AdbStatus, StatusBar, TransferStatus};
 use theme::ThemeColors;
 use transfer::{TransferDirection, TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
 use iced::widget::{
-    button, checkbox, column, container, image, pick_list, row, scrollable, stack, text,
+    button, column, container, image, pick_list, row, scrollable, stack, text,
     text_input, toggler, vertical_rule, Row,
 };
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
@@ -154,6 +158,8 @@ enum Message {
 
     // ── Local Pane ────────────────────────────────────────────────────────────
     LocalNavigateTo(PathBuf),
+    LocalEntriesLoaded { path: PathBuf, entries: Vec<DirEntry> },
+    LocalLoadError(String),
     LocalSelectEntry(usize),
     LocalToggleHidden,
     LocalToggleType,
@@ -169,8 +175,8 @@ enum Message {
     AndroidNavigateTo(PathBuf),
     AndroidEntriesLoaded {
         path: PathBuf,
-        entries: Arc<Vec<AndroidEntry>>,
-        roots: Arc<Vec<PathBuf>>,
+        entries: Vec<DirEntry>,
+        roots: Vec<PathBuf>,
     },
     AndroidLoadError(String),
     AndroidSelectEntry(usize),
@@ -276,7 +282,7 @@ enum Message {
 
     // ── File Preview ──────────────────────────────────────────────────────────
     /// Double-click on a file entry — check size then pull to temp
-    PreviewFile(AndroidEntry),
+    PreviewFile(DirEntry),
     /// adb pull succeeded — local temp path ready for rendering
     PreviewReady(PathBuf),
     /// adb pull failed
@@ -361,8 +367,9 @@ struct App {
     /// Serial of the currently active (authorized) device
     active_serial: Option<String>,
 
-    local_pane: LocalPane,
-    android_pane: AndroidPane,
+    local_pane: FilePane<LocalFs>,
+    android_pane: FilePane<AndroidFs>,
+    android_ctx: Option<AndroidContext>,
 
     /// Active view mode for the local pane (persists during navigation)
     local_view_mode: ViewMode,
@@ -444,8 +451,9 @@ impl Default for App {
             adb_client: None,
             devices: Vec::new(),
             active_serial: None,
-            local_pane: LocalPane::new(start_path),
-            android_pane: AndroidPane::default(),
+            local_pane: FilePane::new(start_path, PaneState::Loading),
+            android_pane: FilePane::new(PathBuf::from("/sdcard"), PaneState::NoDevice),
+            android_ctx: None,
             local_view_mode: ViewMode::default(),
             android_view_mode: ViewMode::default(),
             local_gallery_idx: 0,
@@ -605,7 +613,7 @@ impl App {
         let device_poll = iced::time::every(Duration::from_secs(2)).map(|_| Message::PollDevices);
 
         // Spinner — only while the Android pane is loading
-        let maybe_spinner = if self.android_pane.state == AndroidPaneState::Loading {
+        let maybe_spinner = if self.android_pane.state == PaneState::Loading {
             let spinner =
                 iced::time::every(Duration::from_millis(120)).map(|_| Message::SpinnerTick);
             Some(spinner)
@@ -747,19 +755,34 @@ impl App {
 
                 match (&self.active_serial, &new_serial) {
                     (None, Some(serial)) => {
-                        // Device just appeared — start loading /sdcard
+                        // Device just appeared — build context and start loading /sdcard
                         tracing::info!(serial = %serial, "device connected, loading /sdcard");
+                        let device_label = self.devices.iter()
+                            .find(|d| &d.serial == serial)
+                            .and_then(|d| d.model.clone())
+                            .unwrap_or_else(|| serial.clone());
+                        let client = self.adb_client.clone()
+                            .expect("adb_client set at AdbReady");
                         self.active_serial = Some(serial.clone());
-                        self.android_pane.on_device_connected();
+                        self.android_ctx = Some(AndroidContext {
+                            client,
+                            serial: serial.clone(),
+                            storage_roots: Vec::new(),
+                            device_label,
+                        });
+                        self.android_pane.state = PaneState::Loading;
                         return self.update(Message::AndroidNavigateTo(PathBuf::from("/sdcard")));
                     }
                     (Some(_), None) => {
-                        // Device disconnected — cancel any active transfer
+                        // Device disconnected — clear context and reset pane
                         tracing::info!("device disconnected");
                         self.active_serial = None;
                         self.active_transfer = None;
                         self.transfer_status = None;
-                        self.android_pane.on_device_disconnected();
+                        self.android_ctx = None;
+                        self.android_pane.state = PaneState::NoDevice;
+                        self.android_pane.entries.clear();
+                        self.android_pane.selected.clear();
                     }
                     _ => {}
                 }
@@ -794,7 +817,26 @@ impl App {
 
             // ── Local Pane ────────────────────────────────────────────────────
             Message::LocalNavigateTo(path) => {
-                self.local_pane.navigate_to(path);
+                self.local_pane.begin_navigate(path.clone());
+                let load_path = path.clone();
+                Task::perform(
+                    async move {
+                        LocalFs::list_dir(&(), &path)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    move |result| match result {
+                        Ok(entries) => Message::LocalEntriesLoaded { path: load_path.clone(), entries },
+                        Err(e) => Message::LocalLoadError(e),
+                    },
+                )
+            }
+            Message::LocalEntriesLoaded { path, entries } => {
+                self.local_pane.on_entries_loaded(path, entries);
+                Task::none()
+            }
+            Message::LocalLoadError(msg) => {
+                self.local_pane.on_error(msg);
                 Task::none()
             }
             Message::LocalSelectEntry(i) => {
@@ -803,7 +845,9 @@ impl App {
             }
             Message::LocalToggleHidden => {
                 self.local_pane.toggle_hidden();
-                Task::none()
+                // Reload after toggling hidden (shows/hides the dot-files)
+                let path = self.local_pane.current_path.clone();
+                self.update(Message::LocalNavigateTo(path))
             }
             Message::LocalToggleType => {
                 self.local_pane.toggle_type();
@@ -818,7 +862,7 @@ impl App {
                 Task::none()
             }
             Message::LocalSortBy(field) => {
-                self.local_pane.sort_by(field);
+                self.local_pane.set_sort(field);
                 Task::none()
             }
             Message::AndroidSortBy(field) => {
@@ -860,27 +904,33 @@ impl App {
                         let roots_fut = client.list_storage_roots(&serial);
                         let (entries_res, roots) = tokio::join!(entries_fut, roots_fut);
                         entries_res
-                            .map(|e| (path, e, roots))
+                            .map(|raw| {
+                                let entries: Vec<DirEntry> = raw
+                                    .into_iter()
+                                    .map(android_entry_to_dir_entry)
+                                    .collect();
+                                (path, entries, roots)
+                            })
                             .map_err(|e| e.to_string())
                     },
                     |result| match result {
                         Ok((path, entries, roots)) => Message::AndroidEntriesLoaded {
                             path,
-                            entries: Arc::new(entries),
-                            roots: Arc::new(roots),
+                            entries,
+                            roots,
                         },
                         Err(e) => Message::AndroidLoadError(e),
                     },
                 )
             }
 
-            Message::AndroidEntriesLoaded {
-                path,
-                entries,
-                roots,
-            } => {
-                self.android_pane
-                    .on_entries_loaded(path, (*entries).clone(), (*roots).clone());
+            Message::AndroidEntriesLoaded { path, entries, roots } => {
+                // Update storage roots in the context so is_nav_root works correctly
+                if let Some(ref mut ctx) = self.android_ctx {
+                    ctx.storage_roots = roots.clone();
+                }
+                self.android_pane.storage_roots = roots;
+                self.android_pane.on_entries_loaded(path, entries);
                 Task::none()
             }
 
@@ -920,14 +970,16 @@ impl App {
 
             // ── Navigation shortcuts ───────────────────────────────────────────
             Message::RefreshPanes => {
-                // Reload local entries in-place
-                self.local_pane.reload();
+                // Reload local pane via async task
+                let local_path = self.local_pane.current_path.clone();
+                let local_task = self.update(Message::LocalNavigateTo(local_path));
                 // Re-fetch the current android directory
-                let path = self.android_pane.current_path.clone();
+                let android_path = self.android_pane.current_path.clone();
                 if self.active_serial.is_some() {
-                    return self.update(Message::AndroidNavigateTo(path));
+                    let android_task = self.update(Message::AndroidNavigateTo(android_path));
+                    return Task::batch([local_task, android_task]);
                 }
-                Task::none()
+                local_task
             }
 
             Message::LocalNavigateUp => {
@@ -1394,7 +1446,7 @@ impl App {
                 // Activate rename for the first selected entry
                 if let Some(&idx) = self.android_pane.selected.first() {
                     self.android_pane.begin_rename(idx);
-                    return text_input::focus(text_input::Id::new(android_pane::RENAME_INPUT_ID));
+                    return text_input::focus(text_input::Id::new(file_pane::RENAME_INPUT_ID));
                 }
                 Task::none()
             }
@@ -2988,15 +3040,16 @@ impl App {
                 .entries
                 .iter()
                 .enumerate()
-                .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir || e.is_symlink, e.name.starts_with('.')))
+                .filter(|(_, e)| self.android_pane.show_hidden || !e.is_hidden)
+                .map(|(i, e)| (i, e.name.clone(), e.is_navigable(), e.is_hidden))
                 .collect()
         } else {
             self.local_pane
                 .entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, e.is_hidden))
+                .filter(|(_, e)| self.local_pane.show_hidden || !e.is_hidden)
+                .map(|(i, e)| (i, e.name.clone(), e.is_navigable(), e.is_hidden))
                 .collect()
         };
 
@@ -3215,9 +3268,9 @@ impl App {
                 .entries
                 .iter()
                 .enumerate()
-                .filter(|(_, e)| self.android_pane.show_hidden || !e.name.starts_with('.'))
+                .filter(|(_, e)| self.android_pane.show_hidden || !e.is_hidden)
                 .map(|(i, e)| {
-                    (i, e.name.clone(), e.is_dir || e.is_symlink, self.android_pane.selected.contains(&i), e.name.starts_with('.'))
+                    (i, e.name.clone(), e.is_navigable(), self.android_pane.selected.contains(&i), e.is_hidden)
                 })
                 .collect()
         } else {
@@ -3225,7 +3278,8 @@ impl App {
                 .entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| (i, e.name.clone(), e.is_dir, self.local_pane.selected.contains(&i), e.is_hidden))
+                .filter(|(_, e)| self.local_pane.show_hidden || !e.is_hidden)
+                .map(|(i, e)| (i, e.name.clone(), e.is_navigable(), self.local_pane.selected.contains(&i), e.is_hidden))
                 .collect()
         };
 
@@ -3364,12 +3418,20 @@ impl App {
 
         let local_content: Element<Message> = match self.local_view_mode {
             // Name-only rows with type icons — compact, maximum density
-            ViewMode::List => self.local_pane.view_list(
-                self.theme,
-                Message::LocalNavigateTo,
-                Message::LocalSelectEntry,
-                Message::LocalSortBy,
-            ),
+            ViewMode::List => {
+                let breadcrumb = view_breadcrumb(
+                    &self.local_pane.current_path, self.theme, Message::LocalNavigateTo,
+                );
+                let list = self.local_pane.view_list(
+                    &(),
+                    self.theme,
+                    Message::LocalNavigateTo,
+                    Message::LocalSelectEntry,
+                    Message::LocalSortBy,
+                    None,
+                );
+                column![breadcrumb, list].width(Fill).height(Fill).into()
+            }
             // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(false),
             ViewMode::Grid => self.view_local_grid(),
@@ -3397,14 +3459,33 @@ impl App {
             no_transfer,
         );
 
+        let default_android_ctx = AndroidContext {
+            client: AdbClient { adb_path: PathBuf::new() },
+            serial: String::new(),
+            storage_roots: Vec::new(),
+            device_label: String::new(),
+        };
+        let android_ctx_ref = self.android_ctx.as_ref().unwrap_or(&default_android_ctx);
+
         let android_content: Element<Message> = match self.android_view_mode {
             // Name-only rows with type icons
-            ViewMode::List => self.android_pane.view_list(
-                self.theme,
-                Message::AndroidNavigateTo,
-                Message::AndroidSelectEntry,
-                Message::AndroidSortBy,
-            ),
+            ViewMode::List => {
+                let breadcrumb = view_breadcrumb(
+                    &self.android_pane.current_path, self.theme, Message::AndroidNavigateTo,
+                );
+                let list = self.android_pane.view_list(
+                    android_ctx_ref,
+                    self.theme,
+                    Message::AndroidNavigateTo,
+                    Message::AndroidSelectEntry,
+                    Message::AndroidSortBy,
+                    Some(RenameCbs {
+                        on_input: Box::new(Message::AndroidRenameInput),
+                        on_commit: Message::AndroidRenameCommit,
+                    }),
+                );
+                column![breadcrumb, list].width(Fill).height(Fill).into()
+            }
             // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(true),
             ViewMode::Grid => self.view_android_grid(),
@@ -3528,19 +3609,33 @@ impl App {
         });
 
         // ── Right: current directory entry list ───────────────────────────────
+        let default_ctx = AndroidContext {
+            client: AdbClient { adb_path: PathBuf::new() },
+            serial: String::new(),
+            storage_roots: Vec::new(),
+            device_label: String::new(),
+        };
         let entry_list: Element<Message> = if is_android {
+            let ctx = self.android_ctx.as_ref().unwrap_or(&default_ctx);
             self.android_pane.view_list(
+                ctx,
                 self.theme,
                 Message::AndroidNavigateTo,
                 Message::AndroidSelectEntry,
                 Message::AndroidSortBy,
+                Some(RenameCbs {
+                    on_input: Box::new(Message::AndroidRenameInput),
+                    on_commit: Message::AndroidRenameCommit,
+                }),
             )
         } else {
             self.local_pane.view_list(
+                &(),
                 self.theme,
                 Message::LocalNavigateTo,
                 Message::LocalSelectEntry,
                 Message::LocalSortBy,
+                None,
             )
         };
 
@@ -3725,11 +3820,11 @@ mod tests {
     #[test]
     fn preview_file_too_large_shows_error() {
         let mut app = App::default();
-        let entry = adb::AndroidEntry {
+        let entry = DirEntry {
             name: "bigvideo.mp4".to_string(),
             path: PathBuf::from("/sdcard/bigvideo.mp4"),
             size: 20 * 1024 * 1024, // 20 MB — over the 10 MB limit
-            modified: "2024-01-15".to_string(),
+            modified_display: "2024-01-15".to_string(),
             is_dir: false,
             is_symlink: false,
             is_hidden: false,
@@ -3952,16 +4047,16 @@ mod tests {
     #[test]
     fn double_click_on_file_triggers_preview_for_small_file() {
         let mut app = App::default();
-        let entry = adb::AndroidEntry {
+        let entry = DirEntry {
             name: "photo.jpg".to_string(),
             path: PathBuf::from("/sdcard/photo.jpg"),
             size: 500 * 1024, // 500 KB — under limit
-            modified: "2024-01-15".to_string(),
+            modified_display: "2024-01-15".to_string(),
             is_dir: false,
             is_symlink: false,
             is_hidden: false,
         };
-        app.android_pane.state = android_pane::AndroidPaneState::Browsing;
+        app.android_pane.state = PaneState::Ready;
         app.android_pane.entries = vec![entry];
 
         // First click — selects
