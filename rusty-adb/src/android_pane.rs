@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Border, Color, Element, Fill};
 
 use crate::adb::AndroidEntry;
@@ -286,22 +286,37 @@ impl AndroidPane {
             let entry_path = self.current_path.join(&name);
             let entry_is_dir = entry.is_dir;
             let on_nav = on_navigate(entry_path);
-            let on_sel = on_select(i);
+            let on_sel_btn = on_select(i);
+            let on_sel_chk = on_select(i);
             rows.push(
-                button(
+                container(
                     row![
-                        text(icon).size(11).color(icon_fg).width(28),
-                        text(name).size(12).color(fg).width(Fill),
+                        checkbox("", is_selected)
+                            .on_toggle(move |_| on_sel_chk.clone())
+                            .size(14),
+                        button(
+                            row![
+                                text(icon).size(11).color(icon_fg).width(28),
+                                text(name).size(12).color(fg).width(Fill),
+                            ]
+                            .spacing(4),
+                        )
+                        .width(Fill)
+                        .style(|_t, _s| button::Style {
+                            background: None,
+                            ..Default::default()
+                        })
+                        .on_press(if entry_is_dir { on_nav } else { on_sel_btn }),
                     ]
-                    .spacing(4)
-                    .padding([1, 4]),
+                    .spacing(6)
+                    .padding([1, 4])
+                    .align_y(iced::Alignment::Center),
                 )
                 .width(Fill)
-                .style(move |_t, _s| button::Style {
+                .style(move |_t| container::Style {
                     background: bg,
                     ..Default::default()
                 })
-                .on_press(if entry_is_dir { on_nav } else { on_sel })
                 .into(),
             );
         }
@@ -653,7 +668,8 @@ impl AndroidPane {
             let entry_path = entry.path.clone();
             let entry_is_dir = entry.is_dir || entry.is_symlink;
             let on_nav = on_navigate(entry_path.clone());
-            let on_sel = on_select(i);
+            let on_sel_btn = on_select(i);
+            let on_sel_chk = on_select(i);
 
             // If this entry is the one being renamed, use the pre-built input row.
             let row_element: Element<Message> = if rename_row
@@ -681,14 +697,29 @@ impl AndroidPane {
                 .spacing(6)
                 .padding([1, 0]);
 
-                button(row_content)
-                    .width(Fill)
-                    .style(move |_t, _s| button::Style {
-                        background: row_bg.map(Into::into),
-                        ..Default::default()
-                    })
-                    .on_press(if entry_is_dir { on_nav } else { on_sel })
-                    .into()
+                container(
+                    row![
+                        checkbox("", is_selected)
+                            .on_toggle(move |_| on_sel_chk.clone())
+                            .size(14),
+                        button(row_content)
+                            .width(Fill)
+                            .style(|_t, _s| button::Style {
+                                background: None,
+                                ..Default::default()
+                            })
+                            .on_press(if entry_is_dir { on_nav } else { on_sel_btn }),
+                    ]
+                    .spacing(6)
+                    .padding([1, 4])
+                    .align_y(iced::Alignment::Center),
+                )
+                .width(Fill)
+                .style(move |_t| container::Style {
+                    background: row_bg.map(Into::into),
+                    ..Default::default()
+                })
+                .into()
             };
 
             rows.push(row_element);

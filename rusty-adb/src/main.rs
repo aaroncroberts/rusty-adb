@@ -34,8 +34,8 @@ use transfer::{TransferDirection, TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
 use iced::widget::{
-    button, column, container, image, pick_list, row, scrollable, stack, text, text_input, toggler,
-    vertical_rule,
+    button, checkbox, column, container, image, pick_list, row, scrollable, stack, text,
+    text_input, toggler, vertical_rule,
 };
 use iced::{Border, Element, Fill, Subscription, Task, Theme};
 
@@ -2499,17 +2499,48 @@ impl App {
                     } else {
                         name.clone()
                     };
+                    let nav_msg = if is_android {
+                        Message::AndroidNavigateTo(current_path.join(name.as_str()))
+                    } else {
+                        Message::LocalNavigateTo(current_path.join(name.as_str()))
+                    };
+                    let sel_msg = if is_android {
+                        Message::AndroidSelectEntry(orig_idx)
+                    } else {
+                        Message::LocalSelectEntry(orig_idx)
+                    };
+                    let open_msg = if is_dir { nav_msg } else { sel_msg.clone() };
+                    let sel_chk = sel_msg;
                     let tile = container(
                         column![
-                            text(icon).size(14).color(icon_fg),
-                            text(short_name).size(10).color(name_fg),
+                            // Checkbox in top-left for selection
+                            row![
+                                checkbox("", is_selected)
+                                    .on_toggle(move |_| sel_chk.clone())
+                                    .size(12),
+                                iced::widget::Space::with_width(Fill),
+                            ],
+                            // Icon + name as a clickable button
+                            button(
+                                column![
+                                    text(icon).size(14).color(icon_fg),
+                                    text(short_name).size(10).color(name_fg),
+                                ]
+                                .spacing(2)
+                                .align_x(iced::Alignment::Center),
+                            )
+                            .width(Fill)
+                            .on_press(open_msg)
+                            .style(|_t, _s| button::Style {
+                                background: None,
+                                ..Default::default()
+                            }),
                         ]
-                        .spacing(2)
-                        .align_x(iced::Alignment::Center),
+                        .spacing(2),
                     )
                     .width(TILE_W)
                     .height(TILE_H)
-                    .padding(6)
+                    .padding(4)
                     .style(move |_t: &Theme| container::Style {
                         background: bg,
                         border: Border {
@@ -2519,27 +2550,7 @@ impl App {
                         },
                         ..Default::default()
                     });
-                    let msg = if is_dir {
-                        if is_android {
-                            Message::AndroidNavigateTo(current_path.join(name.as_str()))
-                        } else {
-                            Message::LocalNavigateTo(current_path.join(name.as_str()))
-                        }
-                    } else if is_android {
-                        Message::AndroidSelectEntry(orig_idx)
-                    } else {
-                        Message::LocalSelectEntry(orig_idx)
-                    };
-                    tile_row.push(
-                        button(tile)
-                            .on_press(msg)
-                            .padding(0)
-                            .style(|_t, _s| button::Style {
-                                background: None,
-                                ..Default::default()
-                            })
-                            .into(),
-                    );
+                    tile_row.push(tile.into());
                 }
                 // Pad incomplete last row so alignment is consistent
                 while tile_row.len() < COLS {
@@ -2602,11 +2613,6 @@ impl App {
                     let bg: Option<iced::Background> =
                         if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
                     let border_color = if is_selected { t.accent } else { t.border };
-                    let icon_art = if is_dir {
-                        "+---+\n| / |\n+---+"
-                    } else {
-                        "+---+\n| - |\n+---+"
-                    };
                     let icon_fg = if is_dir { t.accent } else { t.text_secondary };
                     let name_fg = if is_hidden { t.text_secondary } else { t.text };
                     let display_name = if name.len() > 16 {
@@ -2614,17 +2620,74 @@ impl App {
                     } else {
                         name.clone()
                     };
+
+                    let nav_msg = if is_android {
+                        Message::AndroidNavigateTo(current_path.join(name.as_str()))
+                    } else {
+                        Message::LocalNavigateTo(current_path.join(name.as_str()))
+                    };
+                    let sel_msg = if is_android {
+                        Message::AndroidSelectEntry(orig_idx)
+                    } else {
+                        Message::LocalSelectEntry(orig_idx)
+                    };
+                    let open_msg = if is_dir { nav_msg } else { sel_msg.clone() };
+                    let sel_chk = sel_msg;
+
+                    // For local image files show a live thumbnail; otherwise ASCII art.
+                    let ext = name.rsplit('.').next()
+                        .map(|e| e.to_lowercase())
+                        .unwrap_or_default();
+                    let is_image = !is_dir && !is_android
+                        && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp");
+
+                    let thumb: Element<Message> = if is_image {
+                        let handle = image::Handle::from_path(
+                            current_path.join(name.as_str()),
+                        );
+                        image(handle)
+                            .width(TILE_W - 20)
+                            .height(TILE_H - 30)
+                            .into()
+                    } else {
+                        let icon_art = if is_dir {
+                            "+---+\n| / |\n+---+"
+                        } else {
+                            "+---+\n| - |\n+---+"
+                        };
+                        text(icon_art).size(11).color(icon_fg).into()
+                    };
+
                     let tile = container(
                         column![
-                            text(icon_art).size(11).color(icon_fg),
-                            text(display_name).size(10).color(name_fg),
+                            // Checkbox row at top
+                            row![
+                                checkbox("", is_selected)
+                                    .on_toggle(move |_| sel_chk.clone())
+                                    .size(12),
+                                iced::widget::Space::with_width(Fill),
+                            ],
+                            // Thumbnail/icon + name as clickable button
+                            button(
+                                column![
+                                    thumb,
+                                    text(display_name).size(10).color(name_fg),
+                                ]
+                                .spacing(4)
+                                .align_x(iced::Alignment::Center),
+                            )
+                            .width(Fill)
+                            .on_press(open_msg)
+                            .style(|_t, _s| button::Style {
+                                background: None,
+                                ..Default::default()
+                            }),
                         ]
-                        .spacing(4)
-                        .align_x(iced::Alignment::Center),
+                        .spacing(2),
                     )
                     .width(TILE_W)
                     .height(TILE_H)
-                    .padding(8)
+                    .padding(4)
                     .style(move |_t: &Theme| container::Style {
                         background: bg,
                         border: Border {
@@ -2634,27 +2697,7 @@ impl App {
                         },
                         ..Default::default()
                     });
-                    let msg = if is_dir {
-                        if is_android {
-                            Message::AndroidNavigateTo(current_path.join(name.as_str()))
-                        } else {
-                            Message::LocalNavigateTo(current_path.join(name.as_str()))
-                        }
-                    } else if is_android {
-                        Message::AndroidSelectEntry(orig_idx)
-                    } else {
-                        Message::LocalSelectEntry(orig_idx)
-                    };
-                    tile_row.push(
-                        button(tile)
-                            .on_press(msg)
-                            .padding(0)
-                            .style(|_t, _s| button::Style {
-                                background: None,
-                                ..Default::default()
-                            })
-                            .into(),
-                    );
+                    tile_row.push(tile.into());
                 }
                 while tile_row.len() < COLS {
                     tile_row.push(
