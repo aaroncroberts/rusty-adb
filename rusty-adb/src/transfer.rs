@@ -137,15 +137,16 @@ where
         ),
     };
 
+    // Use "-t <id>" for transport-addressed devices (serial stored as "t:<id>"),
+    // otherwise use the standard "-s <serial>" selector.
+    let (flag, id) = if let Some(tid) = job.serial.strip_prefix("t:") {
+        ("-t", tid)
+    } else {
+        ("-s", job.serial.as_str())
+    };
+
     let mut child = tokio::process::Command::new(&job.adb_path)
-        .args([
-            "-s",
-            &job.serial,
-            adb_verb,
-            "--progress",
-            &source_str,
-            &dest_str,
-        ])
+        .args([flag, id, adb_verb, "--progress", &source_str, &dest_str])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()

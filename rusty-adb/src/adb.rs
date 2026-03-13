@@ -236,14 +236,24 @@ fn parse_devices(output: &str) -> Vec<AdbDevice> {
             continue;
         }
 
-        // Each line: <serial>\t<state>\t[key:value ...]
-        let mut parts = line.splitn(2, '\t');
-        let serial = match parts.next() {
-            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-            _ => continue,
+        // Lines are normally tab-separated: <serial>\t<state>\t[key:value ...]
+        // Some devices (e.g. those with no USB serial) emit space-padded lines
+        // where the "serial" column is "?". Handle both formats.
+        let (raw_serial, rest) = if let Some(tab) = line.find('\t') {
+            (line[..tab].trim(), line[tab + 1..].trim())
+        } else {
+            // Space-padded: first whitespace-delimited token is the serial
+            let trimmed = line.trim();
+            match trimmed.split_once(|c: char| c.is_whitespace()) {
+                Some((s, r)) => (s, r.trim()),
+                None => continue,
+            }
         };
 
-        let rest = parts.next().unwrap_or("").trim();
+        if raw_serial.is_empty() {
+            continue;
+        }
+
         // rest looks like: "device  product:panther model:Pixel_7 ..."
         let mut rest_parts = rest.splitn(2, ' ');
         let state_str = rest_parts.next().unwrap_or("offline");
@@ -252,6 +262,21 @@ fn parse_devices(output: &str) -> Vec<AdbDevice> {
         let kv_part = rest_parts.next().unwrap_or("");
         let model = extract_kv(kv_part, "model").map(|m| m.replace('_', " "));
         let product = extract_kv(kv_part, "product");
+
+        // When the serial is "?" ADB uses transport addressing. Store the
+        // transport_id as "t:<id>" so the command builder can emit "-t <id>"
+        // instead of "-s ?" (which ADB does not accept).
+        let serial = if raw_serial == "?" {
+            match extract_kv(kv_part, "transport_id") {
+                Some(tid) => format!("t:{tid}"),
+                None => {
+                    tracing::warn!("device with '?' serial has no transport_id — skipping");
+                    continue;
+                }
+            }
+        } else {
+            raw_serial.to_string()
+        };
 
         devices.push(AdbDevice {
             serial,
@@ -262,6 +287,18 @@ fn parse_devices(output: &str) -> Vec<AdbDevice> {
     }
 
     devices
+}
+
+/// Returns the ADB target flag pair for a device selector.
+///
+/// Serials stored as `"t:<id>"` (transport-addressed, e.g. when USB serial is
+/// unknown) emit `["-t", "<id>"]`; real serials emit `["-s", "<serial>"]`.
+fn target_args(serial: &str) -> [&str; 2] {
+    if let Some(tid) = serial.strip_prefix("t:") {
+        ["-t", tid]
+    } else {
+        ["-s", serial]
+    }
 }
 
 /// Extract `key:value` from a space-separated list of `key:value` pairs.
@@ -364,7 +401,8 @@ impl AdbClient {
         let path_str = path.to_string_lossy();
 
         let output = Command::new(&self.adb_path)
-            .args(["-s", serial, "shell", "ls", "-la", &*path_str])
+            .args(target_args(serial))
+            .args(["shell", "ls", "-la", &*path_str])
             .output()
             .await
             .context("failed to run adb shell ls -la")?;
@@ -407,7 +445,8 @@ impl AdbClient {
         let from_str = from.to_string_lossy();
         let to_str = to.to_string_lossy();
         let output = Command::new(&self.adb_path)
-            .args(["-s", serial, "shell", "mv", &*from_str, &*to_str])
+            .args(target_args(serial))
+            .args(["shell", "mv", &*from_str, &*to_str])
             .output()
             .await
             .context("failed to run adb shell mv")?;
@@ -422,7 +461,8 @@ impl AdbClient {
     pub async fn delete(&self, serial: &str, path: &std::path::Path) -> Result<()> {
         let path_str = path.to_string_lossy();
         let output = Command::new(&self.adb_path)
-            .args(["-s", serial, "shell", "rm", "-rf", &*path_str])
+            .args(target_args(serial))
+            .args(["shell", "rm", "-rf", &*path_str])
             .output()
             .await
             .context("failed to run adb shell rm -rf")?;
@@ -454,7 +494,8 @@ impl AdbClient {
         let local_str = local_path.to_string_lossy().into_owned();
 
         let output = Command::new(&self.adb_path)
-            .args(["-s", serial, "pull", &*remote_str, &*local_str])
+            .args(target_args(serial))
+            .args(["pull", &*remote_str, &*local_str])
             .output()
             .await
             .context("failed to run adb pull")?;
@@ -479,7 +520,8 @@ impl AdbClient {
         let mut roots = vec![PathBuf::from("/sdcard")];
 
         let Ok(output) = Command::new(&self.adb_path)
-            .args(["-s", serial, "shell", "ls", "/storage/"])
+            .args(target_args(serial))
+            .args(["shell", "ls", "/storage/"])
             .output()
             .await
         else {
@@ -644,6 +686,20 @@ mod tests {
         let input = "List of devices attached\n";
         let devices = parse_devices(input);
         assert!(devices.is_empty());
+    }
+
+    /// Devices without a USB serial emit space-padded lines with "?" as serial.
+    /// The parser should fall back to transport_id and store it as "t:<id>".
+    #[test]
+    fn parse_question_mark_serial_uses_transport_id() {
+        let input = "List of devices attached\n\
+                     ?                      device usb:2-1 product:some_product model:Some_Model device:some_device transport_id:3\n";
+        let devices = parse_devices(input);
+        assert_eq!(devices.len(), 1);
+        let d = &devices[0];
+        assert_eq!(d.serial, "t:3", "should encode transport_id as selector");
+        assert_eq!(d.state, DeviceState::Device);
+        assert!(d.model.is_some(), "model should be parsed from kv pairs");
     }
 
     #[test]
