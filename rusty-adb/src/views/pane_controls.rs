@@ -410,22 +410,24 @@ impl App {
 
         // ── Storage root chips (android only, when external media is present) ─
         if is_android {
-            // Deduplicate: skip /storage/emulated/N when /sdcard is also present.
-            let has_sdcard = self
+            // Deduplicate: prefer the real /storage/emulated/N path over /sdcard
+            // (a symlink). Showing both would be redundant; the canonical path
+            // produces a consistent breadcrumb alongside /storage/external_sd.
+            let has_emulated = self
                 .android_pane
                 .storage_roots
                 .iter()
-                .any(|r| r == Path::new("/sdcard"));
+                .any(|r| r.to_string_lossy().starts_with("/storage/emulated/"));
             let display_roots: Vec<&PathBuf> = self
                 .android_pane
                 .storage_roots
                 .iter()
                 .filter(|r| {
-                    if has_sdcard {
-                        !r.to_string_lossy().starts_with("/storage/emulated/")
-                    } else {
-                        true
+                    // Drop the /sdcard symlink when the real emulated path exists.
+                    if has_emulated && *r == Path::new("/sdcard") {
+                        return false;
                     }
+                    true
                 })
                 .collect();
 
@@ -434,7 +436,11 @@ impl App {
                 let mut chips: Vec<Element<'a, Message>> = Vec::new();
                 for root in display_roots {
                     let label = storage_root_label(root);
-                    let is_active = current.starts_with(root);
+                    // An emulated root is "active" both when the current path is
+                    // under it AND when it's under /sdcard (the symlink alias).
+                    let is_active = current.starts_with(root)
+                        || (root.to_string_lossy().starts_with("/storage/emulated/")
+                            && current.starts_with("/sdcard"));
                     let color = if is_active { t.accent } else { t.text_secondary };
                     let path = root.clone();
                     chips.push(
