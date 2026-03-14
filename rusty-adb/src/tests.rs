@@ -496,3 +496,123 @@ fn view_panes_android_expanded_renders_without_panic() {
     };
     let _: iced::Element<Message> = app.view();
 }
+
+// ── Banner view smoke tests ─────────────────────────────────────────────────
+
+/// `view_error_banner` is exercised through `App::view` when error_banner is set.
+#[test]
+fn view_error_banner_renders_without_panic() {
+    let app = App {
+        error_banner: Some("Something went wrong".to_string()),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_toast_banner` is exercised through `App::view` when toast is set.
+#[test]
+fn view_toast_banner_renders_without_panic() {
+    let app = App {
+        toast: Some("Transfer complete".to_string()),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_delete_confirm` with a single file — confirms the singular label path.
+#[test]
+fn view_delete_confirm_single_file_renders_without_panic() {
+    let app = App {
+        delete_confirm_paths: Some(vec![PathBuf::from("/sdcard/photo.jpg")]),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_delete_confirm` with multiple files — confirms the plural label path.
+#[test]
+fn view_delete_confirm_multiple_files_renders_without_panic() {
+    let app = App {
+        delete_confirm_paths: Some(vec![
+            PathBuf::from("/sdcard/a.jpg"),
+            PathBuf::from("/sdcard/b.jpg"),
+            PathBuf::from("/sdcard/c.jpg"),
+        ]),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+// ── Modal view smoke tests ──────────────────────────────────────────────────
+
+/// `view_about_modal` is stacked over the base UI when `about_open = true`.
+#[test]
+fn view_about_modal_renders_without_panic() {
+    let app = App {
+        about_open: true,
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_settings_modal` is stacked when `settings_open = true`.
+#[test]
+fn view_settings_modal_renders_without_panic() {
+    let app = App {
+        settings_open: true,
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_log_viewer` is the outermost overlay when `log_viewer_open = true`.
+#[test]
+fn view_log_viewer_renders_without_panic() {
+    let app = App {
+        log_viewer_open: true,
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_preview_modal` with an image path.
+#[test]
+fn view_preview_modal_image_renders_without_panic() {
+    let app = App {
+        preview_modal: Some(PreviewContent::Image(PathBuf::from("/tmp/photo.jpg"))),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_preview_modal` with text content.
+#[test]
+fn view_preview_modal_text_renders_without_panic() {
+    let app = App {
+        preview_modal: Some(PreviewContent::Text("line1\nline2\n".to_string())),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// `view_preview_modal` with an unsupported file type message.
+#[test]
+fn view_preview_modal_unsupported_renders_without_panic() {
+    let app = App {
+        preview_modal: Some(PreviewContent::Unsupported(
+            "Preview not available for .exe files".to_string(),
+        )),
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}
+
+/// ADB not found — renders the setup guide instead of the panes.
+#[test]
+fn view_adb_not_found_renders_without_panic() {
+    let app = App {
+        adb_status: AdbStatus::NotFound,
+        ..Default::default()
+    };
+    let _: iced::Element<Message> = app.view();
+}

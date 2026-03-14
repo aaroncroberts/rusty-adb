@@ -394,4 +394,94 @@ mod tests {
             );
         }
     }
+
+    // ── view_pane_menu_bar smoke tests ─────────────────────────────────────
+
+    fn default_state() -> PaneMenuState {
+        PaneMenuState {
+            local_sel_has_files: false,
+            android_sel_has_files: false,
+            android_sel_single: false,
+            android_sel_nonempty: false,
+            has_device: false,
+            no_transfer: true,
+        }
+    }
+
+    #[test]
+    fn view_pane_menu_bar_local_no_selection_renders() {
+        let app = crate::App::default();
+        let _ = app.view_pane_menu_bar(false, crate::ViewMode::List, false, default_state());
+    }
+
+    #[test]
+    fn view_pane_menu_bar_android_no_selection_renders() {
+        let app = crate::App::default();
+        let _ = app.view_pane_menu_bar(true, crate::ViewMode::List, false, default_state());
+    }
+
+    #[test]
+    fn view_pane_menu_bar_android_with_device_and_selection_renders() {
+        let app = crate::App::default();
+        let state = PaneMenuState {
+            local_sel_has_files: false,
+            android_sel_has_files: true,
+            android_sel_single: true,
+            android_sel_nonempty: true,
+            has_device: true,
+            no_transfer: true,
+        };
+        let _ = app.view_pane_menu_bar(true, crate::ViewMode::Details, false, state);
+    }
+
+    #[test]
+    fn view_pane_menu_bar_local_with_device_and_files_selected_renders() {
+        let app = crate::App::default();
+        let state = PaneMenuState {
+            local_sel_has_files: true,
+            android_sel_has_files: false,
+            android_sel_single: false,
+            android_sel_nonempty: false,
+            has_device: true,
+            no_transfer: true,
+        };
+        let _ = app.view_pane_menu_bar(false, crate::ViewMode::Grid, true, state);
+    }
+
+    #[test]
+    fn view_pane_menu_bar_all_view_modes_render() {
+        let app = crate::App::default();
+        for mode in [
+            crate::ViewMode::List,
+            crate::ViewMode::Details,
+            crate::ViewMode::Grid,
+            crate::ViewMode::Icon,
+        ] {
+            let _ = app.view_pane_menu_bar(false, mode, false, default_state());
+        }
+    }
+
+    // ── shared_views smoke tests ───────────────────────────────────────────
+
+    #[test]
+    fn view_error_without_retry_renders() {
+        use crate::file_pane::view_error;
+        let theme = crate::App::default().theme;
+        let _: iced::Element<crate::Message> = view_error(theme, "directory not found", None);
+    }
+
+    #[test]
+    fn view_error_with_retry_renders() {
+        use crate::file_pane::view_error;
+        let theme = crate::App::default().theme;
+        let _: iced::Element<crate::Message> =
+            view_error(theme, "timeout", Some(crate::Message::RefreshPanes));
+    }
+
+    #[test]
+    fn view_connect_guide_renders() {
+        use crate::file_pane::view_connect_guide;
+        let theme = crate::App::default().theme;
+        let _: iced::Element<crate::Message> = view_connect_guide(theme);
+    }
 }
