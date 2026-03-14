@@ -54,14 +54,21 @@ pub fn load_local_entries(path: &PathBuf) -> Result<Vec<DirEntry>, FsError> {
                 .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                 .map(|d| format_unix_date(d.as_secs()))
                 .unwrap_or_else(|| "--".to_string());
+            let is_dir = meta.is_dir();
+            let child_count = if is_dir {
+                std::fs::read_dir(entry.path()).ok().map(|d| d.count())
+            } else {
+                None
+            };
             Some(DirEntry {
                 path: entry.path(),
-                is_dir: meta.is_dir(),
+                is_dir,
                 is_symlink: false,
                 size: meta.len(),
                 modified_display,
                 is_hidden,
                 name,
+                child_count,
             })
         })
         .collect();

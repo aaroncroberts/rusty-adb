@@ -65,5 +65,6 @@ pub fn android_entry_to_dir_entry(e: AndroidEntry) -> DirEntry {
         is_dir: e.is_dir,
         is_symlink: e.is_symlink,
         is_hidden: e.is_hidden,
+        child_count: None, // counting would require one extra `adb ls` per directory
     }
 }

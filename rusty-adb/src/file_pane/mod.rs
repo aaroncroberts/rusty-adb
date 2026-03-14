@@ -343,6 +343,7 @@ mod tests {
                 is_dir: false,
                 is_symlink: false,
                 is_hidden: false,
+                child_count: None,
             },
         ]);
         pane.select(0);
@@ -401,6 +402,7 @@ mod tests {
                 is_dir: false,
                 is_symlink: false,
                 is_hidden: false,
+                child_count: None,
             },
         ]);
         pane.begin_rename(0);

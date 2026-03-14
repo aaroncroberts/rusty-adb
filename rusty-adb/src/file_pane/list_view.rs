@@ -29,7 +29,7 @@ impl<FS: FileSystem> FilePane<FS> {
         // ── Column widths (shared between header and every data row) ──────────
         const W_ICON: u16 = 24;
         const W_TYPE: u16 = 52;
-        const W_SIZE: u16 = 72;
+        const W_SIZE: u16 = 84;
         const W_DATE: u16 = 90;
 
         let t = theme;

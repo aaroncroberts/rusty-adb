@@ -39,14 +39,21 @@ pub struct DirEntry {
     /// Always `false` for local filesystem entries.
     pub is_symlink: bool,
     pub is_hidden: bool,
+    /// Number of immediate children for directories, when available.
+    /// `None` when counting would be expensive (Android backend).
+    pub child_count: Option<usize>,
 }
 
 impl DirEntry {
-    /// Human-readable file size: directories and symlinks show `"--"`,
-    /// files show KB / MB / GB.
+    /// Human-readable size column value:
+    /// - Directories: item count if known (`"3 items"` / `"1 item"`), else `"--"`.
+    /// - Files and symlinks: formatted byte size (`"2 KB"`, `"1.4 MB"`, …).
     pub fn size_display(&self) -> String {
         if self.is_dir {
-            "--".to_string()
+            match self.child_count {
+                Some(n) => format!("{} {}", n, if n == 1 { "item" } else { "items" }),
+                None => "--".to_string(),
+            }
         } else {
             format_size(self.size)
         }
@@ -248,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn dir_entry_size_display_dir() {
+    fn dir_entry_size_display_dir_no_count() {
         let e = DirEntry {
             name: "foo".into(),
             path: PathBuf::from("/tmp/foo"),
@@ -257,8 +264,39 @@ mod tests {
             is_dir: true,
             is_symlink: false,
             is_hidden: false,
+            child_count: None,
         };
         assert_eq!(e.size_display(), "--");
+    }
+
+    #[test]
+    fn dir_entry_size_display_dir_with_count() {
+        let e = DirEntry {
+            name: "foo".into(),
+            path: PathBuf::from("/tmp/foo"),
+            size: 4096,
+            modified_display: "--".into(),
+            is_dir: true,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: Some(3),
+        };
+        assert_eq!(e.size_display(), "3 items");
+    }
+
+    #[test]
+    fn dir_entry_size_display_dir_singular() {
+        let e = DirEntry {
+            name: "foo".into(),
+            path: PathBuf::from("/tmp/foo"),
+            size: 0,
+            modified_display: "--".into(),
+            is_dir: true,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: Some(1),
+        };
+        assert_eq!(e.size_display(), "1 item");
     }
 
     #[test]
@@ -271,6 +309,7 @@ mod tests {
             is_dir: false,
             is_symlink: false,
             is_hidden: false,
+            child_count: None,
         };
         assert_eq!(e.size_display(), "2 KB");
     }
@@ -285,6 +324,7 @@ mod tests {
             is_dir: true,
             is_symlink: false,
             is_hidden: false,
+            child_count: None,
         };
         assert!(e.is_navigable());
         assert_eq!(e.icon(), "[/]");
@@ -301,6 +341,7 @@ mod tests {
             is_dir: false,
             is_symlink: true,
             is_hidden: false,
+            child_count: None,
         };
         assert!(e.is_navigable());
         assert_eq!(e.icon(), "[@]");
@@ -317,6 +358,7 @@ mod tests {
             is_dir: false,
             is_symlink: false,
             is_hidden: false,
+            child_count: None,
         };
         assert!(!e.is_navigable());
         assert_eq!(e.icon(), "[-]");

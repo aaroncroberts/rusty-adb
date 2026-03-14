@@ -150,6 +150,7 @@ fn preview_file_too_large_shows_error() {
         is_dir: false,
         is_symlink: false,
         is_hidden: false,
+        child_count: None,
     };
     let _ = app.update(Message::PreviewFile(entry));
     assert!(app.error_banner.is_some());
@@ -377,6 +378,7 @@ fn double_click_on_file_triggers_preview_for_small_file() {
         is_dir: false,
         is_symlink: false,
         is_hidden: false,
+        child_count: None,
     };
     app.android_pane.state = PaneState::Ready;
     app.android_pane.entries = vec![entry];
