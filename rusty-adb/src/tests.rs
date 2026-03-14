@@ -616,3 +616,202 @@ fn view_adb_not_found_renders_without_panic() {
     };
     let _: iced::Element<Message> = app.view();
 }
+
+// ── Device connect / disconnect integration tests ──────────────────────────
+//
+// These tests drive App::update() with message sequences that simulate the
+// full device lifecycle. Task::perform closures are discarded (never executed),
+// so no real ADB binary is needed.
+
+/// When DevicesLoaded arrives with a new authorized device,
+/// the android pane must transition to Loading and active_serial must be set.
+///
+/// Note: constructing a fake AdbClient is valid here because Task::perform
+/// is lazy — the async closure runs only when driven by the Iced runtime.
+/// Unit tests that discard the returned Task never invoke ADB.
+#[test]
+fn devicesloaded_new_device_transitions_pane_to_loading() {
+    use std::sync::Arc;
+    let mut app = App {
+        adb_client: Some(AdbClient { adb_path: PathBuf::from("/fake/adb") }),
+        ..Default::default()
+    };
+    assert_eq!(app.android_pane.state, PaneState::NoDevice);
+    assert!(app.active_serial.is_none());
+
+    let device = AdbDevice {
+        serial: "TEST001".to_string(),
+        state: adb::DeviceState::Device,
+        model: Some("Pixel 7".to_string()),
+        product: None,
+    };
+    let _ = app.update(Message::DevicesLoaded(Arc::new(vec![device])));
+
+    assert_eq!(app.android_pane.state, PaneState::Loading,
+        "pane should be Loading after device connect");
+    assert_eq!(app.active_serial.as_deref(), Some("TEST001"),
+        "active_serial must be set to the new device serial");
+}
+
+/// When DevicesLoaded arrives with no devices while a device was active,
+/// active_serial is cleared and the pane state reverts to NoDevice.
+#[test]
+fn devicesloaded_disconnect_clears_active_serial_and_pane() {
+    use std::sync::Arc;
+    let mut app = App {
+        adb_client: Some(AdbClient { adb_path: PathBuf::from("/fake/adb") }),
+        active_serial: Some("TEST001".to_string()),
+        ..Default::default()
+    };
+    app.android_pane.state = PaneState::Ready;
+
+    let _ = app.update(Message::DevicesLoaded(Arc::new(vec![])));
+
+    assert!(app.active_serial.is_none(), "active_serial must be cleared");
+    assert_eq!(app.android_pane.state, PaneState::NoDevice,
+        "pane state must revert to NoDevice");
+}
+
+/// When DevicesLoaded sees the same device already active, nothing changes.
+#[test]
+fn devicesloaded_same_device_is_no_change() {
+    use std::sync::Arc;
+    let mut app = App {
+        adb_client: Some(AdbClient { adb_path: PathBuf::from("/fake/adb") }),
+        active_serial: Some("TEST001".to_string()),
+        ..Default::default()
+    };
+    app.android_pane.state = PaneState::Ready;
+
+    let device = AdbDevice {
+        serial: "TEST001".to_string(),
+        state: adb::DeviceState::Device,
+        model: Some("Pixel 7".to_string()),
+        product: None,
+    };
+    let _ = app.update(Message::DevicesLoaded(Arc::new(vec![device])));
+
+    assert_eq!(app.active_serial.as_deref(), Some("TEST001"),
+        "serial unchanged for same device");
+    assert_eq!(app.android_pane.state, PaneState::Ready,
+        "pane state unchanged for same device");
+}
+
+/// When AndroidEntriesLoaded arrives, the pane transitions from Loading to Ready
+/// and the entries are stored.
+#[test]
+fn android_entries_loaded_transitions_pane_to_ready() {
+    let mut app = App::default();
+    app.android_pane.state = PaneState::Loading;
+
+    let entries = vec![
+        DirEntry {
+            name: "DCIM".to_string(),
+            path: PathBuf::from("/sdcard/DCIM"),
+            size: 0,
+            modified_display: "2024-01-01".to_string(),
+            is_dir: true,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: None,
+        },
+        DirEntry {
+            name: "photo.jpg".to_string(),
+            path: PathBuf::from("/sdcard/photo.jpg"),
+            size: 512 * 1024,
+            modified_display: "2024-01-02".to_string(),
+            is_dir: false,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: None,
+        },
+    ];
+    let _ = app.update(Message::AndroidEntriesLoaded {
+        path: PathBuf::from("/sdcard"),
+        entries,
+        roots: vec![PathBuf::from("/sdcard")],
+    });
+
+    assert_eq!(app.android_pane.state, PaneState::Ready,
+        "pane should transition to Ready after entries loaded");
+    assert_eq!(app.android_pane.entries.len(), 2,
+        "both entries should be stored");
+    assert_eq!(app.android_pane.entries[0].name, "DCIM");
+    assert_eq!(app.android_pane.entries[1].name, "photo.jpg");
+    assert_eq!(app.android_pane.current_path, PathBuf::from("/sdcard"),
+        "current_path must be updated");
+}
+
+/// Local pane: LocalEntriesLoaded transitions to Ready with correct entries.
+#[test]
+fn local_entries_loaded_transitions_pane_to_ready() {
+    let mut app = App::default();
+    app.local_pane.state = PaneState::Loading;
+
+    let entries = vec![DirEntry {
+        name: "Documents".to_string(),
+        path: PathBuf::from("/Users/aaron/Documents"),
+        size: 0,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: true,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: Some(10),
+    }];
+
+    let _ = app.update(Message::LocalEntriesLoaded {
+        path: PathBuf::from("/Users/aaron"),
+        entries,
+    });
+
+    assert_eq!(app.local_pane.state, PaneState::Ready);
+    assert_eq!(app.local_pane.entries.len(), 1);
+    assert_eq!(app.local_pane.entries[0].name, "Documents");
+}
+
+/// Android load error transitions pane to an error state.
+#[test]
+fn android_load_error_sets_error_state() {
+    let mut app = App::default();
+    app.android_pane.state = PaneState::Loading;
+
+    let _ = app.update(Message::AndroidLoadError("connection refused".to_string()));
+
+    assert!(
+        matches!(app.android_pane.state, PaneState::Error(_)),
+        "pane should be in Error state after load failure"
+    );
+}
+
+/// A stale AndroidEntriesLoaded arriving after disconnect must NOT change pane
+/// state. `FilePane::on_entries_loaded` guards against this by ignoring any
+/// update when the state is not `Loading`.
+#[test]
+fn stale_entries_loaded_after_disconnect_is_ignored() {
+    let mut app = App::default();
+    // Simulate: device was disconnected — pane reset to NoDevice
+    app.active_serial = None;
+    app.android_pane.state = PaneState::NoDevice;
+
+    // Stale response arrives from a Task that was in-flight before disconnect
+    let _ = app.update(Message::AndroidEntriesLoaded {
+        path: PathBuf::from("/sdcard"),
+        entries: vec![],
+        roots: vec![],
+    });
+
+    // Stale response must be silently dropped — state stays NoDevice
+    assert_eq!(app.android_pane.state, PaneState::NoDevice,
+        "stale entries must not override NoDevice state");
+}
+
+/// AdbError increments the daemon_error_count.
+#[test]
+fn adb_error_increments_error_count() {
+    let mut app = App::default();
+    assert_eq!(app.daemon_error_count, 0);
+    let _ = app.update(Message::AdbError("timeout".to_string()));
+    assert_eq!(app.daemon_error_count, 1);
+    let _ = app.update(Message::AdbError("timeout".to_string()));
+    assert_eq!(app.daemon_error_count, 2);
+}
