@@ -3,7 +3,8 @@
 //! Phosphor-green-on-near-black palette that evokes classic CRT terminals
 //! (think Midnight Commander or a green-screen VT100).
 
-use iced::Color;
+use iced::widget::{button, container};
+use iced::{Border, Color};
 
 /// Main color palette — retro terminal aesthetic.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,6 +92,120 @@ impl ThemeColors {
                 0x22 as f32 / 255.0,
                 0x22 as f32 / 255.0,
             ),
+        }
+    }
+}
+
+impl ThemeColors {
+    // ── Style helpers — return closures for use with .style() ─────────────────
+
+    /// Transparent/ghost button — no background, no border. For text-only and icon buttons.
+    pub fn transparent_button(self) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+        move |_, _| button::Style {
+            background: None,
+            ..Default::default()
+        }
+    }
+
+    /// Accent-filled button — prominent primary action (install, save).
+    pub fn accent_button(self) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+        move |_, _| button::Style {
+            background: Some(self.accent.into()),
+            border: Border {
+                radius: 0.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Secondary button — `background_secondary` fill with a 1px border. Standard action.
+    pub fn secondary_button(self) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+        move |_, _| button::Style {
+            background: Some(self.background_secondary.into()),
+            border: Border {
+                color: self.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Error/destructive button — red fill for dangerous actions (delete).
+    pub fn error_button(self) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+        move |_, _| button::Style {
+            background: Some(self.error.into()),
+            border: Border {
+                radius: 0.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Secondary panel — `background_secondary` fill with a 1px border. Most common panel style.
+    pub fn secondary_panel(self) -> impl Fn(&iced::Theme) -> container::Style {
+        move |_| container::Style {
+            background: Some(self.background_secondary.into()),
+            border: Border {
+                color: self.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Primary panel — `background` fill with a 1px border. For modal cards and main content areas.
+    pub fn primary_panel(self) -> impl Fn(&iced::Theme) -> container::Style {
+        move |_| container::Style {
+            background: Some(self.background.into()),
+            border: Border {
+                color: self.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Error notification banner — subtle red tint with red border.
+    pub fn error_banner(self) -> impl Fn(&iced::Theme) -> container::Style {
+        move |_| container::Style {
+            background: Some(self.error.scale_alpha(0.12).into()),
+            border: Border {
+                color: self.error.scale_alpha(0.4),
+                width: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Warning/delete-confirm banner — subtle amber tint.
+    pub fn warning_banner(self) -> impl Fn(&iced::Theme) -> container::Style {
+        move |_| container::Style {
+            background: Some(self.warning.scale_alpha(0.15).into()),
+            border: Border {
+                color: self.warning.scale_alpha(0.5),
+                width: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Success/toast banner — subtle green tint.
+    pub fn success_banner(self) -> impl Fn(&iced::Theme) -> container::Style {
+        move |_| container::Style {
+            background: Some(self.success.scale_alpha(0.15).into()),
+            border: Border {
+                color: self.success.scale_alpha(0.5),
+                width: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
         }
     }
 }

@@ -5,10 +5,9 @@ use crate::adb::AdbClient;
 use crate::android_fs::AndroidContext;
 use crate::file_pane::{view_breadcrumb, RenameCbs};
 use crate::status_bar::AdbStatus;
-use crate::adb::DeviceState;
 use iced::widget::{
     button, column, container, image, pick_list, row, scrollable, stack, text,
-    text_input, toggler, vertical_rule, Row,
+    toggler, vertical_rule, Row,
 };
 use iced::{Border, Element, Fill, Theme};
 
@@ -74,35 +73,17 @@ impl App {
         let install_label = "Download Platform Tools";
 
         let install_btn = button(text(install_label).size(13).color(iced::Color::WHITE))
-            .style(move |_t, _s| button::Style {
-                background: Some(t.accent.into()),
-                border: Border {
-                    radius: 0.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.accent_button())
             .padding([8, 16])
             .on_press(Message::InstallAdb);
 
         let retry_btn = button(text("Retry Detection").size(13).color(t.text))
-            .style(move |_t, _s| button::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(t.secondary_button())
             .padding([8, 16])
             .on_press(Message::RetryAdbFind);
 
         let download_btn = button(text("Download Manually").size(13).color(t.accent))
-            .style(move |_t, _s| button::Style {
-                background: None,
-                ..Default::default()
-            })
+            .style(t.transparent_button())
             .on_press(Message::OpenUrl(
                 "https://developer.android.com/tools/releases/platform-tools".to_string(),
             ));
@@ -121,15 +102,7 @@ impl App {
                 )
                 .width(Fill)
                 .padding([8, 12])
-                .style(move |_t| container::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
+                .style(t.secondary_panel()),
             )
             .height(120)
             .into()
@@ -262,15 +235,7 @@ impl App {
             .height(Fill),
         )
         .padding(32)
-        .style(move |_t| container::Style {
-            background: Some(t.background_secondary.into()),
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(t.secondary_panel());
 
         container(card)
             .width(Fill)
@@ -286,10 +251,7 @@ impl App {
             text(format!("[!] {msg}")).size(12).color(t.error),
             iced::widget::Space::with_width(Fill),
             button(text("X").size(11).color(t.error))
-                .style(move |_t, _s| button::Style {
-                    background: None,
-                    ..Default::default()
-                })
+                .style(t.transparent_button())
                 .on_press(Message::DismissError),
         ]
         .align_y(iced::Alignment::Center)
@@ -297,15 +259,7 @@ impl App {
 
         container(content)
             .width(Fill)
-            .style(move |_t| container::Style {
-                background: Some(t.error.scale_alpha(0.12).into()),
-                border: Border {
-                    color: t.error.scale_alpha(0.4),
-                    width: 1.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.error_banner())
             .into()
     }
 
@@ -322,22 +276,12 @@ impl App {
         };
 
         let confirm_btn = button(text("Confirm Delete").size(12).color(iced::Color::WHITE))
-            .style(move |_t, _s| button::Style {
-                background: Some(t.error.into()),
-                border: Border {
-                    radius: 0.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.error_button())
             .padding([4, 12])
             .on_press(Message::AndroidDeleteConfirm);
 
         let cancel_btn = button(text("Cancel").size(12).color(t.text))
-            .style(move |_t, _s| button::Style {
-                background: None,
-                ..Default::default()
-            })
+            .style(t.transparent_button())
             .padding([4, 8])
             .on_press(Message::AndroidDeleteCancel);
 
@@ -352,15 +296,7 @@ impl App {
 
         container(content)
             .width(Fill)
-            .style(move |_t| container::Style {
-                background: Some(t.warning.scale_alpha(0.15).into()),
-                border: Border {
-                    color: t.warning.scale_alpha(0.5),
-                    width: 1.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.warning_banner())
             .into()
     }
 
@@ -392,15 +328,7 @@ impl App {
         let t = self.theme;
 
         let close_btn = button(text("X  Close").size(12).color(t.text))
-            .style(move |_th, _s| button::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(t.secondary_button())
             .padding([4, 12])
             .on_press(Message::ClosePreview);
 
@@ -447,15 +375,7 @@ impl App {
                     .padding([4, 8]),
                 )
                 .width(Fill)
-                .style(move |_th| container::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+                .style(t.secondary_panel()),
                 // Content area
                 container(preview_body)
                     .width(Fill)
@@ -471,15 +391,7 @@ impl App {
         )
         .width(700)
         .height(500)
-        .style(move |_th| container::Style {
-            background: Some(t.background.into()),
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(t.primary_panel());
 
         // Semi-transparent backdrop — fills the full window
         Self::modal_backdrop(card)
@@ -571,15 +483,7 @@ impl App {
             text("Level:").size(11).color(t.text_secondary),
             level_picker,
             button(text("Close").size(11).color(t.text))
-                .style(move |_th: &Theme, _s| button::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .style(t.secondary_button())
                 .padding([2, 10])
                 .on_press(Message::CloseLogViewer),
         ]
@@ -597,15 +501,7 @@ impl App {
                     .padding([6, 10]),
                 )
                 .width(Fill)
-                .style(move |_th| container::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+                .style(t.secondary_panel()),
                 // Toolbar
                 container(toolbar)
                     .width(Fill)
@@ -652,15 +548,7 @@ impl App {
         let version = env!("CARGO_PKG_VERSION");
 
         let close_btn = button(text("X  Close").size(12).color(t.text))
-            .style(move |_th, _s| button::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(t.secondary_button())
             .padding([4, 12])
             .on_press(Message::CloseAbout);
 
@@ -669,10 +557,7 @@ impl App {
                 .size(12)
                 .color(t.accent),
         )
-        .style(move |_th, _s| button::Style {
-            background: None,
-            ..Default::default()
-        })
+        .style(t.transparent_button())
         .on_press(Message::OpenUrl(
             "https://github.com/aaroncroberts/rusty-adb".to_string(),
         ));
@@ -690,15 +575,7 @@ impl App {
                     .padding([6, 10]),
                 )
                 .width(Fill)
-                .style(move |_th| container::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+                .style(t.secondary_panel()),
                 // Body
                 container(
                     column![
@@ -730,15 +607,7 @@ impl App {
             .width(Fill),
         )
         .width(480)
-        .style(move |_th| container::Style {
-            background: Some(t.background.into()),
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(t.primary_panel());
 
         Self::modal_backdrop(card)
     }
@@ -749,15 +618,7 @@ impl App {
         let content = row![text(msg).size(12).color(t.text).width(Fill),].padding([6, 15]);
         container(content)
             .width(Fill)
-            .style(move |_th| container::Style {
-                background: Some(t.success.scale_alpha(0.15).into()),
-                border: Border {
-                    color: t.success.scale_alpha(0.5),
-                    width: 1.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.success_banner())
             .into()
     }
 
@@ -800,41 +661,20 @@ impl App {
         .into();
 
         let open_folder_btn = button(text("Open Log Folder").size(12).color(t.accent))
-            .style(move |_th, _s| button::Style {
-                background: None,
-                ..Default::default()
-            })
+            .style(t.transparent_button())
             .on_press(Message::OpenLogFolder);
 
         let view_logs_btn = button(text("View Logs").size(12).color(t.accent))
-            .style(move |_th: &Theme, _s| button::Style {
-                background: None,
-                ..Default::default()
-            })
+            .style(t.transparent_button())
             .on_press(Message::OpenLogViewer);
 
         let save_btn = button(text("Save").size(12).color(iced::Color::WHITE))
-            .style(move |_th, _s| button::Style {
-                background: Some(t.accent.into()),
-                border: Border {
-                    radius: 0.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.accent_button())
             .padding([5, 16])
             .on_press(Message::SaveSettings);
 
         let cancel_btn = button(text("Cancel").size(12).color(t.text))
-            .style(move |_th, _s| button::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(t.secondary_button())
             .padding([5, 12])
             .on_press(Message::CloseSettings);
 
@@ -851,15 +691,7 @@ impl App {
                     .padding([6, 10]),
                 )
                 .width(Fill)
-                .style(move |_th| container::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+                .style(t.secondary_panel()),
                 // Body
                 container(
                     column![
@@ -882,15 +714,7 @@ impl App {
                             let action_btn =
                                 move |label: &str, color: iced::Color, msg: Option<Message>| {
                                     let b = button(text(label.to_string()).size(12).color(color))
-                                        .style(move |_th, _s| button::Style {
-                                            background: Some(t.background_secondary.into()),
-                                            border: Border {
-                                                color: t.border,
-                                                width: 1.0,
-                                                radius: 0.0.into(),
-                                            },
-                                            ..Default::default()
-                                        })
+                                        .style(t.secondary_button())
                                         .padding([5, 14]);
                                     let elem: Element<Message> = if let Some(m) = msg {
                                         b.on_press(m).into()
@@ -927,28 +751,12 @@ impl App {
                         .padding([8, 12]),
                 )
                 .width(Fill)
-                .style(move |_th| container::Style {
-                    background: Some(t.background_secondary.into()),
-                    border: Border {
-                        color: t.border,
-                        width: 1.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+                .style(t.secondary_panel()),
             ]
             .width(Fill),
         )
         .width(420)
-        .style(move |_th| container::Style {
-            background: Some(t.background.into()),
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(t.primary_panel());
 
         Self::modal_backdrop(card)
     }
@@ -961,10 +769,7 @@ impl App {
             let lbl = text(label).size(12).color(color);
             let btn = button(lbl)
                 .padding([4, 10])
-                .style(move |_t, _s| button::Style {
-                    background: None,
-                    ..Default::default()
-                });
+                .style(t.transparent_button());
             if let Some(m) = msg {
                 btn.on_press(m)
             } else {
@@ -984,15 +789,7 @@ impl App {
         container(content)
             .width(Fill)
             .height(TOOLBAR_HEIGHT)
-            .style(move |_theme| container::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.secondary_panel())
             .into()
     }
 
@@ -1079,10 +876,7 @@ impl App {
             move |label: &'static str, color: iced::Color, msg: Option<Message>| {
                 let b = button(text(label).size(11).color(color))
                     .padding([2, 8])
-                    .style(move |_t, _s| button::Style {
-                        background: None,
-                        ..Default::default()
-                    });
+                    .style(t.transparent_button());
                 if let Some(m) = msg { b.on_press(m) } else { b }
             };
 
@@ -1166,15 +960,7 @@ impl App {
         container(content)
             .width(Fill)
             .height(28)
-            .style(move |_theme| container::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+            .style(t.secondary_panel())
             .into()
     }
 
@@ -1367,10 +1153,7 @@ impl App {
                         focused_clone
                     }
                 })
-                .style(|_t, _s| button::Style {
-                    background: None,
-                    ..Default::default()
-                }),
+                .style(t.transparent_button()),
             )
             .width(STRIP_TILE_W)
             .height(STRIP_TILE_H)
@@ -1405,15 +1188,7 @@ impl App {
         let filmstrip_container = container(filmstrip)
             .width(Fill)
             .height(STRIP_TILE_H + 16)
-            .style(move |_th| container::Style {
-                background: Some(t.background.into()),
-                border: Border {
-                    color: t.border,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+            .style(t.primary_panel());
 
         column![preview_area, filmstrip_container]
             .width(Fill)
@@ -1771,15 +1546,7 @@ impl App {
         )
         .width(180)
         .height(Fill)
-        .style(move |_th| container::Style {
-            background: Some(t.background_secondary.into()),
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(t.secondary_panel());
 
         // ── Right: current directory entry list ───────────────────────────────
         let default_ctx = AndroidContext {
@@ -1833,15 +1600,7 @@ impl App {
         )
         .width(Fill)
         .padding([3, 8])
-        .style(move |_th| container::Style {
-            background: Some(t.background_secondary.into()),
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(t.secondary_panel())
         .into()
     }
 }
