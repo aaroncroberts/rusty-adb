@@ -80,17 +80,15 @@ The **scripts/** directory wraps the most common workflows:
 
 rusty-adb uses three layers of tests.
 
-### Unit tests (`src/*.rs`)
+### Unit tests (`src/**/*.rs`)
 
 Logic that can be tested without a real device or process lives in `#[cfg(test)]` modules inside each source file. These cover:
 
-- `adb.rs` — `parse_ls_output`, `DeviceState::from_str`, display formatting
-- `transfer.rs` — `parse_progress_line`, `parse_speed`, the `run_transfer_emits_failed_on_bad_exit` path
+- `adb/parser.rs` — `parse_ls_output`, `DeviceState::from_str`, display formatting
+- `adb/transfer.rs` — `parse_progress_line`, `parse_speed`, the `run_transfer_emits_failed_on_bad_exit` path
+- `adb/mod.rs` — `AdbStatus::text()` output for every variant
 - `config.rs` — YAML parsing, default fallbacks
-- `status_bar.rs` — `AdbStatus::text()` output
-- `android_pane.rs` — pane state transitions
-- `local_pane.rs` — entry formatting
-- `main.rs` — `App::update()` logic for every `Message` variant
+- `fs/mod.rs` — `SortField` ordering, `DirEntry` formatting
 
 Run with: `cargo test --all`
 
@@ -113,7 +111,7 @@ These use a **mock-adb** bash script (`tests/fixtures/mock-adb`) instead of a re
 
 ### Transfer failure test
 
-`transfer.rs` includes `run_transfer_emits_failed_on_bad_exit` (`#[cfg(unix)]`) which creates a temporary `exit 1` shell script and verifies that `run_transfer` emits `TransferEvent::Failed` — without needing a real process.
+`adb/transfer.rs` includes `run_transfer_emits_failed_on_bad_exit` (`#[cfg(unix)]`) which creates a temporary `exit 1` shell script and verifies that `run_transfer` emits `TransferEvent::Failed` — without needing a real process.
 
 ---
 
@@ -123,7 +121,7 @@ These use a **mock-adb** bash script (`tests/fixtures/mock-adb`) instead of a re
 - **Lints**: `cargo clippy --all-targets -- -D warnings` must pass with zero warnings. Fix all warnings before opening a PR — the CI pipeline enforces this.
 - **Error handling**: Use `anyhow::Result` for fallible functions. Include context (serial, path) in error strings so failures are debuggable in logs.
 - **No hot-path `unwrap()`**: Use `.expect("reason")` with a short explanation, or `?` propagation.
-- **DRY**: Extract shared patterns into private helpers (see `check_adb_output()` in `adb.rs` and `modal_backdrop()` in `main.rs`).
+- **DRY**: Extract shared patterns into private helpers (see `check_adb_output()` in `adb/mod.rs` and `modal_backdrop()` in `views/modals.rs`).
 - **Iced widgets**: Keep `view_*` methods focused — build the widget tree, return `Element`. Business logic belongs in `update()`.
 
 ---
@@ -163,10 +161,18 @@ Types: `feat` · `fix` · `refactor` · `test` · `docs` · `chore` · `style`
 
 ### File organisation
 
-- Each module (adb, transfer, config, …) is a single file under `src/`.
-- Integration tests live in `tests/` at the crate root.
-- Developer scripts live in `scripts/` at the workspace root.
-- Architecture and design docs live in `docs/`.
+Source is organised into focused module directories under `src/`. Each directory has a `mod.rs` that owns the public API and delegates to sibling files for large or distinct concerns:
+
+- `src/adb/` — ADB client, domain types (`AdbStatus`, `TransferStatus`), and the transfer engine
+- `src/fs/` — `FileSystem` trait, `DirEntry`, and both filesystem backends (local + Android)
+- `src/file_pane/` — generic `FilePane<FS>` pane widget and its view helpers
+- `src/views/` — all Iced widget rendering (status bar, modals, banners, pane controls)
+- `src/update/` — all `App::update()` handlers, one focused `impl App` block per file
+- `src/config.rs` and `src/theme.rs` — single-file modules (small enough to not need a directory)
+
+Integration tests live in `tests/` at the crate root. Developer scripts live in `scripts/` at the workspace root. Architecture and design docs live in `docs/`.
+
+**Dependency rule:** `adb/` and `fs/` are the base layer — they must not import from `views/`, `update/`, or `file_pane/`. If you find yourself wanting to make that import, the type belongs in `adb/` or `fs/` instead.
 
 ### Adding a new feature
 

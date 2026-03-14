@@ -1,311 +1,196 @@
-# Repository Organization Rules
+# Repository Organisation — rusty-adb
 
-## 📁 Directory Structure
+Rules and conventions for agents working in this repository.
 
-The repository MUST maintain this exact structure:
+---
 
-```
-lib-todd-data/
-├── .claude/                    # Agent rules and guidelines
-│   ├── rules.md               # Development workflow rules
-│   └── repository-organization.md  # This file
-├── .github/                    # GitHub configuration
-│   └── workflows/             # CI/CD pipelines
-├── docs/                       # Documentation (user-facing)
-│   ├── README.md              # Documentation index
-│   ├── getting-started.md     # Quick start guide
-│   ├── CONTRIBUTING.md        # Contribution guidelines
-│   ├── guides/                # User guides
-│   ├── api/                   # API reference
-│   ├── architecture/          # Architecture docs
-│   └── examples/              # Code examples
-├── packages/                   # Monorepo packages
-│   ├── todd-data/             # Main library
-│   └── example-app/           # Example usage
-├── scripts/                    # Build and utility scripts
-├── README.md                   # Project overview
-├── CHANGELOG.md               # Version history
-├── LICENSE                    # License file
-└── WBS.md                     # Work Breakdown Structure
-```
+## Workspace Layout
 
-## 🎯 File Organization Principles
-
-### 1. Documentation Files
-
-**Location Rules:**
-- User-facing docs → `docs/`
-- Development docs → `docs/CONTRIBUTING.md`, `.claude/`
-- Package docs → `packages/*/README.md`
-- Root README → Project overview only
-
-**Naming Convention:**
-- Use kebab-case: `getting-started.md`, `api-reference.md`
-- Use descriptive names: NOT `doc1.md`, YES `mongodb-guide.md`
-
-**Required Files:**
-- `README.md` - Must exist in root
-- `docs/README.md` - Documentation index
-- `docs/getting-started.md` - Quick start
-- `docs/CONTRIBUTING.md` - How to contribute
-- `CHANGELOG.md` - Version history
-
-### 2. Source Code Files
-
-**Location Rules:**
-- Library code → `packages/todd-data/src/`
-- Tests → `packages/todd-data/src/**/__tests__/` or `*.test.ts`
-- Type definitions → Colocated with implementation
-
-**Naming Convention:**
-- Use kebab-case for files: `storage-adapter.ts`
-- Use PascalCase for classes: `MongoDBAdapter`
-- Test files: `*.test.ts` or `__tests__/*.ts`
-
-**Structure:**
-```
-packages/todd-data/src/
-├── core/                  # Core abstractions
-│   ├── __tests__/        # Core tests
-│   ├── storage-adapter.ts
-│   ├── errors.ts
-│   └── index.ts
-├── types/                # Shared types
-├── adapters/             # Storage implementations
-│   ├── mongodb/
-│   └── d1/
-├── cli/                  # CLI tool
-└── testing/              # Test utilities
+```text
+rusty-adb/                     # Cargo workspace root
+├── rusty-adb/                 # Main application crate
+│   ├── src/
+│   │   ├── main.rs            # App struct, Message enum, Iced entry point
+│   │   ├── lib.rs             # Library target for integration tests
+│   │   ├── config.rs          # AppConfig / LogConfig (YAML via serde)
+│   │   ├── theme.rs           # ThemeColors + style factory methods
+│   │   ├── adb/               # ADB client + domain types (base layer)
+│   │   │   ├── mod.rs         #   AdbClient, AdbStatus, AdbDevice, DeviceState
+│   │   │   ├── parser.rs      #   ls -la parser (pure functions, unit tested)
+│   │   │   └── transfer.rs    #   TransferJob, TransferEvent, TransferStatus, run_transfer
+│   │   ├── fs/                # Filesystem abstraction layer
+│   │   │   ├── mod.rs         #   FileSystem trait, DirEntry, FsError, PaneState, SortField
+│   │   │   ├── local.rs       #   LocalFs implementation
+│   │   │   └── android.rs     #   AndroidFs + AndroidContext implementation
+│   │   ├── file_pane/         # Generic FilePane<FS> widget
+│   │   │   ├── mod.rs         #   State management, rename flow, multi-select
+│   │   │   ├── list_view.rs   #   List mode + loading spinner
+│   │   │   └── shared_views.rs#   Breadcrumb strip + error state
+│   │   ├── views/             # All Iced rendering (depends on adb/, fs/)
+│   │   │   ├── mod.rs         #   view(), view_toolbar(), view_panes()
+│   │   │   ├── status_bar.rs  #   StatusBar widget
+│   │   │   ├── modals.rs      #   Preview, log viewer, about, settings
+│   │   │   ├── banners.rs     #   Error, toast, hero banners
+│   │   │   ├── pane_controls.rs # Views/Show dropdowns, pane title bars
+│   │   │   ├── rendering.rs   #   Grid, icon, columns (Details) layouts
+│   │   │   └── setup.rs       #   ADB not-found install guide
+│   │   └── update/            # State mutation handlers
+│   │       ├── mod.rs         #   update() dispatch + device detection
+│   │       ├── pane.rs        #   Navigation, sorting, selection
+│   │       ├── file_ops.rs    #   Rename, delete, preview
+│   │       ├── transfer.rs    #   Transfer queue, progress, cancel
+│   │       ├── install.rs     #   ADB install flow + daemon restart
+│   │       └── ui.rs          #   View modes, settings, log viewer, banners
+│   └── tests/
+│       ├── adb_integration.rs # Integration tests (no real device needed)
+│       └── fixtures/mock-adb  # Bash script that fakes the adb binary
+├── rusty-logging/             # Shared logging crate (sibling workspace member)
+├── scripts/                   # Developer helper shell scripts
+├── docs/                      # Architecture docs and screenshots
+│   ├── ARCHITECTURE.md        # Detailed module map + data flow
+│   └── screenshot.png
+├── .beads/                    # Beads issue tracking (do not edit manually)
+├── .claude/                   # Agent rules and project context (this file lives here)
+├── Cargo.toml                 # Workspace manifest
+├── README.md                  # Project overview
+├── CONTRIBUTING.md            # Dev setup, testing strategy, conventions
+└── AGENTS.md                  # Agent-specific workflow rules
 ```
 
-### 3. Configuration Files
+---
 
-**Location: Root only**
-- Package management: `package.json`, `pnpm-workspace.yaml`
-- TypeScript: `tsconfig*.json`
-- Linting: `.eslintrc.js`, `.markdownlint.json`
-- Git: `.gitignore`, `.gitattributes`
-- Node: `.nvmrc`, `.npmrc`
+## Dependency Rules (CRITICAL)
 
-**Never nest config files** except in packages with their own package.json
+Dependencies must flow strictly downward. Violating this creates circular imports and breaks the architecture:
 
-### 4. Build Artifacts
+```
+main.rs
+  ├── update/      ← mutates App state
+  │     └── adb/  ← calls AdbClient methods
+  ├── views/       ← renders state into widgets
+  │     ├── adb/  ← reads AdbStatus, TransferStatus
+  │     └── file_pane/
+  ├── file_pane/   ← generic pane widget
+  │     └── fs/   ← FileSystem trait, DirEntry
+  ├── adb/         ← NO imports from views/, update/, file_pane/
+  └── fs/          ← NO imports from views/, update/, file_pane/
+```
 
-**MUST be gitignored:**
-- `dist/` - Build output
-- `coverage/` - Test coverage
-- `node_modules/` - Dependencies
-- `*.log` - Log files
-- `.DS_Store` - Mac files
+**Key invariant:** Domain types (`AdbStatus`, `TransferStatus`, `DirEntry`) live at the base of the dependency graph. If a `views/` or `update/` module needs a type, that type belongs in `adb/` or `fs/` — not in the widget module.
 
-**Location:**
-- Build output → `packages/*/dist/`
-- Coverage → `packages/*/coverage/`
+---
 
-## 📝 Documentation Organization
+## Where to Put New Code
 
-### Documentation Categories
+| What you're adding | Where it goes |
+| --- | --- |
+| New ADB command | `adb/mod.rs` (add method to `AdbClient`) |
+| New ADB parsing logic | `adb/parser.rs` |
+| New domain state type | `adb/mod.rs` (for ADB state) or `fs/mod.rs` (for fs state) |
+| New filesystem backend | New file in `fs/` + impl `FileSystem` trait |
+| New widget / rendering helper | `views/` — pick the most relevant existing file or add a new one |
+| New status bar widget | `views/status_bar.rs` |
+| New modal dialog | `views/modals.rs` |
+| New `Message` handler | Add the `Message` variant in `main.rs`, add the handler method in the most relevant `update/` file |
+| New pane behaviour | `file_pane/mod.rs` (state) + `file_pane/list_view.rs` or `file_pane/shared_views.rs` (view) |
+| New config field | `config.rs` |
 
-1. **Getting Started** (`docs/getting-started.md`)
-   - Installation
-   - Quick start
-   - Basic examples
+---
 
-2. **Guides** (`docs/guides/`)
-   - Feature-specific tutorials
-   - Best practices
-   - Common patterns
+## Logging
 
-3. **API Reference** (`docs/api/`)
-   - Auto-generated from TSDoc
-   - One file per module
-   - Include examples
+rusty-adb uses `tracing` macros throughout. All calls flow through the `rusty-logging` crate, which is initialised once in `main()`:
 
-4. **Architecture** (`docs/architecture/`)
-   - Design decisions
-   - Patterns used
-   - Trade-offs
+```rust
+rusty_logging::LoggingConfig::builder()
+    .level(&config.log.level)
+    .console(config.log.console_enabled)
+    .file(config.log.file_enabled)
+    .build()?;
+```
 
-5. **Examples** (`docs/examples/`)
-   - Complete, runnable examples
-   - Real-world use cases
-   - Copy-paste ready
+**Use structured fields, not string interpolation:**
 
-### Documentation Maintenance Rules
+```rust
+// Good
+tracing::warn!(path = %path.display(), error = %e, "delete failed");
 
-**ALWAYS update docs when:**
-- Adding new features
-- Changing APIs
-- Fixing bugs that affect usage
-- Adding examples
+// Bad
+tracing::warn!("delete failed: {} — {}", path.display(), e);
+```
 
-**Documentation must be:**
-- Up-to-date with code
-- Tested (examples must run)
-- Cross-referenced
-- Searchable
+**Level guidance:**
 
-## 🔧 Maintenance Automation
+- `error!` — unrecoverable failure or data loss risk
+- `warn!` — recoverable error, something the user should know about, silently swallowed OS errors
+- `info!` — significant lifecycle event (adb found, device connected, transfer started, settings saved)
+- `debug!` — low-level detail useful when diagnosing a specific problem
+- `trace!` — hot-path detail (progress ticks, per-byte events) — almost never appropriate
 
-### Pre-Commit Checks
+**Never silently swallow errors.** If you use `let _ = some_result`, add a `tracing::warn!` before it. The `if let Err(e) = ...` pattern is preferred:
 
-Before EVERY commit, verify:
+```rust
+if let Err(e) = std::process::Command::new("open").arg(&url).spawn() {
+    tracing::warn!(error = %e, url = %url, "failed to open URL");
+}
+```
+
+---
+
+## Testing
+
+### Running tests
 
 ```bash
-# 1. Documentation links are valid
-find docs -name "*.md" -exec markdown-link-check {} \;
-
-# 2. Examples compile
-pnpm build
-
-# 3. Tests pass
-pnpm test
-
-# 4. Lint passes
-pnpm lint
+cargo test --all              # all unit + integration tests
+cargo clippy --all-targets -- -D warnings   # must be clean
+cargo fmt --all --check       # must have no diffs
 ```
 
-### Monthly Cleanup
+Or use the one-shot quality gate:
 
-On the first of each month:
+```bash
+./scripts/test.sh
+```
 
-1. Review WBS.md - Update progress
-2. Review CHANGELOG.md - Ensure complete
-3. Review docs/ - Remove outdated content
-4. Review package.json - Update dependencies
-5. Review .github/workflows - Update actions
+### Integration tests
 
-## 🚫 Anti-Patterns to Avoid
+Integration tests in `tests/adb_integration.rs` use `tests/fixtures/mock-adb` — a bash script that fakes the `adb` binary. No real Android device is needed. Import paths:
 
-### DO NOT:
+```rust
+use rusty_adb::adb::{run_transfer, TransferDirection, TransferEvent, TransferJob};
+```
 
-1. **Create orphan documentation**
-   - Every doc must be linked from docs/README.md
-   - No standalone docs without clear purpose
+### Unit test locations
 
-2. **Mix concerns**
-   - Don't put build scripts in src/
-   - Don't put docs in packages/
-   - Don't put source in scripts/
+Pure functions get `#[cfg(test)]` blocks in their own file. The most important ones:
 
-3. **Create deep nesting**
-   - Maximum 3 levels deep in docs/
-   - Maximum 4 levels deep in src/
+- `adb/parser.rs` — `parse_ls_output` and `DeviceState::from_str`
+- `adb/transfer.rs` — `parse_progress_line`, `parse_speed`, failure path
+- `adb/mod.rs` — `AdbStatus::text()` for all variants
 
-4. **Use unclear names**
-   - ❌ `utils.ts`, `helpers.ts`, `stuff.md`
-   - ✅ `query-builder.ts`, `mongodb-guide.md`
+---
 
-5. **Duplicate content**
-   - One source of truth for each concept
-   - Use links to reference, don't copy
+## Documentation Files
 
-6. **Leave stale files**
-   - Delete unused files
-   - Update or remove outdated docs
-   - Clean up commented code
+| File | Purpose | When to update |
+| --- | --- | --- |
+| `README.md` | User-facing overview, install, build, project layout | When adding features or changing the module structure |
+| `CONTRIBUTING.md` | Dev setup, testing strategy, code style, PR checklist | When adding new testing patterns or changing conventions |
+| `docs/ARCHITECTURE.md` | Deep module map, dependency graph, data flow diagrams | When adding or reorganising modules |
+| `AGENTS.md` | Agent-specific beads workflow and session rules | When workflow process changes |
+| `.claude/repository-organization.md` | This file — agent-visible repo rules | When reorganising or adding modules |
 
-## ✅ Quality Checklist
+**Always update docs in the same PR as structural changes.** Stale architecture docs mislead future contributors and agents alike.
 
-### New Feature Checklist
+---
 
-When adding a feature:
+## Anti-Patterns to Avoid
 
-- [ ] Code implemented in correct package
-- [ ] Tests added with >80% coverage
-- [ ] TSDoc comments on public APIs
-- [ ] README updated if API changed
-- [ ] Getting started guide updated if needed
-- [ ] Guide added to `docs/guides/` if complex
-- [ ] Example added to `docs/examples/`
-- [ ] CHANGELOG.md updated
-- [ ] WBS.md updated if applicable
+1. **Domain types in widget modules** — `AdbStatus`, `TransferStatus`, `DirEntry` belong in `adb/` or `fs/`, not in `views/`
+2. **Silent error swallowing** — `let _ = spawn()` must be accompanied by a `warn!` call
+3. **`tokio::spawn` from `update()`** — use `Task::perform(future, mapper)` instead; keeps update() testable
+4. **Monolithic files** — if a file grows past ~300 lines with distinct concerns, split it into module directory form (`foo.rs` → `foo/mod.rs` + `foo/concern.rs`)
+5. **Import loops** — `adb/` importing from `views/` or vice versa through some indirect chain
 
-### New Documentation Checklist
-
-When adding documentation:
-
-- [ ] Placed in correct category
-- [ ] Linked from docs/README.md
-- [ ] Cross-referenced from related docs
-- [ ] Examples are tested and runnable
-- [ ] Markdown linting passes
-- [ ] Links are valid
-- [ ] No spelling errors
-- [ ] Clear headings and structure
-
-## 🤖 Agent Rules
-
-### Documentation Management
-
-**ALWAYS:**
-1. Update docs/README.md when adding new documentation
-2. Keep table of contents updated
-3. Add examples for new features
-4. Link related documentation
-
-**NEVER:**
-1. Create documentation outside docs/
-2. Leave broken links
-3. Create docs without examples
-4. Skip updating the index
-
-### File Organization
-
-**ALWAYS:**
-1. Follow the directory structure exactly
-2. Use prescribed naming conventions
-3. Keep related files together
-4. Maintain separation of concerns
-
-**NEVER:**
-1. Create new top-level directories without approval
-2. Mix documentation with source code
-3. Nest configuration files unnecessarily
-4. Create files in wrong locations
-
-### Cleanup Protocol
-
-**Weekly:**
-- Check for orphan files
-- Verify documentation links
-- Review WBS.md progress
-
-**Before Session End:**
-- All files in correct locations
-- No temporary files committed
-- Documentation index updated
-- Links validated
-
-## 📋 Repository Health Metrics
-
-### Green Signals ✅
-
-- All docs linked from README
-- No broken links in documentation
-- All examples compile and run
-- Test coverage >80%
-- No linting errors
-- Clean directory structure
-- Up-to-date CHANGELOG
-
-### Red Signals ❌
-
-- Orphan documentation files
-- Broken documentation links
-- Examples that don't run
-- Outdated API documentation
-- Files in wrong locations
-- Missing or stale CHANGELOG
-- Unclear file organization
-
-## 🔄 Continuous Improvement
-
-This document should be:
-- Reviewed quarterly
-- Updated when patterns emerge
-- Simplified when possible
-- Enforced consistently
-
-**Last Updated:** 2026-02-12
-**Review Due:** 2026-05-12
+**Last Updated:** 2026-03-13

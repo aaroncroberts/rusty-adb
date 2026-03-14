@@ -210,25 +210,45 @@ Log files are written to `~/.rusty-adb/` and rotate automatically.
 
 ```
 rusty-adb/
-├── rusty-adb/          # Main application crate
+├── rusty-adb/             # Main application crate
 │   ├── src/
-│   │   ├── main.rs         # Iced Application, Message enum, update/view
-│   │   ├── adb.rs          # AdbClient — device polling, file operations
-│   │   ├── transfer.rs     # Async file transfer engine with progress events
-│   │   ├── config.rs       # AppConfig loaded from config.yml
-│   │   ├── filesystem.rs   # Shared traits: FileSystem, DirEntry, PaneState
-│   │   ├── file_pane.rs    # Generic FilePane<FS> widget (list, details, grid, icon)
-│   │   ├── local_fs.rs     # Local filesystem backend (FileSystem impl)
-│   │   ├── android_fs.rs   # Android ADB backend (FileSystem impl)
-│   │   ├── status_bar.rs   # Status bar widget
-│   │   ├── theme.rs        # Colour palette
-│   │   └── lib.rs          # Library target for integration tests
+│   │   ├── main.rs        # Iced Application, App struct, Message enum
+│   │   ├── lib.rs         # Library target (re-exports for integration tests)
+│   │   ├── config.rs      # AppConfig loaded from config.yml
+│   │   ├── theme.rs       # ThemeColors palette + style factory methods
+│   │   ├── adb/           # ADB client, domain types, transfer engine
+│   │   │   ├── mod.rs     #   AdbClient, AdbStatus, AdbDevice, DeviceState
+│   │   │   ├── parser.rs  #   ls -la output parser (pure, fully tested)
+│   │   │   └── transfer.rs#   TransferJob, TransferEvent, TransferStatus, run_transfer
+│   │   ├── fs/            # Filesystem abstraction
+│   │   │   ├── mod.rs     #   FileSystem trait, DirEntry, FsError, PaneState, SortField
+│   │   │   ├── local.rs   #   LocalFs (host filesystem backend)
+│   │   │   └── android.rs #   AndroidFs, AndroidContext (ADB backend)
+│   │   ├── file_pane/     # Generic two-pane widget
+│   │   │   ├── mod.rs     #   FilePane<FS> struct, state management, rename/select
+│   │   │   ├── list_view.rs      # List-mode and loading-spinner views
+│   │   │   └── shared_views.rs   # Breadcrumb strip, error state widget
+│   │   ├── views/         # All Iced widget rendering
+│   │   │   ├── mod.rs     #   view(), view_toolbar(), view_panes()
+│   │   │   ├── status_bar.rs     # StatusBar widget (reads AdbStatus/TransferStatus)
+│   │   │   ├── modals.rs         # Preview, log viewer, about, settings overlays
+│   │   │   ├── banners.rs        # Error, toast, hero banners
+│   │   │   ├── pane_controls.rs  # Views/Show dropdowns, pane title bars
+│   │   │   ├── rendering.rs      # Grid, icon, columns (Details) layouts
+│   │   │   └── setup.rs          # ADB not-found install guide
+│   │   └── update/        # State mutation handlers (one impl App block each)
+│   │       ├── mod.rs     #   update() dispatch, device detection, derive_adb_status
+│   │       ├── pane.rs    #   Navigation, sorting, selection for both panes
+│   │       ├── file_ops.rs#   Rename, delete, preview
+│   │       ├── transfer.rs#   Transfer queue, progress, complete, cancel
+│   │       ├── install.rs #   ADB install flow, daemon restart
+│   │       └── ui.rs      #   View modes, settings, log viewer, banners, escape routing
 │   └── tests/
-│       ├── adb_integration.rs  # Integration tests via mock-adb
-│       └── fixtures/mock-adb   # Bash script that fakes the adb binary
-├── rusty-logging/      # Shared logging crate
-├── scripts/            # Developer helper scripts
-└── docs/               # Architecture docs and screenshots
+│       ├── adb_integration.rs    # Integration tests via mock-adb (no real device needed)
+│       └── fixtures/mock-adb     # Bash script that fakes the adb binary
+├── rusty-logging/         # Shared logging crate (rotating file + console via tracing)
+├── scripts/               # Developer helper scripts
+└── docs/                  # Architecture docs and screenshots
 ```
 
 ---
