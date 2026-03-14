@@ -27,7 +27,7 @@ pub use shared_views::{view_connect_guide, view_error};
 
 use std::path::PathBuf;
 
-use crate::fs::{DirEntry, FileSystem, PaneState, SortField, sort_entries};
+use crate::fs::{sort_entries, DirEntry, FileSystem, PaneState, SortField};
 
 // ─── Rename State ─────────────────────────────────────────────────────────────
 
@@ -318,7 +318,11 @@ mod tests {
         pane.state = PaneState::NoDevice;
         // Stale in-flight response arrives — must be discarded
         pane.on_entries_loaded(path, vec![]);
-        assert_eq!(pane.state, PaneState::NoDevice, "stale response must not override NoDevice");
+        assert_eq!(
+            pane.state,
+            PaneState::NoDevice,
+            "stale response must not override NoDevice"
+        );
     }
 
     #[test]
@@ -333,8 +337,9 @@ mod tests {
     fn select_toggles_entry() {
         let path = PathBuf::from("/tmp");
         let mut pane: FilePane<LocalFs> = FilePane::new(path.clone(), PaneState::Loading);
-        pane.on_entries_loaded(path, vec![
-            DirEntry {
+        pane.on_entries_loaded(
+            path,
+            vec![DirEntry {
                 name: "a".into(),
                 path: PathBuf::from("/tmp/a"),
                 size: 0,
@@ -343,8 +348,8 @@ mod tests {
                 is_symlink: false,
                 is_hidden: false,
                 child_count: None,
-            },
-        ]);
+            }],
+        );
         pane.select(0);
         assert!(pane.selected.contains(&0));
         pane.select(0);
@@ -392,8 +397,9 @@ mod tests {
     fn begin_rename_sets_pending() {
         let path = PathBuf::from("/tmp");
         let mut pane: FilePane<LocalFs> = FilePane::new(path.clone(), PaneState::Loading);
-        pane.on_entries_loaded(path, vec![
-            DirEntry {
+        pane.on_entries_loaded(
+            path,
+            vec![DirEntry {
                 name: "hello.txt".into(),
                 path: PathBuf::from("/tmp/hello.txt"),
                 size: 0,
@@ -402,8 +408,8 @@ mod tests {
                 is_symlink: false,
                 is_hidden: false,
                 child_count: None,
-            },
-        ]);
+            }],
+        );
         pane.begin_rename(0);
         assert_eq!(pane.rename_pending, Some((0, "hello.txt".to_string())));
     }
@@ -414,5 +420,66 @@ mod tests {
         pane.rename_pending = Some((0, "old".to_string()));
         pane.cancel_rename();
         assert!(pane.rename_pending.is_none());
+    }
+
+    #[test]
+    fn begin_rename_out_of_bounds_is_ignored() {
+        let mut pane = make_pane(); // no entries
+        pane.begin_rename(0);
+        assert!(pane.rename_pending.is_none());
+
+        pane.begin_rename(usize::MAX);
+        assert!(pane.rename_pending.is_none());
+    }
+
+    #[test]
+    fn update_rename_input_updates_draft_text() {
+        let path = PathBuf::from("/tmp");
+        let mut pane: FilePane<LocalFs> = FilePane::new(path.clone(), PaneState::Loading);
+        pane.on_entries_loaded(
+            path,
+            vec![DirEntry {
+                name: "file.txt".into(),
+                path: PathBuf::from("/tmp/file.txt"),
+                size: 0,
+                modified_display: "--".into(),
+                is_dir: false,
+                is_symlink: false,
+                is_hidden: false,
+                child_count: None,
+            }],
+        );
+        pane.begin_rename(0);
+        pane.update_rename_input("new_name.txt".to_string());
+        assert_eq!(
+            pane.rename_pending,
+            Some((0, "new_name.txt".to_string()))
+        );
+    }
+
+    #[test]
+    fn begin_navigate_clears_rename_pending() {
+        let path = PathBuf::from("/tmp");
+        let mut pane: FilePane<LocalFs> = FilePane::new(path.clone(), PaneState::Loading);
+        pane.on_entries_loaded(
+            path,
+            vec![DirEntry {
+                name: "file.txt".into(),
+                path: PathBuf::from("/tmp/file.txt"),
+                size: 0,
+                modified_display: "--".into(),
+                is_dir: false,
+                is_symlink: false,
+                is_hidden: false,
+                child_count: None,
+            }],
+        );
+        pane.begin_rename(0);
+        assert!(pane.rename_pending.is_some());
+        pane.begin_navigate(PathBuf::from("/tmp/subdir"));
+        assert!(
+            pane.rename_pending.is_none(),
+            "begin_navigate should clear any active rename"
+        );
     }
 }

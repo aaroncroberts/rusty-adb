@@ -133,6 +133,90 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
+    fn make_entry(name: &str, size: u64, modified: &str, is_dir: bool) -> DirEntry {
+        DirEntry {
+            name: name.to_string(),
+            path: PathBuf::from(format!("/tmp/{name}")),
+            size,
+            modified_display: modified.to_string(),
+            is_dir,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: None,
+        }
+    }
+
+    #[test]
+    fn sort_by_size_ascending() {
+        let mut entries = vec![
+            make_entry("big.txt", 9000, "2024-01-03", false),
+            make_entry("small.txt", 100, "2024-01-01", false),
+            make_entry("mid.txt", 500, "2024-01-02", false),
+        ];
+        sort_entries(&mut entries, SortField::Size, true);
+        assert_eq!(entries[0].name, "small.txt");
+        assert_eq!(entries[1].name, "mid.txt");
+        assert_eq!(entries[2].name, "big.txt");
+    }
+
+    #[test]
+    fn sort_by_size_descending() {
+        let mut entries = vec![
+            make_entry("big.txt", 9000, "2024-01-03", false),
+            make_entry("small.txt", 100, "2024-01-01", false),
+            make_entry("mid.txt", 500, "2024-01-02", false),
+        ];
+        sort_entries(&mut entries, SortField::Size, false);
+        assert_eq!(entries[0].name, "big.txt");
+        assert_eq!(entries[2].name, "small.txt");
+    }
+
+    #[test]
+    fn sort_by_modified_ascending() {
+        let mut entries = vec![
+            make_entry("newest.txt", 0, "2024-03-01", false),
+            make_entry("oldest.txt", 0, "2024-01-01", false),
+            make_entry("middle.txt", 0, "2024-02-01", false),
+        ];
+        sort_entries(&mut entries, SortField::Modified, true);
+        assert_eq!(entries[0].name, "oldest.txt");
+        assert_eq!(entries[1].name, "middle.txt");
+        assert_eq!(entries[2].name, "newest.txt");
+    }
+
+    #[test]
+    fn sort_by_modified_descending() {
+        let mut entries = vec![
+            make_entry("newest.txt", 0, "2024-03-01", false),
+            make_entry("oldest.txt", 0, "2024-01-01", false),
+            make_entry("middle.txt", 0, "2024-02-01", false),
+        ];
+        sort_entries(&mut entries, SortField::Modified, false);
+        assert_eq!(entries[0].name, "newest.txt");
+        assert_eq!(entries[2].name, "oldest.txt");
+    }
+
+    #[test]
+    fn sort_dirs_always_before_files_regardless_of_field() {
+        let mut entries = vec![
+            make_entry("z_file.txt", 1000, "2024-03-01", false),
+            make_entry("a_dir", 0, "2024-01-01", true),
+        ];
+        // Even if file sorts first by name, dirs must come first
+        sort_entries(&mut entries, SortField::Name, true);
+        assert!(entries[0].is_dir, "directory must precede file");
+    }
+
+    #[test]
+    fn sort_by_name_case_insensitive() {
+        let mut entries = vec![
+            make_entry("Zfile.txt", 0, "2024-01-01", false),
+            make_entry("apple.txt", 0, "2024-01-01", false),
+        ];
+        sort_entries(&mut entries, SortField::Name, true);
+        assert_eq!(entries[0].name, "apple.txt", "lowercase 'a' should sort before 'Z'");
+    }
+
     #[test]
     fn sort_descending_reverses_order() {
         use std::fs;
