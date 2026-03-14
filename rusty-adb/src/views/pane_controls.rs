@@ -230,14 +230,16 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
+        let show_picker = show_picker.width(iced::Length::Shrink);
+
         let content = row![
             text("View").size(11).color(t.text_secondary),
             iced::widget::Space::new(6, 1),
             view_picker,
-            iced::widget::Space::new(4, 1),
-            show_picker,
             iced::widget::horizontal_space(),
             cmd_row,
+            iced::widget::Space::new(4, 1),
+            show_picker,
         ]
         .spacing(2)
         .padding([2, 8])
