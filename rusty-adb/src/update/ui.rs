@@ -94,11 +94,17 @@ impl App {
             let dir = dir.to_string_lossy().into_owned();
             tracing::info!(dir = %dir, "opening log folder");
             #[cfg(target_os = "macos")]
-            let _ = std::process::Command::new("open").arg(&dir).spawn();
+            if let Err(e) = std::process::Command::new("open").arg(&dir).spawn() {
+                tracing::warn!(error = %e, dir = %dir, "failed to open log folder in Finder");
+            }
             #[cfg(target_os = "windows")]
-            let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+            if let Err(e) = std::process::Command::new("explorer").arg(&dir).spawn() {
+                tracing::warn!(error = %e, dir = %dir, "failed to open log folder in Explorer");
+            }
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+            if let Err(e) = std::process::Command::new("xdg-open").arg(&dir).spawn() {
+                tracing::warn!(error = %e, dir = %dir, "failed to open log folder with xdg-open");
+            }
         }
         Task::none()
     }

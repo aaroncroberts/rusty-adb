@@ -30,6 +30,7 @@ impl App {
     }
 
     pub(super) fn local_load_error(&mut self, msg: String) -> Task<Message> {
+        tracing::warn!(error = %msg, "local directory load error");
         self.local_pane.on_error(msg);
         Task::none()
     }
@@ -218,8 +219,11 @@ impl App {
         tracing::info!(serial = %serial, "user requested disconnect");
         Task::perform(
             async move { client.disconnect(&serial).await.map_err(|e| e.to_string()) },
-            |result| match result {
-                Ok(_) | Err(_) => Message::PollDevices,
+            |result| {
+                if let Err(e) = result {
+                    tracing::warn!(error = %e, "disconnect request failed, polling will reflect new state");
+                }
+                Message::PollDevices
             },
         )
     }

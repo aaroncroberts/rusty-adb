@@ -123,10 +123,14 @@ impl App {
         Task::perform(
             async move {
                 for path in &paths {
+                    tracing::info!(path = %path.display(), "deleting android file");
                     client
                         .delete(&serial, path)
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| {
+                            tracing::warn!(path = %path.display(), error = %e, "delete failed");
+                            e.to_string()
+                        })?;
                 }
                 Ok::<(), String>(())
             },
@@ -191,6 +195,7 @@ impl App {
                 match std::fs::read_to_string(&local_path) {
                     Ok(text) => PreviewContent::Text(text),
                     Err(e) => {
+                        tracing::warn!(error = %e, path = %local_path.display(), "failed to read text file for preview");
                         PreviewContent::Unsupported(format!("Could not read file: {e}"))
                     }
                 }

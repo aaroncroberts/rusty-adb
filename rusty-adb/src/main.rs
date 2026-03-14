@@ -657,12 +657,18 @@ impl App {
                             TransferEvent::Failed(e) => Message::TransferFailed(e.clone()),
                         };
                         // try_send: channel has capacity 32, ample for ≤100 progress ticks
-                        let _ = sender.try_send(msg);
+                        if let Err(e) = sender.try_send(msg) {
+                            tracing::warn!(error = ?e, "transfer event channel full — progress tick dropped");
+                        }
                     })
                     .await;
 
                     if let Err(e) = result {
-                        let _ = sender.try_send(Message::TransferFailed(e.to_string()));
+                        let msg = e.to_string();
+                        tracing::warn!(error = %msg, "transfer engine error");
+                        if let Err(send_err) = sender.try_send(Message::TransferFailed(msg)) {
+                            tracing::error!(error = ?send_err, "failed to deliver TransferFailed to UI — user will not see error");
+                        }
                     }
 
                     // Park forever — Iced keeps the subscription alive until the

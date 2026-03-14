@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 impl App {
     pub(super) fn adb_not_found(&mut self) -> Task<Message> {
+        tracing::warn!("adb binary not found — showing install guide");
         self.adb_status = AdbStatus::NotFound;
         Task::none()
     }
@@ -120,11 +121,15 @@ impl App {
         };
         Task::perform(
             async move {
-                // kill-server first (ignore errors — may already be dead)
-                let _ = tokio::process::Command::new(&client.adb_path)
+                // kill-server first; errors are non-fatal (daemon may already be dead)
+                match tokio::process::Command::new(&client.adb_path)
                     .arg("kill-server")
                     .status()
-                    .await;
+                    .await
+                {
+                    Ok(s) => tracing::debug!(status = %s, "adb kill-server completed"),
+                    Err(e) => tracing::debug!(error = %e, "adb kill-server spawn failed (non-fatal)"),
+                }
                 // start-server fresh
                 client.start_server().await.map_err(|e| e.to_string())?;
                 Ok::<AdbClient, String>(client)
@@ -142,11 +147,17 @@ impl App {
     pub(super) fn open_url(&mut self, url: String) -> Task<Message> {
         tracing::info!(url = %url, "opening URL in browser");
         #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(&url).spawn();
+        if let Err(e) = std::process::Command::new("open").arg(&url).spawn() {
+            tracing::warn!(error = %e, url = %url, "failed to open URL (is 'open' available?)");
+        }
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer").arg(&url).spawn();
+        if let Err(e) = std::process::Command::new("explorer").arg(&url).spawn() {
+            tracing::warn!(error = %e, url = %url, "failed to open URL (is 'explorer' available?)");
+        }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+            tracing::warn!(error = %e, url = %url, "failed to open URL (is 'xdg-open' available?)");
+        }
         Task::none()
     }
 }
