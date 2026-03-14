@@ -10,11 +10,11 @@ mod rendering;
 mod setup;
 pub mod status_bar;
 
-use crate::{App, Message, TOOLBAR_HEIGHT};
+use crate::{App, Message};
 use std::path::PathBuf;
 use crate::adb::AdbClient;
 use crate::fs::AndroidContext;
-use crate::file_pane::{view_breadcrumb, RenameCbs};
+use crate::file_pane::RenameCbs;
 use crate::adb::AdbStatus;
 use crate::ViewMode;
 use iced::widget::{
@@ -26,13 +26,13 @@ impl App {
     pub(super) fn view(&self) -> Element<Message> {
         // ADB not installed — replace panes with the setup guide
         if self.adb_status == AdbStatus::NotFound {
-            let mut items: Vec<Element<Message>> = vec![self.view_toolbar()];
+            let mut items: Vec<Element<Message>> = vec![self.view_header()];
             items.push(self.view_adb_not_found());
             items.push(self.status_bar.view(&self.adb_status, None, None));
             return column(items).into();
         }
 
-        let mut items: Vec<Element<Message>> = vec![self.view_hero_banner(), self.view_toolbar()];
+        let mut items: Vec<Element<Message>> = vec![self.view_header()];
         if let Some(msg) = &self.error_banner {
             items.push(self.view_error_banner(msg));
         }
@@ -69,38 +69,6 @@ impl App {
         }
     }
 
-    fn view_toolbar(&self) -> Element<Message> {
-        let t = self.theme;
-
-        // ── Button builder helper ─────────────────────────────────────────────
-        let toolbar_btn = move |label: String, color: iced::Color, msg: Option<Message>| {
-            let lbl = text(label).size(12).color(color);
-            let btn = button(lbl)
-                .padding([4, 10])
-                .style(t.transparent_button());
-            if let Some(m) = msg {
-                btn.on_press(m)
-            } else {
-                btn
-            }
-        };
-
-        // ── Buttons (toolbar — device actions moved to Settings modal) ────────
-        let settings_btn = toolbar_btn("Settings".to_string(), t.text, Some(Message::OpenSettings));
-        let about_btn = toolbar_btn("About".to_string(), t.text_secondary, Some(Message::OpenAbout));
-
-        let content = row![settings_btn, about_btn,]
-            .spacing(8)
-            .padding([0, 16])
-            .align_y(iced::Alignment::Center);
-
-        container(content)
-            .width(Fill)
-            .height(TOOLBAR_HEIGHT)
-            .style(t.secondary_panel())
-            .into()
-    }
-
     fn view_panes(&self) -> Element<Message> {
         let t = self.theme;
         let has_device = self.active_serial.is_some();
@@ -133,28 +101,22 @@ impl App {
 
         let local_content: Element<Message> = match self.local_view_mode {
             // Name-only rows with type icons — compact, maximum density
-            ViewMode::List => {
-                let breadcrumb = view_breadcrumb(
-                    &self.local_pane.current_path, self.theme, Message::LocalNavigateTo,
-                );
-                let list = self.local_pane.view_list(
-                    &(),
-                    self.theme,
-                    Message::LocalNavigateTo,
-                    Message::LocalSelectEntry,
-                    Message::LocalSortBy,
-                    None,
-                );
-                column![breadcrumb, list].width(Fill).height(Fill).into()
-            }
+            ViewMode::List => self.local_pane.view_list(
+                &(),
+                self.theme,
+                Message::LocalNavigateTo,
+                Message::LocalSelectEntry,
+                Message::LocalSortBy,
+                None,
+            ),
             // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(false),
             ViewMode::Grid => self.view_local_grid(),
             ViewMode::Icon => self.view_local_icon(),
         };
 
-        let local_path = self.local_pane.current_path.display().to_string();
-        let local_title = self.view_pane_title_bar("LOCAL", &local_path);
+        let local_path = self.local_pane.current_path.clone();
+        let local_title = self.view_pane_title_bar("LOCAL", &local_path, Message::LocalNavigateTo);
 
         let left: Element<Message> = column![local_title, local_menu, local_content]
             .width(Fill)
@@ -183,23 +145,17 @@ impl App {
 
         let android_content: Element<Message> = match self.android_view_mode {
             // Name-only rows with type icons
-            ViewMode::List => {
-                let breadcrumb = view_breadcrumb(
-                    &self.android_pane.current_path, self.theme, Message::AndroidNavigateTo,
-                );
-                let list = self.android_pane.view_list(
-                    android_ctx_ref,
-                    self.theme,
-                    Message::AndroidNavigateTo,
-                    Message::AndroidSelectEntry,
-                    Message::AndroidSortBy,
-                    Some(RenameCbs {
-                        on_input: Box::new(Message::AndroidRenameInput),
-                        on_commit: Message::AndroidRenameCommit,
-                    }),
-                );
-                column![breadcrumb, list].width(Fill).height(Fill).into()
-            }
+            ViewMode::List => self.android_pane.view_list(
+                android_ctx_ref,
+                self.theme,
+                Message::AndroidNavigateTo,
+                Message::AndroidSelectEntry,
+                Message::AndroidSortBy,
+                Some(RenameCbs {
+                    on_input: Box::new(Message::AndroidRenameInput),
+                    on_commit: Message::AndroidRenameCommit,
+                }),
+            ),
             // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(true),
             ViewMode::Grid => self.view_android_grid(),
@@ -225,8 +181,8 @@ impl App {
             })
             .into();
 
-        let android_path = self.android_pane.current_path.display().to_string();
-        let android_title = self.view_pane_title_bar("ANDROID", &android_path);
+        let android_path = self.android_pane.current_path.clone();
+        let android_title = self.view_pane_title_bar("ANDROID", &android_path, Message::AndroidNavigateTo);
 
         let right: Element<Message> = column![android_title, android_menu, android_content]
             .width(Fill)

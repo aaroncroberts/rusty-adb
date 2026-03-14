@@ -22,7 +22,6 @@
 mod list_view;
 mod shared_views;
 
-pub use shared_views::view_breadcrumb;
 #[allow(unused_imports)]
 pub use shared_views::{view_connect_guide, view_error};
 

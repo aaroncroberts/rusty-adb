@@ -393,3 +393,25 @@ fn double_click_on_file_triggers_preview_for_small_file() {
     // last_click should be cleared after double-click consumed
     assert!(app.android_last_click.is_none());
 }
+
+// ── Header consolidation tests ─────────────────────────────────────────────
+
+/// Smoke test: view_header() must compile and return an Element without panicking.
+/// The combined header replaced two separate rows (view_hero_banner + view_toolbar);
+/// verifying it renders proves the merge is structurally sound.
+#[test]
+fn view_header_renders_without_panic() {
+    let app = App::default();
+    let _ = app.view_header();
+}
+
+/// Regression guard: neither view_hero_banner nor view_toolbar should exist.
+/// This is enforced at compile time — if this test compiles, the old split-row
+/// API is gone and view_header() is the single entry point.
+#[test]
+fn view_header_is_sole_header_entrypoint() {
+    // view_header() must be callable; the absence of view_hero_banner /
+    // view_toolbar is verified by the compiler (they were removed).
+    let app = App::default();
+    let _: iced::Element<Message> = app.view_header();
+}

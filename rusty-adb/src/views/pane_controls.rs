@@ -3,6 +3,39 @@
 use crate::{App, Message, ViewMode};
 use iced::widget::{button, container, pick_list, row, text};
 use iced::{Element, Fill};
+use std::path::{Path, PathBuf};
+
+// ─── Path Segment Helper ──────────────────────────────────────────────────────
+
+/// Split `path` into root-first `(display_label, full_path)` segments for
+/// breadcrumb rendering.
+///
+/// Example:
+/// ```text
+/// /sdcard/DCIM  →  [("/", "/"), ("sdcard", "/sdcard"), ("DCIM", "/sdcard/DCIM")]
+/// ```
+pub(crate) fn path_breadcrumb_segments(path: &Path) -> Vec<(String, PathBuf)> {
+    let mut segments: Vec<(String, PathBuf)> = path
+        .ancestors()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| {
+            let label = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "/".to_string());
+            (label, p.to_path_buf())
+        })
+        .collect();
+
+    // Ensure a root segment is always present.
+    if segments.first().map(|(l, _)| l.as_str()) != Some("/") {
+        segments.insert(0, ("/".to_string(), PathBuf::from("/")));
+    }
+    segments
+}
 
 impl App {
     /// Horizontal menu bar rendered at the top of each directory pane.
@@ -130,22 +163,133 @@ impl App {
             .into()
     }
 
-    /// Box-drawing title bar rendered above each file-browser pane.
+    /// Title bar rendered above each file-browser pane.
     ///
-    /// Produces a single line like:  `┌─ LOCAL ─ /home/user ──`
-    /// in monospace accent color on a secondary-background strip.
-    pub(super) fn view_pane_title_bar<'a>(&self, label: &str, path: &str) -> Element<'a, Message> {
+    /// Combines the former static title (`┌─ LOCAL ─ /path`) with the inner
+    /// breadcrumb widget: the path is split into clickable ancestor segments
+    /// while keeping the `┌─ LABEL ─` box-drawing prefix.
+    ///
+    /// Each ancestor segment emits `on_navigate(ancestor_path)` when clicked.
+    /// The current (last) segment is non-clickable, rendered in accent color.
+    pub(super) fn view_pane_title_bar<'a>(
+        &self,
+        label: &str,
+        current_path: &Path,
+        on_navigate: impl Fn(PathBuf) -> Message,
+    ) -> Element<'a, Message> {
         let t = self.theme;
-        let title = format!("┌─ {label} ─ {path}");
-        container(
-            text(title)
+        let segments = path_breadcrumb_segments(current_path);
+        let last_idx = segments.len().saturating_sub(1);
+
+        let mut cells: Vec<Element<'a, Message>> = Vec::new();
+
+        // ┌─ LABEL ─ prefix
+        cells.push(
+            text(format!("┌─ {} ─", label))
                 .size(11)
                 .font(iced::Font::MONOSPACE)
-                .color(t.accent),
+                .color(t.accent)
+                .into(),
+        );
+
+        for (i, (seg_label, path)) in segments.into_iter().enumerate() {
+            let is_last = i == last_idx;
+            if is_last {
+                // Current directory — non-clickable, accent color
+                cells.push(
+                    text(seg_label)
+                        .size(11)
+                        .font(iced::Font::MONOSPACE)
+                        .color(t.accent)
+                        .into(),
+                );
+            } else {
+                // Ancestor — clickable link
+                let nav_msg = on_navigate(path);
+                cells.push(
+                    button(
+                        text(seg_label)
+                            .size(11)
+                            .font(iced::Font::MONOSPACE)
+                            .color(t.text_secondary),
+                    )
+                    .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                    .padding([0, 2])
+                    .on_press(nav_msg)
+                    .into(),
+                );
+                cells.push(
+                    text("›")
+                        .size(11)
+                        .font(iced::Font::MONOSPACE)
+                        .color(t.text_secondary)
+                        .into(),
+                );
+            }
+        }
+
+        container(
+            iced::widget::Row::from_vec(cells)
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
         )
         .width(Fill)
         .padding([3, 8])
         .style(t.secondary_panel())
         .into()
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segments_root_path() {
+        let segs = path_breadcrumb_segments(Path::new("/"));
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].0, "/");
+        assert_eq!(segs[0].1, PathBuf::from("/"));
+    }
+
+    #[test]
+    fn segments_single_level() {
+        let segs = path_breadcrumb_segments(Path::new("/sdcard"));
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].0, "/");
+        assert_eq!(segs[0].1, PathBuf::from("/"));
+        assert_eq!(segs[1].0, "sdcard");
+        assert_eq!(segs[1].1, PathBuf::from("/sdcard"));
+    }
+
+    #[test]
+    fn segments_nested_path() {
+        let segs = path_breadcrumb_segments(Path::new("/sdcard/DCIM/Camera"));
+        assert_eq!(segs.len(), 4);
+        assert_eq!(segs[0].0, "/");
+        assert_eq!(segs[1].0, "sdcard");
+        assert_eq!(segs[2].0, "DCIM");
+        assert_eq!(segs[3].0, "Camera");
+        assert_eq!(segs[3].1, PathBuf::from("/sdcard/DCIM/Camera"));
+    }
+
+    #[test]
+    fn segments_root_always_present_on_relative_path() {
+        // Even if given a relative path, a root "/" segment is prepended.
+        let segs = path_breadcrumb_segments(Path::new("foo/bar"));
+        assert_eq!(segs[0].0, "/");
+    }
+
+    #[test]
+    fn view_pane_title_bar_renders() {
+        // Smoke test: rendering must not panic.
+        let app = crate::App::default();
+        let _ = app.view_pane_title_bar(
+            "LOCAL",
+            Path::new("/Users/aaron"),
+            crate::Message::LocalNavigateTo,
+        );
     }
 }

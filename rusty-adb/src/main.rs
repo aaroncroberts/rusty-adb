@@ -37,7 +37,6 @@ use views::status_bar::StatusBar;
 use iced::keyboard::{self, key::Named};
 use iced::{Subscription, Task, Theme};
 
-const TOOLBAR_HEIGHT: f32 = 32.0;
 
 // ─── View Mode ─────────────────────────────────────────────────────────────────
 

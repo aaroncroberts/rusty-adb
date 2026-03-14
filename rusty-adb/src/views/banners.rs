@@ -2,7 +2,7 @@
 
 use crate::{App, Message};
 use iced::widget::{button, column, container, row, text};
-use iced::{Border, Element, Fill};
+use iced::{Border, Element, Fill, FillPortion, Length};
 
 impl App {
     pub(super) fn view_error_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
@@ -32,45 +32,69 @@ impl App {
             .into()
     }
 
-    /// Retro ASCII hero banner — a slim persistent strip above the pane menu bars.
+    /// Combined header row: toolbar buttons on the left (2/3), banner on the right (1/3).
     ///
-    /// Shows: ASCII logotype · version · tagline, in phosphor-green palette.
-    pub(super) fn view_hero_banner<'a>(&self) -> Element<'a, Message> {
+    /// Replaces the former two-row layout (`view_hero_banner` + `view_toolbar`).
+    /// - Left portion: Settings and About buttons, left-aligned.
+    /// - Right portion: ASCII logotype + tagline, right-aligned.
+    pub(crate) fn view_header<'a>(&self) -> Element<'a, Message> {
         let t = self.theme;
         let version = env!("CARGO_PKG_VERSION");
 
-        // Top row: ASCII logotype + version
-        let logo_line = format!(
-            "◄◄ RUSTY-ADB ►► v{}",
-            version
-        );
-        let logo = text(logo_line)
+        // ── Right: banner logo + tagline ──────────────────────────────────
+        let logo = text(format!("◄◄ RUSTY-ADB ►► v{}", version))
             .size(13)
             .color(t.accent)
             .font(iced::Font::MONOSPACE);
 
-        // Bottom row: tagline
         let tagline = text("Android file manager · Rust + Iced")
             .size(9)
             .color(t.text_secondary)
             .font(iced::Font::MONOSPACE);
 
-        let inner = column![logo, tagline]
+        let banner_col = column![logo, tagline]
             .spacing(1)
-            .padding([4, 12])
             .align_x(iced::Alignment::End);
 
-        container(row![iced::widget::Space::with_width(Fill), inner])
-            .width(Fill)
-            .style(move |_| container::Style {
-                background: Some(t.background_secondary.into()),
-                border: Border {
-                    color: t.accent.scale_alpha(0.35),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        let right = container(banner_col)
+            .width(Length::FillPortion(1))
+            .padding([4, 12]);
+
+        // ── Left: toolbar buttons ─────────────────────────────────────────
+        let settings_btn = button(text("Settings").size(12).color(t.text))
+            .padding([4, 10])
+            .style(t.transparent_button())
+            .on_press(Message::OpenSettings);
+
+        let about_btn = button(text("About").size(12).color(t.text_secondary))
+            .padding([4, 10])
+            .style(t.transparent_button())
+            .on_press(Message::OpenAbout);
+
+        let left = container(
+            row![settings_btn, about_btn]
+                .spacing(8)
+                .padding([0, 8])
+                .align_y(iced::Alignment::Center),
+        )
+        .width(FillPortion(2))
+        .height(Fill);
+
+        // ── Combined row ──────────────────────────────────────────────────
+        container(
+            row![left, right]
+                .align_y(iced::Alignment::Center),
+        )
+        .width(Fill)
+        .style(move |_| container::Style {
+            background: Some(t.background_secondary.into()),
+            border: Border {
+                color: t.accent.scale_alpha(0.35),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 }
