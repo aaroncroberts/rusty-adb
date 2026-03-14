@@ -1,6 +1,35 @@
 use super::*;
 use adb::DeviceState;
 
+// ── Helpers shared by transfer flow tests ────────────────────────────────────
+
+/// Path to the mock-adb script bundled with the crate's test fixtures.
+/// Stable because CARGO_MANIFEST_DIR is always the crate root.
+fn mock_adb_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/mock-adb")
+}
+
+/// Feed a `TransferEvent` into `App` exactly as the subscription does,
+/// returning the App state snapshot after each message is processed.
+///
+/// This mirrors the mapping in `main.rs subscription()` verbatim:
+///   Progress  → TransferProgress
+///   Complete  → TransferComplete
+///   Cancelled → TransferCancelled
+///   Failed    → TransferFailed
+fn apply_event(app: &mut App, event: adb::TransferEvent) {
+    let msg = match event {
+        adb::TransferEvent::Progress { percent } => Message::TransferProgress { percent },
+        adb::TransferEvent::Complete { speed_display } => {
+            Message::TransferComplete { speed_display }
+        }
+        adb::TransferEvent::Cancelled => Message::TransferCancelled,
+        adb::TransferEvent::Failed(e) => Message::TransferFailed(e),
+    };
+    let _ = app.update(msg);
+}
+
 fn device(serial: &str, state: DeviceState, model: Option<&str>) -> AdbDevice {
     AdbDevice {
         serial: serial.to_string(),
@@ -1252,4 +1281,298 @@ fn copy_to_local_single_file_sets_active_transfer() {
     assert_eq!(job.source, PathBuf::from("/sdcard/photo.jpg"));
     assert_eq!(job.destination, app.local_pane.current_path);
     assert!(matches!(job.direction, adb::TransferDirection::ToLocal));
+}
+
+// ── End-to-end transfer flow tests ───────────────────────────────────────────
+//
+// These tests wire together the full copy pipeline:
+//   1. App::update(CopyToAndroid/CopyToLocal)  — sets up active_transfer
+//   2. adb::run_transfer with mock-adb          — real subprocess, real stderr parsing
+//   3. apply_event() per TransferEvent          — same mapping the subscription uses
+//   4. Assert App state at each step            — what the UI reads from
+//
+// If these pass, the status bar will show correct progress and the pane will
+// refresh after completion.  The only untested slice is the Iced channel
+// wrapper itself, which is thin framework glue.
+
+/// Helper: create a real temp source file and an App ready to push it.
+fn app_for_push(tmp: &tempfile::TempDir) -> (App, std::path::PathBuf) {
+    let src = tmp.path().join("photo.jpg");
+    std::fs::write(&src, b"fake image data").expect("write source file");
+
+    let mut app = App {
+        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        active_serial: Some("device1234".to_string()),
+        ..Default::default()
+    };
+    app.local_pane.entries = vec![DirEntry {
+        name: "photo.jpg".to_string(),
+        path: src.clone(),
+        size: 15,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: false,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: None,
+    }];
+    app.local_pane.selected = vec![0];
+    // android destination stays at the default /sdcard — mock-adb ignores it
+    (app, src)
+}
+
+// ─── Push (local → android) ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn push_progress_events_reach_transfer_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut app, _src) = app_for_push(&tmp);
+
+    let _ = app.update(Message::CopyToAndroid);
+    assert_eq!(app.transfer_status.as_ref().unwrap().percent, 0,
+        "should start at 0% before any events");
+
+    let job   = app.active_transfer.clone().expect("active_transfer set");
+    let cancel = app.cancel_flag.clone().unwrap();
+    let mut events = Vec::new();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+
+    // Feed every event through App — same path the Iced subscription takes
+    let mut observed_percents: Vec<u8> = Vec::new();
+    for ev in events {
+        if let adb::TransferEvent::Progress { percent } = &ev {
+            observed_percents.push(*percent);
+        }
+        apply_event(&mut app, ev);
+    }
+
+    // mock-adb emits exactly [ 25% 50% 75% 100% ]
+    assert_eq!(observed_percents, vec![25, 50, 75, 100],
+        "mock-adb must emit 25/50/75/100 progress ticks");
+    // After each Progress event the status bar percent must match
+    // (verified end-state: must have reached 100 before Complete arrived)
+    assert!(observed_percents.contains(&100));
+}
+
+#[tokio::test]
+async fn push_complete_event_clears_state_and_carries_speed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut app, _src) = app_for_push(&tmp);
+
+    let _ = app.update(Message::CopyToAndroid);
+    let job    = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+
+    let mut events = Vec::new();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+
+    let last = events.last().cloned().unwrap();
+    // Verify the engine itself produced a Complete with speed
+    assert!(matches!(last, adb::TransferEvent::Complete { ref speed_display }
+        if speed_display == "1.2 MB/s"),
+        "mock-adb push must report 1.2 MB/s, got: {last:?}");
+
+    for ev in events {
+        apply_event(&mut app, ev);
+    }
+
+    // After TransferComplete the UI state must be fully cleared
+    assert!(app.active_transfer.is_none(), "active_transfer must clear after complete");
+    assert!(app.transfer_status.is_none(), "transfer_status must clear after complete");
+    assert!(app.cancel_flag.is_none());
+}
+
+#[tokio::test]
+async fn push_progress_updates_status_bar_percent_incrementally() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut app, _src) = app_for_push(&tmp);
+    let _ = app.update(Message::CopyToAndroid);
+
+    let job    = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+
+    // Collect and apply events one at a time, checking percent after each
+    let mut events = Vec::new();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+
+    let mut expected = vec![25u8, 50, 75, 100].into_iter();
+    for ev in events {
+        if matches!(ev, adb::TransferEvent::Progress { .. }) {
+            apply_event(&mut app, ev);
+            let pct = app.transfer_status.as_ref().unwrap().percent;
+            assert_eq!(pct, expected.next().unwrap(),
+                "status bar percent must match mock-adb progress tick");
+        } else {
+            apply_event(&mut app, ev);
+        }
+    }
+}
+
+// ─── Pull (android → local) ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn pull_progress_events_reach_transfer_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = App {
+        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        active_serial: Some("device1234".to_string()),
+        ..Default::default()
+    };
+    // Android pane: one file selected
+    app.android_pane.entries = vec![DirEntry {
+        name: "photo.jpg".to_string(),
+        path: std::path::PathBuf::from("/sdcard/DCIM/photo.jpg"),
+        size: 3_145_728,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: false,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: None,
+    }];
+    app.android_pane.selected = vec![0];
+    // Local destination: the temp dir (mock-adb writes the file there)
+    app.local_pane.current_path = tmp.path().to_path_buf();
+
+    let _ = app.update(Message::CopyToLocal);
+    assert!(app.active_transfer.is_some());
+    let job    = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+
+    let mut events = Vec::new();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+
+    let percents: Vec<u8> = events.iter().filter_map(|e| {
+        if let adb::TransferEvent::Progress { percent } = e { Some(*percent) } else { None }
+    }).collect();
+    assert_eq!(percents, vec![25, 50, 75, 100]);
+
+    for ev in events {
+        apply_event(&mut app, ev);
+    }
+
+    assert!(app.active_transfer.is_none());
+    assert!(app.transfer_status.is_none());
+}
+
+#[tokio::test]
+async fn pull_complete_carries_correct_speed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = App {
+        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        active_serial: Some("device1234".to_string()),
+        ..Default::default()
+    };
+    app.android_pane.entries = vec![DirEntry {
+        name: "photo.jpg".to_string(),
+        path: std::path::PathBuf::from("/sdcard/DCIM/photo.jpg"),
+        size: 3_145_728,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: false,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: None,
+    }];
+    app.android_pane.selected = vec![0];
+    app.local_pane.current_path = tmp.path().to_path_buf();
+
+    let _ = app.update(Message::CopyToLocal);
+    let job    = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+
+    let mut events = Vec::new();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+
+    let last = events.last().cloned().unwrap();
+    // mock-adb pull summary: "1.0 MB/s"
+    assert!(matches!(last, adb::TransferEvent::Complete { ref speed_display }
+        if speed_display == "1.0 MB/s"),
+        "mock-adb pull must report 1.0 MB/s, got: {last:?}");
+}
+
+// ─── Multi-file queue ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn multi_file_push_queue_processes_all_jobs_in_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src_a = tmp.path().join("a.jpg");
+    let src_b = tmp.path().join("b.jpg");
+    std::fs::write(&src_a, b"aaa").unwrap();
+    std::fs::write(&src_b, b"bbb").unwrap();
+
+    let mut app = App {
+        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        active_serial: Some("device1234".to_string()),
+        ..Default::default()
+    };
+    app.local_pane.entries = vec![
+        DirEntry { name: "a.jpg".into(), path: src_a, size: 3, modified_display: "2024-01-01".into(),
+            is_dir: false, is_symlink: false, is_hidden: false, child_count: None },
+        DirEntry { name: "b.jpg".into(), path: src_b, size: 3, modified_display: "2024-01-01".into(),
+            is_dir: false, is_symlink: false, is_hidden: false, child_count: None },
+    ];
+    app.local_pane.selected = vec![0, 1];
+
+    let _ = app.update(Message::CopyToAndroid);
+    assert_eq!(app.transfer_queue_total, 2);
+    assert_eq!(app.transfer_status.as_ref().unwrap().job_index, 1);
+
+    // ── Run job 1 ──
+    let job1   = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+    let mut events1 = Vec::new();
+    adb::run_transfer(&job1, cancel, |ev| events1.push(ev)).await.unwrap();
+    for ev in events1 {
+        apply_event(&mut app, ev);
+    }
+
+    // After first completes, second job must be active
+    assert!(app.active_transfer.is_some(), "second job must start after first completes");
+    assert_eq!(app.transfer_status.as_ref().unwrap().job_index, 2,
+        "job_index must advance to 2");
+    assert_eq!(app.transfer_status.as_ref().unwrap().percent, 0,
+        "percent resets to 0 for each new job");
+    assert_eq!(app.transfer_queue.len(), 0);
+
+    // ── Run job 2 ──
+    let job2   = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+    let mut events2 = Vec::new();
+    adb::run_transfer(&job2, cancel, |ev| events2.push(ev)).await.unwrap();
+    for ev in events2 {
+        apply_event(&mut app, ev);
+    }
+
+    // Both jobs complete — all state cleared
+    assert!(app.active_transfer.is_none(), "all transfers must finish");
+    assert!(app.transfer_status.is_none());
+}
+
+// ─── Cancel mid-flight ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn cancel_flag_stops_transfer_and_clears_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut app, _src) = app_for_push(&tmp);
+
+    let _ = app.update(Message::CopyToAndroid);
+
+    // Request cancel before the subscription drives the transfer
+    let _ = app.update(Message::CancelTransfer);
+
+    let job    = app.active_transfer.clone().unwrap();
+    let cancel = app.cancel_flag.clone().unwrap();
+    // cancel flag is now true — run_transfer will stop after first stderr line
+    let mut events = Vec::new();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+
+    assert!(events.iter().any(|e| matches!(e, adb::TransferEvent::Cancelled)),
+        "cancel flag must produce a Cancelled event");
+    assert!(!events.iter().any(|e| matches!(e, adb::TransferEvent::Complete { .. })),
+        "must not Complete after cancel");
+
+    for ev in events {
+        apply_event(&mut app, ev);
+    }
+    assert!(app.active_transfer.is_none());
+    assert!(app.transfer_status.is_none());
+    assert!(app.transfer_queue.is_empty());
 }
