@@ -27,25 +27,21 @@ mod tests;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
-use adb::{AdbClient, AdbDevice, DeviceState};
-use android_fs::{android_entry_to_dir_entry, AndroidContext, AndroidFs};
-use file_pane::{view_breadcrumb, FilePane, RenameCbs};
+use adb::{AdbClient, AdbDevice};
+use android_fs::{AndroidContext, AndroidFs};
+use file_pane::FilePane;
 use filesystem::{DirEntry, FileSystem, PaneState, SortField};
 use local_fs::LocalFs;
 use status_bar::{AdbStatus, StatusBar, TransferStatus};
 use theme::ThemeColors;
-use transfer::{TransferDirection, TransferEvent, TransferJob};
+use transfer::{TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
-use iced::widget::{
-    button, column, container, image, pick_list, row, scrollable, stack, text,
-    text_input, toggler, vertical_rule, Row,
-};
-use iced::{Border, Element, Fill, Subscription, Task, Theme};
+use iced::{Subscription, Task, Theme};
 
 const TOOLBAR_HEIGHT: f32 = 32.0;
 

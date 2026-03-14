@@ -68,21 +68,9 @@ impl App {
                 self.adb_status = derive_status(&self.devices);
                 tracing::debug!(count = self.devices.len(), "devices refreshed");
 
-                // Detect newly-connected authorized device
-                let new_serial = self
-                    .devices
-                    .iter()
-                    .find(|d| d.state == DeviceState::Device)
-                    .map(|d| d.serial.clone());
-
-                match (&self.active_serial, &new_serial) {
-                    (None, Some(serial)) => {
-                        // Device just appeared — build context and start loading /sdcard
+                match detect_device_transition(self.active_serial.as_deref(), &self.devices) {
+                    DeviceTransition::Connected { serial, label } => {
                         tracing::info!(serial = %serial, "device connected, loading /sdcard");
-                        let device_label = self.devices.iter()
-                            .find(|d| &d.serial == serial)
-                            .and_then(|d| d.model.clone())
-                            .unwrap_or_else(|| serial.clone());
                         let client = self.adb_client.clone()
                             .expect("adb_client set at AdbReady");
                         self.active_serial = Some(serial.clone());
@@ -90,13 +78,12 @@ impl App {
                             client,
                             serial: serial.clone(),
                             storage_roots: Vec::new(),
-                            device_label,
+                            device_label: label,
                         });
                         self.android_pane.state = PaneState::Loading;
-                        return self.update(Message::AndroidNavigateTo(PathBuf::from("/sdcard")));
+                        self.update(Message::AndroidNavigateTo(PathBuf::from("/sdcard")))
                     }
-                    (Some(_), None) => {
-                        // Device disconnected — clear context and reset pane
+                    DeviceTransition::Disconnected => {
                         tracing::info!("device disconnected");
                         self.active_serial = None;
                         self.active_transfer = None;
@@ -105,11 +92,10 @@ impl App {
                         self.android_pane.state = PaneState::NoDevice;
                         self.android_pane.entries.clear();
                         self.android_pane.selected.clear();
+                        Task::none()
                     }
-                    _ => {}
+                    DeviceTransition::NoChange => Task::none(),
                 }
-
-                Task::none()
             }
 
             Message::AdbError(msg) => {
@@ -1156,5 +1142,128 @@ pub(super) fn derive_status(devices: &[AdbDevice]) -> AdbStatus {
         AdbStatus::Unauthorized
     } else {
         AdbStatus::Disconnected
+    }
+}
+
+// ─── Device transition detection ─────────────────────────────────────────────
+
+/// What changed in the device list since the last poll.
+///
+/// Returned by [`detect_device_transition`] — a pure function that can be
+/// unit-tested without constructing a full [`App`].
+#[derive(Debug, PartialEq)]
+pub(crate) enum DeviceTransition {
+    /// A new authorized device appeared.  Contains the serial and a
+    /// human-readable display label (model name or serial as fallback).
+    Connected { serial: String, label: String },
+    /// The previously active device is no longer in the authorized list.
+    Disconnected,
+    /// No actionable change (same device, still connected; or still no device).
+    NoChange,
+}
+
+/// Pure function: compute whether the active device has changed.
+///
+/// Returns [`DeviceTransition::Connected`] when a new authorized device
+/// appears, [`DeviceTransition::Disconnected`] when the active one disappears,
+/// or [`DeviceTransition::NoChange`] for all other cases.
+pub(crate) fn detect_device_transition(
+    active: Option<&str>,
+    devices: &[AdbDevice],
+) -> DeviceTransition {
+    let authorized = devices.iter().find(|d| d.state == DeviceState::Device);
+    let new_serial = authorized.map(|d| d.serial.as_str());
+
+    match (active, new_serial) {
+        (None, Some(serial)) => {
+            let label = authorized
+                .and_then(|d| d.model.as_deref())
+                .unwrap_or(serial)
+                .to_string();
+            DeviceTransition::Connected {
+                serial: serial.to_string(),
+                label,
+            }
+        }
+        (Some(_), None) => DeviceTransition::Disconnected,
+        _ => DeviceTransition::NoChange,
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dev(serial: &str, state: DeviceState, model: Option<&str>) -> AdbDevice {
+        AdbDevice { serial: serial.to_string(), state, model: model.map(String::from), product: None }
+    }
+
+    // ── detect_device_transition ──────────────────────────────────────────────
+
+    #[test]
+    fn transition_none_to_authorized_with_model() {
+        let devices = vec![dev("ABC123", DeviceState::Device, Some("Pixel 7"))];
+        assert_eq!(
+            detect_device_transition(None, &devices),
+            DeviceTransition::Connected { serial: "ABC123".into(), label: "Pixel 7".into() }
+        );
+    }
+
+    #[test]
+    fn transition_none_to_authorized_no_model_uses_serial() {
+        let devices = vec![dev("emulator-5554", DeviceState::Device, None)];
+        assert_eq!(
+            detect_device_transition(None, &devices),
+            DeviceTransition::Connected { serial: "emulator-5554".into(), label: "emulator-5554".into() }
+        );
+    }
+
+    #[test]
+    fn transition_some_to_none_is_disconnected() {
+        assert_eq!(
+            detect_device_transition(Some("ABC123"), &[]),
+            DeviceTransition::Disconnected
+        );
+    }
+
+    #[test]
+    fn transition_same_device_is_no_change() {
+        let devices = vec![dev("ABC123", DeviceState::Device, None)];
+        assert_eq!(
+            detect_device_transition(Some("ABC123"), &devices),
+            DeviceTransition::NoChange
+        );
+    }
+
+    #[test]
+    fn transition_no_device_before_or_after_is_no_change() {
+        assert_eq!(detect_device_transition(None, &[]), DeviceTransition::NoChange);
+    }
+
+    #[test]
+    fn transition_unauthorized_only_is_no_change() {
+        let devices = vec![dev("ABC123", DeviceState::Unauthorized, None)];
+        assert_eq!(detect_device_transition(None, &devices), DeviceTransition::NoChange);
+    }
+
+    // ── derive_status ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn status_authorized_device_uses_model() {
+        let devices = vec![dev("S1", DeviceState::Device, Some("Pixel 7"))];
+        assert_eq!(derive_status(&devices), AdbStatus::Connected("Pixel 7".into()));
+    }
+
+    #[test]
+    fn status_unauthorized_device() {
+        let devices = vec![dev("S1", DeviceState::Unauthorized, None)];
+        assert_eq!(derive_status(&devices), AdbStatus::Unauthorized);
+    }
+
+    #[test]
+    fn status_empty_is_disconnected() {
+        assert_eq!(derive_status(&[]), AdbStatus::Disconnected);
     }
 }

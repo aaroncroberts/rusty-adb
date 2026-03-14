@@ -1,4 +1,5 @@
 use super::*;
+use adb::DeviceState;
 
 fn device(serial: &str, state: DeviceState, model: Option<&str>) -> AdbDevice {
     AdbDevice {
