@@ -1,5 +1,6 @@
 //! Pane-level UI controls: menu bar and title bar for each file-browser pane.
 
+use crate::icons;
 use crate::{App, Message, PaneLayout, ViewMode};
 use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, container, horizontal_space, pick_list, row, text, tooltip};
@@ -85,8 +86,23 @@ impl App {
         .padding([2, 8]);
 
         // ── file command button ─────────────────────────────────────────────
-        let cmd_btn = move |label: &'static str, color: iced::Color, msg: Option<Message>| {
-            let b = button(text(label).size(11).color(color))
+        // `icon_glyph` is an optional Nerd Font glyph string (e.g. icons::trash()).
+        let cmd_btn = move |icon_glyph: Option<String>,
+                            label: &'static str,
+                            color: iced::Color,
+                            msg: Option<Message>| {
+            let content: iced::Element<Message> = if let Some(g) = icon_glyph {
+                row![
+                    text(g).font(icons::font()).size(13).color(color),
+                    text(label).size(11).color(color),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                text(label).size(11).color(color).into()
+            };
+            let b = button(content)
                 .padding([2, 8])
                 .style(t.transparent_button());
             if let Some(m) = msg {
@@ -166,21 +182,44 @@ impl App {
         let mut cmd_items: Vec<Element<Message>> = Vec::new();
         if is_android {
             if has_device && no_transfer && android_sel_has_files {
-                cmd_items.push(cmd_btn("To Local", t.accent, Some(Message::CopyToLocal)).into());
+                cmd_items.push(
+                    cmd_btn(
+                        Some(icons::download()),
+                        "To Local",
+                        t.accent,
+                        Some(Message::CopyToLocal),
+                    )
+                    .into(),
+                );
             }
             if has_device && android_sel_single {
-                cmd_items
-                    .push(cmd_btn("Rename", t.accent, Some(Message::AndroidBeginRename)).into());
+                cmd_items.push(
+                    cmd_btn(None, "Rename", t.accent, Some(Message::AndroidBeginRename)).into(),
+                );
             }
             if has_device && android_sel_nonempty {
-                cmd_items
-                    .push(cmd_btn("Delete", t.error, Some(Message::AndroidBeginDelete)).into());
+                cmd_items.push(
+                    cmd_btn(
+                        Some(icons::trash()),
+                        "Delete",
+                        t.error,
+                        Some(Message::AndroidBeginDelete),
+                    )
+                    .into(),
+                );
             }
         } else {
             // local pane
             if has_device && no_transfer && local_sel_has_files {
-                cmd_items
-                    .push(cmd_btn("To Android", t.accent, Some(Message::CopyToAndroid)).into());
+                cmd_items.push(
+                    cmd_btn(
+                        Some(icons::upload()),
+                        "To Android",
+                        t.accent,
+                        Some(Message::CopyToAndroid),
+                    )
+                    .into(),
+                );
             }
         }
 
@@ -304,15 +343,23 @@ impl App {
             horizontal_space().into()
         } else {
             let (icon, tip, msg) = if this_is_expanded {
-                ("><", "Restore equal split", Message::CollapsePanes)
+                (
+                    icons::collapse(),
+                    "Restore equal split",
+                    Message::CollapsePanes,
+                )
             } else {
-                (">>", "Expand this pane", Message::ExpandPane(is_android))
+                (
+                    icons::expand(),
+                    "Expand this pane",
+                    Message::ExpandPane(is_android),
+                )
             };
             let btn = button(
                 text(icon)
-                    .size(11)
+                    .size(14)
                     .color(t.text_secondary)
-                    .font(iced::Font::MONOSPACE),
+                    .font(icons::font()),
             )
             .style(|_t, _s| button::Style {
                 background: None,

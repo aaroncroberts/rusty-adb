@@ -3,6 +3,7 @@
 use crate::adb::AdbClient;
 use crate::file_pane::RenameCbs;
 use crate::fs::AndroidContext;
+use crate::icons;
 use crate::{App, Message};
 use iced::widget::{button, column, container, image, row, scrollable, text};
 use iced::{Border, Element, Fill, Theme};
@@ -166,14 +167,14 @@ impl App {
                     .height(STRIP_TILE_H - 22)
                     .into()
             } else {
-                let art = if is_dir {
-                    "┌──┐\n│/ │\n└──┘"
+                let glyph = if is_dir {
+                    icons::folder()
                 } else {
-                    "┌──┐\n│──│\n└──┘"
+                    icons::file()
                 };
-                text(art)
-                    .size(9)
-                    .font(iced::Font::MONOSPACE)
+                text(glyph)
+                    .size(18)
+                    .font(icons::font())
                     .color(icon_fg)
                     .into()
             };
@@ -380,21 +381,20 @@ impl App {
                             "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
                         );
 
-                    // 3-line icon art — compact enough to leave room for the filename
                     let icon_art: Element<Message> = if is_image {
                         image(image::Handle::from_path(current_path.join(name.as_str())))
                             .width(56)
                             .height(44)
                             .into()
                     } else {
-                        let art = if can_navigate {
-                            "┌───┐\n│ / │\n└───┘"
+                        let glyph = if can_navigate {
+                            icons::folder()
                         } else {
-                            "┌───┐\n│───│\n└───┘"
+                            icons::file()
                         };
-                        text(art)
-                            .size(13)
-                            .font(iced::Font::MONOSPACE)
+                        text(glyph)
+                            .size(32)
+                            .font(icons::font())
                             .color(icon_fg)
                             .into()
                     };

@@ -1,5 +1,6 @@
 //! Banner view implementations: error, toast, and hero banners.
 
+use crate::icons;
 use crate::{App, Message};
 use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, column, container, row, text, tooltip};
@@ -75,10 +76,20 @@ impl App {
             .align_x(iced::Alignment::End);
 
         // ── Left: toolbar buttons ─────────────────────────────────────────
-        let settings_btn = button(text("Settings").size(12).color(t.text))
-            .padding([4, 10])
-            .style(t.transparent_button())
-            .on_press(Message::OpenSettings);
+        let settings_btn = button(
+            row![
+                text(icons::settings())
+                    .font(icons::font())
+                    .size(14)
+                    .color(t.text),
+                text("Settings").size(12).color(t.text),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([4, 10])
+        .style(t.transparent_button())
+        .on_press(Message::OpenSettings);
 
         let left = container(
             row![settings_btn]

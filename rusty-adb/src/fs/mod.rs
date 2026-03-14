@@ -20,6 +20,18 @@ pub mod local;
 pub use android::{android_entry_to_dir_entry, AndroidContext, AndroidFs};
 pub use local::{sort_entries, LocalFs};
 
+// ─── Icon Kind ───────────────────────────────────────────────────────────────
+
+/// Which visual icon to display for a directory entry.
+///
+/// Callers convert this to a Nerd Font glyph via `crate::icons`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconKind {
+    Folder,
+    File,
+    Symlink,
+}
+
 // ─── Unified Entry Type ───────────────────────────────────────────────────────
 
 /// A single normalized directory entry produced by any [`FileSystem`] backend.
@@ -79,14 +91,14 @@ impl DirEntry {
         }
     }
 
-    /// ASCII icon glyph used in list / detail views.
-    pub fn icon(&self) -> &'static str {
+    /// Icon glyph kind for this entry — maps to a Nerd Font (Codicons) codepoint.
+    pub fn icon_kind(&self) -> IconKind {
         if self.is_dir {
-            "[/]"
+            IconKind::Folder
         } else if self.is_symlink {
-            "[@]"
+            IconKind::Symlink
         } else {
-            "[-]"
+            IconKind::File
         }
     }
 }
@@ -327,7 +339,7 @@ mod tests {
             child_count: None,
         };
         assert!(e.is_navigable());
-        assert_eq!(e.icon(), "[/]");
+        assert_eq!(e.icon_kind(), IconKind::Folder);
         assert_eq!(e.type_label(), "Folder");
     }
 
@@ -344,7 +356,7 @@ mod tests {
             child_count: None,
         };
         assert!(e.is_navigable());
-        assert_eq!(e.icon(), "[@]");
+        assert_eq!(e.icon_kind(), IconKind::Symlink);
         assert_eq!(e.type_label(), "Symlink");
     }
 
@@ -361,6 +373,6 @@ mod tests {
             child_count: None,
         };
         assert!(!e.is_navigable());
-        assert_eq!(e.icon(), "[-]");
+        assert_eq!(e.icon_kind(), IconKind::File);
     }
 }

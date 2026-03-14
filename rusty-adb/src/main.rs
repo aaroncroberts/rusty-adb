@@ -15,6 +15,7 @@ mod adb;
 mod config;
 mod file_pane;
 mod fs;
+mod icons;
 #[cfg(test)]
 mod tests;
 mod theme;
@@ -583,6 +584,7 @@ pub fn main() -> iced::Result {
         App::view,
     )
     .subscription(App::subscription)
+    .font(icons::FONT_BYTES)
     .theme(|_| Theme::TokyoNightStorm)
     .window(iced::window::Settings {
         size: iced::Size::new(1280.0, 800.0),

@@ -1,7 +1,8 @@
 //! List-view rendering for FilePane.
 
 use super::{FilePane, RenameCbs, RENAME_INPUT_ID};
-use crate::fs::{FileSystem, PaneState, SortField};
+use crate::fs::{FileSystem, IconKind, PaneState, SortField};
+use crate::icons;
 use crate::theme::ThemeColors;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Border, Element, Fill};
@@ -135,7 +136,11 @@ impl<FS: FileSystem> FilePane<FS> {
         // Pre-build the inline rename input (consumes rename callbacks once).
         let mut rename_row: Option<(usize, Element<Message>)> =
             if let (Some(cbs), Some((idx, val))) = (rename_cbs, &self.rename_pending) {
-                let icon = self.entries.get(*idx).map(|e| e.icon()).unwrap_or("[-]");
+                let icon_glyph = self
+                    .entries
+                    .get(*idx)
+                    .map(|e| icon_str(e.icon_kind()))
+                    .unwrap_or_else(icons::file);
                 let input = text_input("New name…", val.as_str())
                     .id(text_input::Id::new(RENAME_INPUT_ID))
                     .on_input(cbs.on_input)
@@ -144,7 +149,7 @@ impl<FS: FileSystem> FilePane<FS> {
                     .width(Fill);
                 Some((
                     *idx,
-                    row![text(icon).size(12), input]
+                    row![text(icon_glyph).font(icons::font()).size(12), input]
                         .spacing(6)
                         .padding([1, 0])
                         .into(),
@@ -237,7 +242,8 @@ impl<FS: FileSystem> FilePane<FS> {
                 rename_row.take().unwrap().1
             } else {
                 let mut cells: Vec<Element<Message>> = vec![
-                    text(entry.icon())
+                    text(icon_str(entry.icon_kind()))
+                        .font(icons::font())
                         .size(11)
                         .color(icon_fg)
                         .width(W_ICON)
@@ -328,6 +334,19 @@ impl<FS: FileSystem> FilePane<FS> {
         column![col_header, body].width(Fill).height(Fill).into()
     }
 
+    // ── Icon helpers ──────────────────────────────────────────────────────────
+}
+
+/// Map an [`IconKind`] to its Nerd Font glyph string.
+fn icon_str(kind: IconKind) -> String {
+    match kind {
+        IconKind::Folder => icons::folder(),
+        IconKind::File => icons::file(),
+        IconKind::Symlink => icons::symlink(),
+    }
+}
+
+impl<FS: FileSystem> FilePane<FS> {
     // ── State body helpers ────────────────────────────────────────────────────
 
     pub(super) fn view_state_body<'a, Message: 'a + Clone>(
