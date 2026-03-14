@@ -1,7 +1,8 @@
 //! Pane navigation handlers: local pane and android pane navigation,
 //! sorting, selection, RefreshPanes, DisconnectDevice, SpinnerTick.
-use crate::{App, Message};
+use crate::adb::AdbOperations;
 use crate::fs::{android_entry_to_dir_entry, DirEntry, FileSystem, LocalFs, SortField};
+use crate::{App, Message};
 use iced::Task;
 use std::path::PathBuf;
 
@@ -18,13 +19,20 @@ impl App {
                     .map_err(|e| e.to_string())
             },
             move |result| match result {
-                Ok(entries) => Message::LocalEntriesLoaded { path: load_path.clone(), entries },
+                Ok(entries) => Message::LocalEntriesLoaded {
+                    path: load_path.clone(),
+                    entries,
+                },
                 Err(e) => Message::LocalLoadError(e),
             },
         )
     }
 
-    pub(super) fn local_entries_loaded(&mut self, path: PathBuf, entries: Vec<DirEntry>) -> Task<Message> {
+    pub(super) fn local_entries_loaded(
+        &mut self,
+        path: PathBuf,
+        entries: Vec<DirEntry>,
+    ) -> Task<Message> {
         self.local_pane.on_entries_loaded(path, entries);
         Task::none()
     }
@@ -120,21 +128,7 @@ impl App {
         self.android_pane.begin_navigate(path.clone());
 
         Task::perform(
-            async move {
-                // Fetch directory entries and storage roots in parallel
-                let entries_fut = client.list_dir(&serial, &path);
-                let roots_fut = client.list_storage_roots(&serial);
-                let (entries_res, roots) = tokio::join!(entries_fut, roots_fut);
-                entries_res
-                    .map(|raw| {
-                        let entries: Vec<DirEntry> = raw
-                            .into_iter()
-                            .map(android_entry_to_dir_entry)
-                            .collect();
-                        (path, entries, roots)
-                    })
-                    .map_err(|e| e.to_string())
-            },
+            async move { fetch_android_dir(&client, &serial, path).await },
             |result| match result {
                 Ok((path, entries, roots)) => Message::AndroidEntriesLoaded {
                     path,
@@ -229,5 +223,116 @@ impl App {
                 Message::PollDevices
             },
         )
+    }
+}
+
+// ─── Extracted async helpers (testable without constructing App) ──────────────
+
+/// Fetch a directory listing and storage roots from an Android device.
+///
+/// This is the core async work inside `android_navigate_to` extracted so it
+/// can be exercised in unit tests via [`crate::adb::mock::MockAdbClient`].
+pub(crate) async fn fetch_android_dir(
+    client: &impl AdbOperations,
+    serial: &str,
+    path: PathBuf,
+) -> Result<(PathBuf, Vec<DirEntry>, Vec<PathBuf>), String> {
+    let entries_fut = client.list_dir(serial, &path);
+    let roots_fut = client.list_storage_roots(serial);
+    let (entries_res, roots) = tokio::join!(entries_fut, roots_fut);
+    entries_res
+        .map(|raw| {
+            let entries: Vec<DirEntry> =
+                raw.into_iter().map(android_entry_to_dir_entry).collect();
+            (path, entries, roots)
+        })
+        .map_err(|e| e.to_string())
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adb::mock::MockAdbClient;
+    use crate::adb::parser::AndroidEntry;
+    use std::path::PathBuf;
+
+    fn make_entry(name: &str, is_dir: bool) -> AndroidEntry {
+        AndroidEntry {
+            name: name.to_string(),
+            path: PathBuf::from(format!("/sdcard/{name}")),
+            size: 0,
+            modified: "2024-01-01".to_string(),
+            is_dir,
+            is_symlink: false,
+            is_hidden: false,
+        }
+    }
+
+    // ── fetch_android_dir ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_android_dir_returns_entries_and_roots() {
+        let mut mock = MockAdbClient::default();
+        mock.entries = vec![
+            make_entry("DCIM", true),
+            make_entry("Download", true),
+            make_entry("photo.jpg", false),
+        ];
+        mock.roots = vec![PathBuf::from("/sdcard"), PathBuf::from("/storage/emulated/0")];
+
+        let (path, entries, roots) = fetch_android_dir(
+            &mock,
+            "serial123",
+            PathBuf::from("/sdcard"),
+        )
+        .await
+        .expect("should succeed");
+
+        assert_eq!(path, PathBuf::from("/sdcard"));
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "DCIM");
+        assert!(entries[0].is_dir);
+        assert_eq!(entries[2].name, "photo.jpg");
+        assert!(!entries[2].is_dir);
+        assert_eq!(roots.len(), 2);
+
+        let calls = mock.calls();
+        assert!(calls.iter().any(|c| c.contains("list_dir")));
+        assert!(calls.iter().any(|c| c.contains("list_storage_roots")));
+    }
+
+    #[tokio::test]
+    async fn fetch_android_dir_list_dir_error_propagates() {
+        let mock = MockAdbClient::failing_list_dir();
+
+        let result = fetch_android_dir(&mock, "serial123", PathBuf::from("/sdcard")).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("mock list_dir failure"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn fetch_android_dir_empty_directory() {
+        let mock = MockAdbClient::default(); // entries = []
+        let (_, entries, roots) =
+            fetch_android_dir(&mock, "device1", PathBuf::from("/sdcard")).await.unwrap();
+
+        assert!(entries.is_empty());
+        assert!(!roots.is_empty()); // always at least /sdcard from default mock
+    }
+
+    #[tokio::test]
+    async fn fetch_android_dir_records_serial_in_calls() {
+        let mock = MockAdbClient::default();
+        let _ = fetch_android_dir(&mock, "R5CWA0X", PathBuf::from("/sdcard")).await;
+
+        let calls = mock.calls();
+        assert!(
+            calls.iter().any(|c| c.contains("R5CWA0X")),
+            "serial should appear in call log: {calls:?}"
+        );
     }
 }

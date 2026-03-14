@@ -155,6 +155,21 @@ pub mod mock {
             self.calls.lock().unwrap().clone()
         }
 
+        /// Constructor: mock that fails on `list_dir`.
+        pub fn failing_list_dir() -> Self {
+            Self { fail_list_dir: true, ..Self::default() }
+        }
+
+        /// Constructor: mock that fails on `rename`.
+        pub fn failing_rename() -> Self {
+            Self { fail_rename: true, ..Self::default() }
+        }
+
+        /// Constructor: mock that fails on `delete`.
+        pub fn failing_delete() -> Self {
+            Self { fail_delete: true, ..Self::default() }
+        }
+
         fn log(&self, call: impl Into<String>) {
             self.calls.lock().unwrap().push(call.into());
         }
