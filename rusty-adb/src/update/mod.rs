@@ -118,18 +118,51 @@ impl App {
             }
             Message::LocalLoadError(msg) => self.local_load_error(msg),
             Message::LocalSelectEntry(i) => self.local_select_entry(i),
-            Message::LocalToggleHidden => self.local_toggle_hidden(),
-            Message::LocalToggleType => self.local_toggle_type(),
-            Message::LocalToggleSize => self.local_toggle_size(),
-            Message::LocalToggleModified => self.local_toggle_modified(),
+            Message::ToggleShowPanel(is_android) => {
+                // Toggle open/closed; clicking the same pane's button closes it.
+                self.show_panel_open = if self.show_panel_open == Some(is_android) {
+                    None
+                } else {
+                    Some(is_android)
+                };
+                Task::none()
+            }
+            Message::LocalToggleHidden => {
+                self.show_panel_open = None;
+                self.local_toggle_hidden()
+            }
+            Message::LocalToggleType => {
+                self.show_panel_open = None;
+                self.local_toggle_type()
+            }
+            Message::LocalToggleSize => {
+                self.show_panel_open = None;
+                self.local_toggle_size()
+            }
+            Message::LocalToggleModified => {
+                self.show_panel_open = None;
+                self.local_toggle_modified()
+            }
             Message::LocalSortBy(field) => self.local_sort_by(field),
             Message::AndroidSortBy(field) => self.android_sort_by(field),
 
             // ── Android Pane ──────────────────────────────────────────────────
-            Message::AndroidToggleHidden => self.android_toggle_hidden(),
-            Message::AndroidToggleType => self.android_toggle_type(),
-            Message::AndroidToggleSize => self.android_toggle_size(),
-            Message::AndroidToggleModified => self.android_toggle_modified(),
+            Message::AndroidToggleHidden => {
+                self.show_panel_open = None;
+                self.android_toggle_hidden()
+            }
+            Message::AndroidToggleType => {
+                self.show_panel_open = None;
+                self.android_toggle_type()
+            }
+            Message::AndroidToggleSize => {
+                self.show_panel_open = None;
+                self.android_toggle_size()
+            }
+            Message::AndroidToggleModified => {
+                self.show_panel_open = None;
+                self.android_toggle_modified()
+            }
             Message::AndroidNavigateTo(path) => self.android_navigate_to(path),
             Message::AndroidEntriesLoaded {
                 path,

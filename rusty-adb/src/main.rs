@@ -184,6 +184,7 @@ enum Message {
     },
     LocalLoadError(String),
     LocalSelectEntry(usize),
+    ToggleShowPanel(bool),
     LocalToggleHidden,
     LocalToggleType,
     LocalToggleSize,
@@ -452,6 +453,8 @@ struct App {
     toast: Option<String>,
     /// Whether the About modal is currently open
     about_open: bool,
+    /// Which pane's column/visibility panel is open: Some(false)=local, Some(true)=android, None=closed
+    show_panel_open: Option<bool>,
 
     // ── Log viewer ────────────────────────────────────────────────────────────
     /// Whether the log viewer modal is open
@@ -513,6 +516,7 @@ impl Default for App {
             settings_draft: config::AppConfig::default(),
             toast: None,
             about_open: false,
+            show_panel_open: None,
             theme,
         }
     }

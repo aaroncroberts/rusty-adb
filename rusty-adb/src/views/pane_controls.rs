@@ -112,8 +112,7 @@ impl App {
             }
         };
 
-        // ── Column / visibility icon-button dropdown ─────────────────────────
-        // Read column/hidden visibility from the appropriate pane.
+        // ── Column / visibility icon button ──────────────────────────────────
         let (show_type, show_size, show_modified) = if is_android {
             (
                 self.android_pane.show_type,
@@ -128,58 +127,23 @@ impl App {
             )
         };
 
-        // Build item labels — checkmark prefix shows enabled state.
-        let type_item: &'static str = if show_type { "✓ Type" } else { "  Type" };
-        let size_item: &'static str = if show_size { "✓ Size" } else { "  Size" };
-        let modified_item: &'static str = if show_modified {
-            "✓ Modified"
-        } else {
-            "  Modified"
-        };
-        let hidden_item: &'static str = if show_hidden {
-            "✓ Hidden files"
-        } else {
-            "  Hidden files"
-        };
+        let panel_open = self.show_panel_open == Some(is_android);
 
-        let show_items: Vec<&'static str> = vec![type_item, size_item, modified_item, hidden_item];
-
-        // Always None selected so the icon placeholder is always displayed;
-        // picking an item fires a toggle message then re-renders back to None.
-        let show_picker = pick_list(show_items, None::<&str>, move |picked: &str| match picked {
-            s if s.contains("Type") => {
-                if is_android {
-                    Message::AndroidToggleType
-                } else {
-                    Message::LocalToggleType
-                }
-            }
-            s if s.contains("Size") => {
-                if is_android {
-                    Message::AndroidToggleSize
-                } else {
-                    Message::LocalToggleSize
-                }
-            }
-            s if s.contains("Modified") => {
-                if is_android {
-                    Message::AndroidToggleModified
-                } else {
-                    Message::LocalToggleModified
-                }
-            }
-            _ => {
-                if is_android {
-                    Message::AndroidToggleHidden
-                } else {
-                    Message::LocalToggleHidden
-                }
-            }
-        })
-        .placeholder(icons::layout())
-        .font(icons::font())
-        .text_size(13)
-        .padding([2, 6]);
+        // Icon button — accent when panel is open, secondary when closed.
+        let panel_btn_color = if panel_open { t.accent } else { t.text_secondary };
+        let show_btn = tooltip(
+            button(
+                text(icons::layout())
+                    .font(icons::font())
+                    .size(13)
+                    .color(panel_btn_color),
+            )
+            .style(t.transparent_button())
+            .padding([2, 4])
+            .on_press(Message::ToggleShowPanel(is_android)),
+            text("Columns & visibility").size(11),
+            TipPos::Bottom,
+        );
 
         // ── file commands ───────────────────────────────────────────────────
         let mut cmd_items: Vec<Element<Message>> = Vec::new();
@@ -230,25 +194,68 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
-        let show_picker = show_picker.width(iced::Length::Shrink);
+        // ── Small toggle button helper ──────────────────────────────────────
+        let tog = move |label: &'static str, active: bool, msg: Message| {
+            let color = if active { t.accent } else { t.text_secondary };
+            button(text(label).size(11).color(color))
+                .style(t.transparent_button())
+                .padding([2, 6])
+                .on_press(msg)
+        };
 
-        let content = row![
+        let (type_msg, size_msg, modified_msg, hidden_msg) = if is_android {
+            (
+                Message::AndroidToggleType,
+                Message::AndroidToggleSize,
+                Message::AndroidToggleModified,
+                Message::AndroidToggleHidden,
+            )
+        } else {
+            (
+                Message::LocalToggleType,
+                Message::LocalToggleSize,
+                Message::LocalToggleModified,
+                Message::LocalToggleHidden,
+            )
+        };
+
+        let toolbar = row![
             text("View").size(11).color(t.text_secondary),
             iced::widget::Space::new(6, 1),
             view_picker,
             iced::widget::horizontal_space(),
             cmd_row,
             iced::widget::Space::new(4, 1),
-            show_picker,
+            show_btn,
         ]
         .spacing(2)
         .padding([2, 8])
         .align_y(iced::Alignment::Center);
 
-        container(content)
+        let mut bar = iced::widget::Column::new()
             .width(Fill)
-            .height(32)
-            .align_y(iced::Alignment::Center)
+            .push(toolbar);
+
+        if panel_open {
+            let toggle_row = row![
+                tog("Type", show_type, type_msg),
+                tog("Size", show_size, size_msg),
+                tog("Modified", show_modified, modified_msg),
+                tog("Hidden files", show_hidden, hidden_msg),
+            ]
+            .spacing(0)
+            .padding([2, 8])
+            .align_y(iced::Alignment::Center);
+
+            bar = bar.push(
+                container(toggle_row)
+                    .width(Fill)
+                    .style(t.secondary_panel()),
+            );
+        }
+
+        container(bar)
+            .width(Fill)
             .style(t.secondary_panel())
             .into()
     }
