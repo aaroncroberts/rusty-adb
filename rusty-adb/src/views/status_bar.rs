@@ -96,12 +96,12 @@ impl StatusBar {
 
         // ── Far-right "Logs" link ─────────────────────────────────────────────
         let logs_btn: Element<Message> = {
-            let b = button(text("Logs").size(11).color(theme.text_secondary)).style(
-                move |_t, _s| button::Style {
+            let b = button(text("Logs").size(11).color(theme.accent))
+                .padding([2, 8])
+                .style(move |_t, _s| button::Style {
                     background: None,
                     ..Default::default()
-                },
-            );
+                });
             if let Some(msg) = on_open_logs {
                 b.on_press(msg)
             } else {

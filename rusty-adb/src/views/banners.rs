@@ -80,13 +80,8 @@ impl App {
             .style(t.transparent_button())
             .on_press(Message::OpenSettings);
 
-        let about_btn = button(text("About").size(12).color(t.text_secondary))
-            .padding([4, 10])
-            .style(t.transparent_button())
-            .on_press(Message::OpenAbout);
-
         let left = container(
-            row![settings_btn, about_btn]
+            row![settings_btn]
                 .spacing(8)
                 .padding([0, 8])
                 .align_y(iced::Alignment::Center),

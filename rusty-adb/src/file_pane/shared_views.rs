@@ -60,9 +60,15 @@ pub fn view_connect_guide<'a, Message: 'a + Clone>(theme: ThemeColors) -> Elemen
     let gap = || text("").size(6);
 
     let guide = column![
-        text("No Android device connected").size(13).color(t.text),
+        text("No Android Device Connected")
+            .size(18)
+            .color(t.accent)
+            .font(iced::Font::MONOSPACE),
+        text("Connect a device via USB and follow the steps below.")
+            .size(12)
+            .color(t.text_secondary),
         gap(),
-
+        gap(),
         h("Step 1 - Unlock Developer Options"),
         a("  Settings > About Phone > Build Number  (tap 7 times)"),
         s("  Samsung:  About Phone > Software Information > Build Number"),
@@ -70,21 +76,17 @@ pub fn view_connect_guide<'a, Message: 'a + Clone>(theme: ThemeColors) -> Elemen
         s("  OnePlus:  About Device > Version > Build Number"),
         s("  Your PIN may be required. \"You are now a developer!\" confirms success."),
         gap(),
-
         h("Step 2 - Enable USB Debugging"),
         a("  Settings > Developer Options > USB Debugging  (toggle on)"),
         gap(),
-
         h("Step 3 - Connect via USB"),
         s("  Plug in USB. Swipe the notification shade, tap the USB notification,"),
         s("  and choose  File Transfer / MTP."),
         gap(),
-
         h("Step 4 - Authorise this computer"),
         s("  Tap Allow on the \"Allow USB debugging?\" dialog."),
         s("  Tick \"Always allow from this computer\" to skip this next time."),
         gap(),
-
         h("Troubleshooting"),
         s("  No dialog? Disconnect, toggle USB Debugging off/on, reconnect."),
         s("  Shows \"unauthorized\"? Revoke all authorisations in Developer Options,"),
