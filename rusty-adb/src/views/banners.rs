@@ -1,8 +1,9 @@
 //! Banner view implementations: error, toast, and hero banners.
 
 use crate::{App, Message};
-use iced::widget::{button, column, container, row, text};
-use iced::{Border, Element, Fill, FillPortion, Length};
+use iced::widget::tooltip::Position as TipPos;
+use iced::widget::{button, column, container, row, text, tooltip};
+use iced::{Border, Element, Fill};
 
 impl App {
     pub(super) fn view_error_banner<'a>(&'a self, msg: &'a str) -> Element<'a, Message> {
@@ -56,9 +57,22 @@ impl App {
             .spacing(1)
             .align_x(iced::Alignment::End);
 
-        let right = container(banner_col)
-            .width(Length::FillPortion(1))
-            .padding([4, 12]);
+        // Clicking the banner opens the About dialog
+        let banner_btn = tooltip(
+            button(banner_col)
+                .style(|_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+                .padding([4, 12])
+                .on_press(Message::OpenAbout),
+            text("About rusty-adb").size(11),
+            TipPos::Bottom,
+        );
+
+        let right = container(banner_btn)
+            .width(Fill)
+            .align_x(iced::Alignment::End);
 
         // ── Left: toolbar buttons ─────────────────────────────────────────
         let settings_btn = button(text("Settings").size(12).color(t.text))
@@ -77,24 +91,20 @@ impl App {
                 .padding([0, 8])
                 .align_y(iced::Alignment::Center),
         )
-        .width(FillPortion(2))
-        .height(Fill);
+        .width(iced::Length::Shrink);
 
         // ── Combined row ──────────────────────────────────────────────────
-        container(
-            row![left, right]
-                .align_y(iced::Alignment::Center),
-        )
-        .width(Fill)
-        .style(move |_| container::Style {
-            background: Some(t.background_secondary.into()),
-            border: Border {
-                color: t.accent.scale_alpha(0.35),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+        container(row![left, right].align_y(iced::Alignment::Center))
+            .width(Fill)
+            .style(move |_| container::Style {
+                background: Some(t.background_secondary.into()),
+                border: Border {
+                    color: t.accent.scale_alpha(0.35),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 }

@@ -1,7 +1,7 @@
 //! Modal overlay views: preview, log viewer, about, and settings.
 
-use crate::{App, LogLevel, Message, PreviewContent};
 use crate::adb::AdbStatus;
+use crate::{App, LogLevel, Message, PreviewContent};
 use iced::widget::{
     button, column, container, image, pick_list, row, scrollable, text, toggler, Row,
 };
@@ -10,7 +10,10 @@ use iced::{Border, Element, Fill};
 impl App {
     /// The semi-transparent backdrop captures clicks (closing the modal).
     /// The inner card shows either an image or scrollable text.
-    pub(super) fn view_preview_modal<'a>(&'a self, content: &'a PreviewContent) -> Element<'a, Message> {
+    pub(super) fn view_preview_modal<'a>(
+        &'a self,
+        content: &'a PreviewContent,
+    ) -> Element<'a, Message> {
         let t = self.theme;
 
         let close_btn = button(text("X  Close").size(12).color(t.text))
@@ -151,7 +154,10 @@ impl App {
 
         let log_scroll = scrollable(
             container(
-                text(log_display).size(11).font(iced::Font::MONOSPACE).color(t.text),
+                text(log_display)
+                    .size(11)
+                    .font(iced::Font::MONOSPACE)
+                    .color(t.text),
             )
             .padding(8)
             .width(Fill),
@@ -178,10 +184,7 @@ impl App {
             column![
                 // Header
                 container(
-                    row![
-                        text("Log Viewer").size(14).color(t.text).width(Fill),
-                    ]
-                    .padding([6, 10]),
+                    row![text("Log Viewer").size(14).color(t.text).width(Fill),].padding([6, 10]),
                 )
                 .width(Fill)
                 .style(t.secondary_panel()),
@@ -262,18 +265,47 @@ impl App {
                 // Body
                 container(
                     column![
-                        // ASCII art logo — "rusty" (left) + "adb" (right), figlet small
-                        column![
-                            text("╔══════════════════════════════════════════════╗").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║ _ __ _   _ ___| |_ _   _    __ _  __| | |__ ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║| '__| | | / __| __| | | |  / _` |/ _` | '_ \\║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║| |  | |_| \\__ \\ |_| |_| | | (_| | (_| | |_) |║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║|_|   \\__,_|___/\\__|\\__, | \\__,_|\\__,_|_.__/ ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text("║                      |___/                    ║").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                            text(format!("║  Android file manager  v{version:<21}║")).size(12).font(iced::Font::MONOSPACE).color(t.text),
-                            text("╚══════════════════════════════════════════════╝").size(12).font(iced::Font::MONOSPACE).color(t.accent),
-                        ]
-                        .spacing(0),
+                        // ASCII art logo — top/bottom border only, centered
+                        container(
+                            column![
+                                text("══════════════════════════════════════════════")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                                text(" _ __ _   _ ___| |_ _   _    __ _  __| | |__ ")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                                text("| '__| | | / __| __| | | |  / _` |/ _` | '_ \\")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                                text("| |  | |_| \\__ \\ |_| |_| | | (_| | (_| | |_) |")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                                text("|_|   \\__,_|___/\\__|\\__, |  \\__,_|\\__,_|_.__/ ")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                                text("                     |___/                     ")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                                text("").size(6),
+                                text(format!("  Android file manager  v{version:<21}"))
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.text),
+                                text("══════════════════════════════════════════════")
+                                    .size(12)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(t.accent),
+                            ]
+                            .spacing(0),
+                        )
+                        .width(Fill)
+                        .align_x(iced::Alignment::Center),
                         text("").size(8), // spacer
                         text("Android file manager built with Rust and Iced.")
                             .size(12)
@@ -396,20 +428,30 @@ impl App {
                                     };
                                     elem
                                 };
-                            let refresh = action_btn("Refresh", t.text, Some(Message::RefreshPanes));
+                            let refresh =
+                                action_btn("Refresh", t.text, Some(Message::RefreshPanes));
                             let disconnect = action_btn(
                                 "Disconnect",
-                                if has_device { t.warning } else { t.text_secondary },
-                                if has_device { Some(Message::DisconnectDevice) } else { None },
+                                if has_device {
+                                    t.warning
+                                } else {
+                                    t.text_secondary
+                                },
+                                if has_device {
+                                    Some(Message::DisconnectDevice)
+                                } else {
+                                    None
+                                },
                             );
                             let restart = action_btn(
                                 "Restart Daemon",
                                 if daemon_error { t.warning } else { t.text },
                                 Some(Message::RestartDaemon),
                             );
-                            let r: Element<Message> = Row::from_vec(vec![refresh, disconnect, restart])
-                                .spacing(8)
-                                .into();
+                            let r: Element<Message> =
+                                Row::from_vec(vec![refresh, disconnect, restart])
+                                    .spacing(8)
+                                    .into();
                             r
                         },
                     ]

@@ -108,14 +108,38 @@ impl ThemeColors {
     }
 
     /// Accent-filled button — prominent primary action (install, save).
+    ///
+    /// Uses a deep forest-green fill so white label text is clearly legible
+    /// while still standing out from the near-black `secondary_button`.
     pub fn accent_button(self) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
-        move |_, _| button::Style {
-            background: Some(self.accent.into()),
-            border: Border {
-                radius: 0.0.into(),
+        move |_, status| {
+            // Deep emerald: visible as "primary action" without neon glare.
+            let base = Color::from_rgb(
+                0x0d as f32 / 255.0,
+                0x6e as f32 / 255.0,
+                0x44 as f32 / 255.0,
+            );
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    // Slightly lighter on hover/press for feedback
+                    Color::from_rgb(
+                        0x12 as f32 / 255.0,
+                        0x8a as f32 / 255.0,
+                        0x56 as f32 / 255.0,
+                    )
+                }
+                _ => base,
+            };
+            button::Style {
+                background: Some(bg.into()),
+                text_color: Color::WHITE,
+                border: Border {
+                    color: self.accent.scale_alpha(0.4),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
-            },
-            ..Default::default()
+            }
         }
     }
 

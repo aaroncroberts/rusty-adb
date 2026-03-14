@@ -1,8 +1,9 @@
 //! Pane-level UI controls: menu bar and title bar for each file-browser pane.
 
 use crate::{App, Message, PaneLayout, ViewMode};
-use iced::widget::{button, container, horizontal_space, pick_list, row, text};
-use iced::{Element, Fill};
+use iced::widget::tooltip::Position as TipPos;
+use iced::widget::{button, container, horizontal_space, pick_list, row, text, tooltip};
+use iced::{Element, Fill, FillPortion};
 use std::path::{Path, PathBuf};
 
 // ─── Path Segment Helper ──────────────────────────────────────────────────────
@@ -37,6 +38,16 @@ pub(crate) fn path_breadcrumb_segments(path: &Path) -> Vec<(String, PathBuf)> {
     segments
 }
 
+/// Selection and device state passed to the pane menu bar.
+pub(crate) struct PaneMenuState {
+    pub local_sel_has_files: bool,
+    pub android_sel_has_files: bool,
+    pub android_sel_single: bool,
+    pub android_sel_nonempty: bool,
+    pub has_device: bool,
+    pub no_transfer: bool,
+}
+
 impl App {
     /// Horizontal menu bar rendered at the top of each directory pane.
     ///
@@ -50,13 +61,16 @@ impl App {
         is_android: bool,
         view_mode: ViewMode,
         show_hidden: bool,
-        local_sel_has_files: bool,
-        android_sel_has_files: bool,
-        android_sel_single: bool,
-        android_sel_nonempty: bool,
-        has_device: bool,
-        no_transfer: bool,
+        state: PaneMenuState,
     ) -> Element<'a, Message> {
+        let PaneMenuState {
+            local_sel_has_files,
+            android_sel_has_files,
+            android_sel_single,
+            android_sel_nonempty,
+            has_device,
+            no_transfer,
+        } = state;
         let t = self.theme;
 
         // ── view mode drop-down picker ──────────────────────────────────────
@@ -71,39 +85,77 @@ impl App {
         .padding([2, 8]);
 
         // ── file command button ─────────────────────────────────────────────
-        let cmd_btn =
-            move |label: &'static str, color: iced::Color, msg: Option<Message>| {
-                let b = button(text(label).size(11).color(color))
-                    .padding([2, 8])
-                    .style(t.transparent_button());
-                if let Some(m) = msg { b.on_press(m) } else { b }
-            };
+        let cmd_btn = move |label: &'static str, color: iced::Color, msg: Option<Message>| {
+            let b = button(text(label).size(11).color(color))
+                .padding([2, 8])
+                .style(t.transparent_button());
+            if let Some(m) = msg {
+                b.on_press(m)
+            } else {
+                b
+            }
+        };
 
         // ── "Show" dropdown ─────────────────────────────────────────────────
         // Read column/hidden visibility from the appropriate pane.
         let (show_type, show_size, show_modified) = if is_android {
-            (self.android_pane.show_type, self.android_pane.show_size, self.android_pane.show_modified)
+            (
+                self.android_pane.show_type,
+                self.android_pane.show_size,
+                self.android_pane.show_modified,
+            )
         } else {
-            (self.local_pane.show_type, self.local_pane.show_size, self.local_pane.show_modified)
+            (
+                self.local_pane.show_type,
+                self.local_pane.show_size,
+                self.local_pane.show_modified,
+            )
         };
 
         // Build item labels — checkmark prefix indicates enabled state.
-        let type_item:     &'static str = if show_type     { "✓ Type"         } else { "  Type"         };
-        let size_item:     &'static str = if show_size     { "✓ Size"         } else { "  Size"         };
-        let modified_item: &'static str = if show_modified { "✓ Modified"     } else { "  Modified"     };
-        let hidden_item:   &'static str = if show_hidden   { "✓ Hidden files" } else { "  Hidden files" };
+        let type_item: &'static str = if show_type { "✓ Type" } else { "  Type" };
+        let size_item: &'static str = if show_size { "✓ Size" } else { "  Size" };
+        let modified_item: &'static str = if show_modified {
+            "✓ Modified"
+        } else {
+            "  Modified"
+        };
+        let hidden_item: &'static str = if show_hidden {
+            "✓ Hidden files"
+        } else {
+            "  Hidden files"
+        };
 
         let show_items: Vec<&'static str> = vec![type_item, size_item, modified_item, hidden_item];
 
-        let show_picker = pick_list(show_items, None::<&str>, move |picked: &str| {
-            match picked {
-                s if s.contains("Type") =>
-                    if is_android { Message::AndroidToggleType } else { Message::LocalToggleType },
-                s if s.contains("Size") =>
-                    if is_android { Message::AndroidToggleSize } else { Message::LocalToggleSize },
-                s if s.contains("Modified") =>
-                    if is_android { Message::AndroidToggleModified } else { Message::LocalToggleModified },
-                _ => if is_android { Message::AndroidToggleHidden } else { Message::LocalToggleHidden },
+        let show_picker = pick_list(show_items, None::<&str>, move |picked: &str| match picked {
+            s if s.contains("Type") => {
+                if is_android {
+                    Message::AndroidToggleType
+                } else {
+                    Message::LocalToggleType
+                }
+            }
+            s if s.contains("Size") => {
+                if is_android {
+                    Message::AndroidToggleSize
+                } else {
+                    Message::LocalToggleSize
+                }
+            }
+            s if s.contains("Modified") => {
+                if is_android {
+                    Message::AndroidToggleModified
+                } else {
+                    Message::LocalToggleModified
+                }
+            }
+            _ => {
+                if is_android {
+                    Message::AndroidToggleHidden
+                } else {
+                    Message::LocalToggleHidden
+                }
             }
         })
         .placeholder("Show")
@@ -114,26 +166,21 @@ impl App {
         let mut cmd_items: Vec<Element<Message>> = Vec::new();
         if is_android {
             if has_device && no_transfer && android_sel_has_files {
-                cmd_items.push(
-                    cmd_btn("To Local", t.accent, Some(Message::CopyToLocal)).into(),
-                );
+                cmd_items.push(cmd_btn("To Local", t.accent, Some(Message::CopyToLocal)).into());
             }
             if has_device && android_sel_single {
-                cmd_items.push(
-                    cmd_btn("Rename", t.accent, Some(Message::AndroidBeginRename)).into(),
-                );
+                cmd_items
+                    .push(cmd_btn("Rename", t.accent, Some(Message::AndroidBeginRename)).into());
             }
             if has_device && android_sel_nonempty {
-                cmd_items.push(
-                    cmd_btn("Delete", t.error, Some(Message::AndroidBeginDelete)).into(),
-                );
+                cmd_items
+                    .push(cmd_btn("Delete", t.error, Some(Message::AndroidBeginDelete)).into());
             }
         } else {
             // local pane
             if has_device && no_transfer && local_sel_has_files {
-                cmd_items.push(
-                    cmd_btn("To Android", t.accent, Some(Message::CopyToAndroid)).into(),
-                );
+                cmd_items
+                    .push(cmd_btn("To Android", t.accent, Some(Message::CopyToAndroid)).into());
             }
         }
 
@@ -158,7 +205,8 @@ impl App {
 
         container(content)
             .width(Fill)
-            .height(28)
+            .height(32)
+            .align_y(iced::Alignment::Center)
             .style(t.secondary_panel())
             .into()
     }
@@ -220,7 +268,10 @@ impl App {
                             .font(iced::Font::MONOSPACE)
                             .color(t.text_secondary),
                     )
-                    .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                    .style(|_t, _s| button::Style {
+                        background: None,
+                        ..Default::default()
+                    })
                     .padding([0, 2])
                     .on_press(nav_msg)
                     .into(),
@@ -235,39 +286,51 @@ impl App {
             }
         }
 
-        // ── Expand / collapse toggle ──────────────────────────────────────────
+        // ── Expand / collapse toggle — right-anchored in 1/3 column ─────────
         let this_is_expanded = (is_android && pane_layout == PaneLayout::AndroidExpanded)
             || (!is_android && pane_layout == PaneLayout::LocalExpanded);
         let other_is_expanded = (is_android && pane_layout == PaneLayout::LocalExpanded)
             || (!is_android && pane_layout == PaneLayout::AndroidExpanded);
 
-        // Push breadcrumbs to the left before placing the toggle on the right.
-        cells.push(horizontal_space().into());
-
-        if !other_is_expanded {
-            let (icon, msg) = if this_is_expanded {
-                ("⤡", Message::CollapsePanes)
-            } else {
-                ("⤢", Message::ExpandPane(is_android))
-            };
-            cells.push(
-                button(text(icon).size(13).color(t.text_secondary))
-                    .style(|_t, _s| button::Style { background: None, ..Default::default() })
-                    .padding([0, 4])
-                    .on_press(msg)
-                    .into(),
-            );
-        }
-
-        container(
+        // Breadcrumbs occupy 2/3, action button occupies 1/3 (right-aligned).
+        let breadcrumbs = container(
             iced::widget::Row::from_vec(cells)
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
         )
-        .width(Fill)
-        .padding([3, 8])
-        .style(t.secondary_panel())
-        .into()
+        .width(FillPortion(2));
+
+        let action: Element<'a, Message> = if other_is_expanded {
+            horizontal_space().into()
+        } else {
+            let (icon, tip, msg) = if this_is_expanded {
+                ("><", "Restore equal split", Message::CollapsePanes)
+            } else {
+                (">>", "Expand this pane", Message::ExpandPane(is_android))
+            };
+            let btn = button(
+                text(icon)
+                    .size(11)
+                    .color(t.text_secondary)
+                    .font(iced::Font::MONOSPACE),
+            )
+            .style(|_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .padding([0, 4])
+            .on_press(msg);
+            container(tooltip(btn, text(tip).size(11), TipPos::Bottom))
+                .width(FillPortion(1))
+                .align_x(iced::Alignment::End)
+                .into()
+        };
+
+        container(iced::widget::row![breadcrumbs, action].align_y(iced::Alignment::Center))
+            .width(Fill)
+            .padding([6, 8])
+            .style(t.secondary_panel())
+            .into()
     }
 }
 

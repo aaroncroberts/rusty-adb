@@ -37,19 +37,26 @@ cd rusty-adb
 cargo build
 ```
 
-### 3. Run the app
+### 3. Install cargo-watch (required for the dev loop)
 
-```bash
-cargo run --package rusty-adb
-# or with the dev script (uses cargo-watch for auto-rebuild):
-./scripts/dev.sh
-```
-
-### 4. Optional — cargo-watch (auto-reload on file changes)
+`cargo-watch` automatically recompiles and relaunches the app on every file save, eliminating the manual "kill → rebuild → rerun" cycle:
 
 ```bash
 cargo install cargo-watch
-./scripts/dev.sh   # now auto-rebuilds on every save
+```
+
+### 4. Run the app (watch mode)
+
+```bash
+./scripts/dev.sh
+```
+
+`dev.sh` uses `cargo-watch` when available (auto-rebuild on save) and falls back to a plain `cargo run` if it isn't installed. For a one-shot run without watching:
+
+```bash
+./scripts/dev.sh --no-watch
+# or directly:
+cargo run --package rusty-adb
 ```
 
 ---
@@ -58,21 +65,18 @@ cargo install cargo-watch
 
 | Command | Purpose |
 |---|---|
+| `./scripts/dev.sh` | **Primary dev loop** — watch mode, auto-rebuild on save |
+| `./scripts/dev.sh --no-watch` | One-shot run without file watching |
+| `./scripts/test.sh` | Full quality gate: test + clippy + fmt --check |
+| `./scripts/build.sh` | Release build with binary size output |
 | `cargo build` | Debug build |
 | `cargo build --release` | Release build |
-| `cargo run --package rusty-adb` | Run the app |
+| `cargo run --package rusty-adb` | Run once (no watch) |
 | `cargo test --all` | Run all unit + integration tests |
 | `cargo clippy --all-targets -- -D warnings` | Lint (zero warnings enforced) |
 | `cargo fmt --all` | Auto-format all source files |
 | `cargo fmt --all --check` | Check formatting without modifying files |
 | `cargo doc --no-deps --open` | Build and open rustdoc |
-
-The **scripts/** directory wraps the most common workflows:
-
-```bash
-./scripts/test.sh    # cargo test + clippy + fmt --check in one step
-./scripts/build.sh   # release build with binary size output
-```
 
 ---
 

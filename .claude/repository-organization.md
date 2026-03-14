@@ -141,16 +141,18 @@ if let Err(e) = std::process::Command::new("open").arg(&url).spawn() {
 
 ### Running tests
 
+**Always use the quality gate script:**
+
 ```bash
-cargo test --all              # all unit + integration tests
-cargo clippy --all-targets -- -D warnings   # must be clean
-cargo fmt --all --check       # must have no diffs
+./scripts/test.sh    # cargo test + clippy + fmt --check in one step
 ```
 
-Or use the one-shot quality gate:
+Individual steps when needed:
 
 ```bash
-./scripts/test.sh
+cargo test --all                              # unit + integration tests only
+cargo clippy --all-targets -- -D warnings    # lint only
+cargo fmt --all --check                      # format check only
 ```
 
 ### Integration tests

@@ -481,14 +481,18 @@ fn view_panes_split_renders_without_panic() {
 
 #[test]
 fn view_panes_local_expanded_renders_without_panic() {
-    let mut app = App::default();
-    app.pane_layout = PaneLayout::LocalExpanded;
+    let app = App {
+        pane_layout: PaneLayout::LocalExpanded,
+        ..Default::default()
+    };
     let _: iced::Element<Message> = app.view();
 }
 
 #[test]
 fn view_panes_android_expanded_renders_without_panic() {
-    let mut app = App::default();
-    app.pane_layout = PaneLayout::AndroidExpanded;
+    let app = App {
+        pane_layout: PaneLayout::AndroidExpanded,
+        ..Default::default()
+    };
     let _: iced::Element<Message> = app.view();
 }

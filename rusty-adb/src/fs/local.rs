@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{DirEntry, FsError, FileSystem, SortField, format_unix_date};
+use super::{format_unix_date, DirEntry, FileSystem, FsError, SortField};
 
 // ─── Backend Struct ───────────────────────────────────────────────────────────
 
@@ -77,13 +77,9 @@ pub fn load_local_entries(path: &PathBuf) -> Result<Vec<DirEntry>, FsError> {
 }
 
 /// Sort a `Vec<DirEntry>` in-place: directories first, then by `field` / `ascending`.
-pub fn sort_entries(
-    entries: &mut Vec<DirEntry>,
-    field: SortField,
-    ascending: bool,
-) {
-    entries.sort_by(|a, b| {
-        match (a.is_dir || a.is_symlink, b.is_dir || b.is_symlink) {
+pub fn sort_entries(entries: &mut [DirEntry], field: SortField, ascending: bool) {
+    entries.sort_by(
+        |a, b| match (a.is_dir || a.is_symlink, b.is_dir || b.is_symlink) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => {
@@ -92,10 +88,14 @@ pub fn sort_entries(
                     SortField::Size => a.size.cmp(&b.size),
                     SortField::Modified => a.modified_display.cmp(&b.modified_display),
                 };
-                if ascending { base } else { base.reverse() }
+                if ascending {
+                    base
+                } else {
+                    base.reverse()
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

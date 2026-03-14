@@ -73,13 +73,27 @@ _check_adb() {
     export ADB_PATH
 }
 
+# ── Check: cargo-watch (optional, used by dev.sh) ─────────────────────────────
+_check_cargo_watch() {
+    if command -v cargo-watch &>/dev/null; then
+        local ver
+        ver="$(cargo-watch --version 2>/dev/null | awk '{print $2}')"
+        success "cargo-watch ${ver}"
+    else
+        warn "cargo-watch not found — dev.sh will fall back to plain cargo run."
+        echo  "      Install with: cargo install cargo-watch"
+    fi
+}
+
 # ── Public entry point ─────────────────────────────────────────────────────────
-# Call check_deps [--require-adb] to run all checks.
+# Call check_deps [--require-adb] [--require-watch] to run all checks.
 # Exits 1 if any required dependency is missing.
 check_deps() {
     local require_adb=false
+    local require_watch=false
     for arg in "$@"; do
-        [[ "$arg" == "--require-adb" ]] && require_adb=true
+        [[ "$arg" == "--require-adb" ]]   && require_adb=true
+        [[ "$arg" == "--require-watch" ]] && require_watch=true
     done
 
     header "Checking dependencies…"
@@ -88,9 +102,15 @@ check_deps() {
 
     _check_rust    || ok=false
     _check_adb
+    _check_cargo_watch
 
     if $require_adb && [ -z "$ADB_PATH" ]; then
         fail "adb is required but was not found (see above)."
+        ok=false
+    fi
+
+    if $require_watch && ! command -v cargo-watch &>/dev/null; then
+        fail "cargo-watch is required but was not found (see above)."
         ok=false
     fi
 

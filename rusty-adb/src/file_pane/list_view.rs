@@ -16,7 +16,7 @@ impl<FS: FileSystem> FilePane<FS> {
     /// - `on_select`   — message to emit when the user clicks a file
     /// - `on_sort`     — message to emit when a column header is clicked
     /// - `rename_cbs`  — optional rename callbacks; `None` for backends that
-    ///                   do not support inline rename (local filesystem)
+    ///   do not support inline rename (local filesystem)
     pub fn view_list<'a, 'c, Message: 'a + Clone>(
         &'a self,
         ctx: &'c FS::Context,
@@ -37,21 +37,34 @@ impl<FS: FileSystem> FilePane<FS> {
         // ── Sort indicator ────────────────────────────────────────────────────
         let sort_ind = |field: SortField| -> &'static str {
             if self.sort_by == field {
-                if self.sort_ascending { " ▲" } else { " ▼" }
+                if self.sort_ascending {
+                    " ▲"
+                } else {
+                    " ▼"
+                }
             } else {
                 ""
             }
         };
 
         // ── Column header builder ─────────────────────────────────────────────
-        let mk_hdr = |label: String, field: SortField, width: iced::Length, msg: Message|
-            -> Element<'a, Message>
-        {
-            let fg = if self.sort_by == field { t.accent } else { t.text_secondary };
+        let mk_hdr = |label: String,
+                      field: SortField,
+                      width: iced::Length,
+                      msg: Message|
+         -> Element<'a, Message> {
+            let fg = if self.sort_by == field {
+                t.accent
+            } else {
+                t.text_secondary
+            };
             button(text(label).size(10).color(fg))
                 .width(width)
                 .padding([2, 4])
-                .style(move |_t, _s| button::Style { background: None, ..Default::default() })
+                .style(move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
                 .on_press(msg)
                 .into()
         };
@@ -63,7 +76,7 @@ impl<FS: FileSystem> FilePane<FS> {
 
         let mut hdr_cells: Vec<Element<Message>> = vec![
             iced::widget::Space::new(20, 1).into(), // checkbox placeholder
-            text("").width(W_ICON).into(),           // icon placeholder
+            text("").width(W_ICON).into(),          // icon placeholder
             mk_hdr(name_lbl, SortField::Name, Fill, on_sort(SortField::Name)),
         ];
         if self.show_type {
@@ -101,7 +114,11 @@ impl<FS: FileSystem> FilePane<FS> {
         .width(Fill)
         .style(move |_t| container::Style {
             background: Some(t.background_secondary.into()),
-            border: Border { color: t.border, width: 1.0, radius: 0.0.into() },
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
             ..Default::default()
         });
 
@@ -118,18 +135,20 @@ impl<FS: FileSystem> FilePane<FS> {
         // Pre-build the inline rename input (consumes rename callbacks once).
         let mut rename_row: Option<(usize, Element<Message>)> =
             if let (Some(cbs), Some((idx, val))) = (rename_cbs, &self.rename_pending) {
-                let icon = self
-                    .entries
-                    .get(*idx)
-                    .map(|e| e.icon())
-                    .unwrap_or("[-]");
+                let icon = self.entries.get(*idx).map(|e| e.icon()).unwrap_or("[-]");
                 let input = text_input("New name…", val.as_str())
                     .id(text_input::Id::new(RENAME_INPUT_ID))
                     .on_input(cbs.on_input)
                     .on_submit(cbs.on_commit)
                     .size(12)
                     .width(Fill);
-                Some((*idx, row![text(icon).size(12), input].spacing(6).padding([1, 0]).into()))
+                Some((
+                    *idx,
+                    row![text(icon).size(12), input]
+                        .spacing(6)
+                        .padding([1, 0])
+                        .into(),
+                ))
             } else {
                 None
             };
@@ -151,7 +170,10 @@ impl<FS: FileSystem> FilePane<FS> {
                         .padding([1, 0]),
                     )
                     .width(Fill)
-                    .style(move |_t, _s| button::Style { background: None, ..Default::default() })
+                    .style(move |_t, _s| button::Style {
+                        background: None,
+                        ..Default::default()
+                    })
                     .on_press(on_navigate(parent_path))
                     .into(),
                 );
@@ -184,10 +206,21 @@ impl<FS: FileSystem> FilePane<FS> {
             }
 
             let is_selected = self.selected.contains(&i);
-            let bg: Option<iced::Background> =
-                if is_selected { Some(t.accent.scale_alpha(0.2).into()) } else { None };
-            let fg = if entry.is_hidden { t.text_secondary } else { t.text };
-            let icon_fg = if entry.is_navigable() { t.accent } else { t.text_secondary };
+            let bg: Option<iced::Background> = if is_selected {
+                Some(t.accent.scale_alpha(0.2).into())
+            } else {
+                None
+            };
+            let fg = if entry.is_hidden {
+                t.text_secondary
+            } else {
+                t.text
+            };
+            let icon_fg = if entry.is_navigable() {
+                t.accent
+            } else {
+                t.text_secondary
+            };
 
             let entry_path = entry.path.clone();
             let can_navigate = entry.is_navigable();
@@ -196,68 +229,86 @@ impl<FS: FileSystem> FilePane<FS> {
             let on_sel_chk = on_select(i);
 
             // If this entry is being renamed, use the pre-built rename input.
-            let row_element: Element<Message> =
-                if rename_row.as_ref().map(|(idx, _)| *idx == i).unwrap_or(false) {
-                    rename_row.take().unwrap().1
-                } else {
-                    let mut cells: Vec<Element<Message>> = vec![
-                        text(entry.icon()).size(11).color(icon_fg).width(W_ICON).into(),
-                        text(entry.name.clone()).size(11).color(fg).width(Fill).into(),
-                    ];
-                    if self.show_type {
-                        cells.push(
-                            text(entry.type_label())
-                                .size(10)
-                                .color(t.text_secondary)
-                                .width(W_TYPE)
-                                .into(),
-                        );
-                    }
-                    if self.show_size {
-                        cells.push(
-                            text(entry.size_display())
-                                .size(10)
-                                .color(t.text_secondary)
-                                .width(W_SIZE)
-                                .into(),
-                        );
-                    }
-                    if self.show_modified {
-                        cells.push(
-                            text(entry.modified_display.clone())
-                                .size(10)
-                                .color(t.text_secondary)
-                                .width(W_DATE)
-                                .into(),
-                        );
-                    }
+            let row_element: Element<Message> = if rename_row
+                .as_ref()
+                .map(|(idx, _)| *idx == i)
+                .unwrap_or(false)
+            {
+                rename_row.take().unwrap().1
+            } else {
+                let mut cells: Vec<Element<Message>> = vec![
+                    text(entry.icon())
+                        .size(11)
+                        .color(icon_fg)
+                        .width(W_ICON)
+                        .into(),
+                    text(entry.name.clone())
+                        .size(11)
+                        .color(fg)
+                        .width(Fill)
+                        .into(),
+                ];
+                if self.show_type {
+                    cells.push(
+                        text(entry.type_label())
+                            .size(10)
+                            .color(t.text_secondary)
+                            .width(W_TYPE)
+                            .into(),
+                    );
+                }
+                if self.show_size {
+                    cells.push(
+                        text(entry.size_display())
+                            .size(10)
+                            .color(t.text_secondary)
+                            .width(W_SIZE)
+                            .into(),
+                    );
+                }
+                if self.show_modified {
+                    cells.push(
+                        text(entry.modified_display.clone())
+                            .size(10)
+                            .color(t.text_secondary)
+                            .width(W_DATE)
+                            .into(),
+                    );
+                }
 
-                    container(
-                        row![
-                            checkbox("", is_selected)
-                                .on_toggle(move |_| on_sel_chk.clone())
-                                .size(12),
-                            button(
-                                iced::widget::Row::from_vec(cells)
-                                    .width(Fill)
-                                    .spacing(6)
-                                    .align_y(iced::Alignment::Center),
-                            )
-                            .width(Fill)
-                            .style(|_t, _s| button::Style { background: None, ..Default::default() })
-                            .on_press(if can_navigate { on_nav } else { on_sel_btn }),
-                        ]
-                        .spacing(4)
-                        .padding([2, 8])
-                        .align_y(iced::Alignment::Center),
-                    )
-                    .width(Fill)
-                    .style(move |_t| container::Style {
-                        background: bg,
-                        ..Default::default()
-                    })
-                    .into()
-                };
+                container(
+                    row![
+                        checkbox("", is_selected)
+                            .on_toggle(move |_| on_sel_chk.clone())
+                            .size(12),
+                        button(
+                            iced::widget::Row::from_vec(cells)
+                                .width(Fill)
+                                .spacing(6)
+                                .align_y(iced::Alignment::Center),
+                        )
+                        .width(Fill)
+                        .style(|_t, _s| button::Style {
+                            background: None,
+                            ..Default::default()
+                        })
+                        .on_press(if can_navigate {
+                            on_nav
+                        } else {
+                            on_sel_btn
+                        }),
+                    ]
+                    .spacing(4)
+                    .padding([2, 8])
+                    .align_y(iced::Alignment::Center),
+                )
+                .width(Fill)
+                .style(move |_t| container::Style {
+                    background: bg,
+                    ..Default::default()
+                })
+                .into()
+            };
 
             rows.push(row_element);
         }
@@ -302,7 +353,9 @@ impl<FS: FileSystem> FilePane<FS> {
 
         let content = row![
             text(spinner).size(14).color(theme.accent),
-            text("  Fetching directory listing…").size(12).color(theme.text_secondary),
+            text("  Fetching directory listing…")
+                .size(12)
+                .color(theme.text_secondary),
         ]
         .align_y(iced::Alignment::Center);
 
