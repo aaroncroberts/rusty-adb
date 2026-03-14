@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::adb::{AdbClient, AndroidEntry};
-use crate::filesystem::{DirEntry, FsError, FileSystem};
+use super::{DirEntry, FsError, FileSystem};
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 

@@ -28,8 +28,7 @@ pub use shared_views::{view_connect_guide, view_error};
 
 use std::path::PathBuf;
 
-use crate::filesystem::{DirEntry, FileSystem, PaneState, SortField};
-use crate::local_fs::sort_entries;
+use crate::fs::{DirEntry, FileSystem, PaneState, SortField, sort_entries};
 
 // ─── Rename State ─────────────────────────────────────────────────────────────
 
@@ -244,8 +243,7 @@ pub struct RenameCbs<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::PaneState;
-    use crate::local_fs::LocalFs;
+    use crate::fs::{LocalFs, PaneState};
 
     fn make_pane() -> FilePane<LocalFs> {
         FilePane::new(PathBuf::from("/sdcard"), PaneState::NoDevice)

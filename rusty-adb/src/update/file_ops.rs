@@ -152,7 +152,7 @@ impl App {
 
     // ── Preview ───────────────────────────────────────────────────────────────
 
-    pub(super) fn preview_file(&mut self, entry: crate::filesystem::DirEntry) -> Task<Message> {
+    pub(super) fn preview_file(&mut self, entry: crate::fs::DirEntry) -> Task<Message> {
         const MAX_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
         if entry.size > MAX_BYTES {
             return self.update(Message::ShowError(

@@ -14,8 +14,10 @@
 //! - `parser`  — Android `ls -la` output parser, pure and fully unit-tested
 
 pub mod parser;
+pub mod transfer;
 
 pub use parser::AndroidEntry;
+pub use transfer::{run_transfer, TransferDirection, TransferEvent, TransferJob};
 
 use std::path::PathBuf;
 use std::str;

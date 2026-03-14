@@ -2,7 +2,7 @@
 
 use crate::{App, Message};
 use crate::adb::AdbClient;
-use crate::android_fs::AndroidContext;
+use crate::fs::AndroidContext;
 use crate::file_pane::RenameCbs;
 use iced::widget::{button, column, container, image, row, scrollable, text};
 use iced::{Border, Element, Fill, Theme};

@@ -4,8 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use iced::Task;
 use crate::adb::{AdbDevice, DeviceState};
-use crate::android_fs::AndroidContext;
-use crate::filesystem::PaneState;
+use crate::fs::{AndroidContext, PaneState};
 use crate::status_bar::AdbStatus;
 
 mod file_ops;

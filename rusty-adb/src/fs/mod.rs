@@ -14,6 +14,12 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod local;
+pub mod android;
+
+pub use local::{LocalFs, sort_entries};
+pub use android::{AndroidFs, AndroidContext, android_entry_to_dir_entry};
+
 // ─── Unified Entry Type ───────────────────────────────────────────────────────
 
 /// A single normalized directory entry produced by any [`FileSystem`] backend.

@@ -12,7 +12,7 @@ mod setup;
 use crate::{App, Message, TOOLBAR_HEIGHT};
 use std::path::PathBuf;
 use crate::adb::AdbClient;
-use crate::android_fs::AndroidContext;
+use crate::fs::AndroidContext;
 use crate::file_pane::{view_breadcrumb, RenameCbs};
 use crate::status_bar::AdbStatus;
 use crate::ViewMode;

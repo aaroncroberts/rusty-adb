@@ -1,9 +1,7 @@
 //! Pane navigation handlers: local pane and android pane navigation,
 //! sorting, selection, RefreshPanes, DisconnectDevice, SpinnerTick.
 use crate::{App, Message};
-use crate::android_fs::android_entry_to_dir_entry;
-use crate::filesystem::{DirEntry, FileSystem, SortField};
-use crate::local_fs::LocalFs;
+use crate::fs::{android_entry_to_dir_entry, DirEntry, FileSystem, LocalFs, SortField};
 use iced::Task;
 use std::path::PathBuf;
 

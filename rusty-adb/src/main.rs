@@ -12,14 +12,11 @@
 #![allow(mismatched_lifetime_syntaxes)]
 
 mod adb;
-mod android_fs;
 mod config;
 mod file_pane;
-mod filesystem;
-mod local_fs;
+mod fs;
 mod status_bar;
 mod theme;
-mod transfer;
 mod update;
 mod views;
 #[cfg(test)]
@@ -32,13 +29,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adb::{AdbClient, AdbDevice};
-use android_fs::{AndroidContext, AndroidFs};
+use fs::{AndroidContext, AndroidFs, DirEntry, FileSystem, LocalFs, PaneState, SortField};
 use file_pane::FilePane;
-use filesystem::{DirEntry, FileSystem, PaneState, SortField};
-use local_fs::LocalFs;
 use status_bar::{AdbStatus, StatusBar, TransferStatus};
 use theme::ThemeColors;
-use transfer::{TransferEvent, TransferJob};
+use adb::{TransferEvent, TransferJob};
 
 use iced::keyboard::{self, key::Named};
 use iced::{Subscription, Task, Theme};
@@ -649,7 +644,7 @@ impl App {
             Subscription::run_with_id(
                 job.id,
                 iced::stream::channel(32, move |mut sender| async move {
-                    let result = transfer::run_transfer(&job, cancel, |event| {
+                    let result = adb::run_transfer(&job, cancel, |event| {
                         let msg = match &event {
                             TransferEvent::Progress { percent } => {
                                 Message::TransferProgress { percent: *percent }

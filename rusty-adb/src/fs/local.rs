@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::filesystem::{DirEntry, FsError, FileSystem, format_unix_date};
+use super::{DirEntry, FsError, FileSystem, SortField, format_unix_date};
 
 // ─── Backend Struct ───────────────────────────────────────────────────────────
 
@@ -72,10 +72,9 @@ pub fn load_local_entries(path: &PathBuf) -> Result<Vec<DirEntry>, FsError> {
 /// Sort a `Vec<DirEntry>` in-place: directories first, then by `field` / `ascending`.
 pub fn sort_entries(
     entries: &mut Vec<DirEntry>,
-    field: crate::filesystem::SortField,
+    field: SortField,
     ascending: bool,
 ) {
-    use crate::filesystem::SortField;
     entries.sort_by(|a, b| {
         match (a.is_dir, b.is_dir) {
             (true, false) => std::cmp::Ordering::Less,
@@ -97,7 +96,6 @@ pub fn sort_entries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::SortField;
 
     #[test]
     fn load_local_entries_valid_path() {

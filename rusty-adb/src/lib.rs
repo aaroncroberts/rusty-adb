@@ -6,8 +6,6 @@
 //! # Modules
 //!
 //! - [`adb`] — [`AdbClient`](adb::AdbClient), device detection, directory listing,
-//!   file operations (rename, delete, pull)
-//! - [`transfer`] — async file transfer engine, progress event streaming, adb output parsers
+//!   file operations (rename, delete, pull), and file transfer engine
 
 pub mod adb;
-pub mod transfer;

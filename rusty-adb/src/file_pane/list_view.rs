@@ -1,7 +1,7 @@
 //! List-view rendering for FilePane.
 
 use super::{FilePane, RenameCbs, RENAME_INPUT_ID};
-use crate::filesystem::{FileSystem, PaneState, SortField};
+use crate::fs::{FileSystem, PaneState, SortField};
 use crate::theme::ThemeColors;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Border, Element, Fill};
