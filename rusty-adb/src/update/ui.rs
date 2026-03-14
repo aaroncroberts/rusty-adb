@@ -6,6 +6,23 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 impl App {
+    // ── Pane Layout ───────────────────────────────────────────────────────────
+
+    pub(super) fn expand_pane(&mut self, is_android: bool) -> Task<Message> {
+        use super::super::PaneLayout;
+        self.pane_layout = if is_android {
+            PaneLayout::AndroidExpanded
+        } else {
+            PaneLayout::LocalExpanded
+        };
+        Task::none()
+    }
+
+    pub(super) fn collapse_panes(&mut self) -> Task<Message> {
+        self.pane_layout = super::super::PaneLayout::Split;
+        Task::none()
+    }
+
     // ── View Modes ────────────────────────────────────────────────────────────
 
     pub(super) fn set_local_view_mode(&mut self, mode: super::super::ViewMode) -> Task<Message> {

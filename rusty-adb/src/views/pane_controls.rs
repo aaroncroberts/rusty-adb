@@ -1,7 +1,7 @@
 //! Pane-level UI controls: menu bar and title bar for each file-browser pane.
 
-use crate::{App, Message, ViewMode};
-use iced::widget::{button, container, pick_list, row, text};
+use crate::{App, Message, PaneLayout, ViewMode};
+use iced::widget::{button, container, horizontal_space, pick_list, row, text};
 use iced::{Element, Fill};
 use std::path::{Path, PathBuf};
 
@@ -171,10 +171,17 @@ impl App {
     ///
     /// Each ancestor segment emits `on_navigate(ancestor_path)` when clicked.
     /// The current (last) segment is non-clickable, rendered in accent color.
+    ///
+    /// An expand/collapse toggle button is shown on the right:
+    /// - Split state → ⤢ (expand this pane)
+    /// - This pane is expanded → ⤡ (restore split)
+    /// - Other pane is expanded → no button (this pane is the sidebar)
     pub(super) fn view_pane_title_bar<'a>(
         &self,
         label: &str,
         current_path: &Path,
+        is_android: bool,
+        pane_layout: PaneLayout,
         on_navigate: impl Fn(PathBuf) -> Message,
     ) -> Element<'a, Message> {
         let t = self.theme;
@@ -226,6 +233,30 @@ impl App {
                         .into(),
                 );
             }
+        }
+
+        // ── Expand / collapse toggle ──────────────────────────────────────────
+        let this_is_expanded = (is_android && pane_layout == PaneLayout::AndroidExpanded)
+            || (!is_android && pane_layout == PaneLayout::LocalExpanded);
+        let other_is_expanded = (is_android && pane_layout == PaneLayout::LocalExpanded)
+            || (!is_android && pane_layout == PaneLayout::AndroidExpanded);
+
+        // Push breadcrumbs to the left before placing the toggle on the right.
+        cells.push(horizontal_space().into());
+
+        if !other_is_expanded {
+            let (icon, msg) = if this_is_expanded {
+                ("⤡", Message::CollapsePanes)
+            } else {
+                ("⤢", Message::ExpandPane(is_android))
+            };
+            cells.push(
+                button(text(icon).size(13).color(t.text_secondary))
+                    .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                    .padding([0, 4])
+                    .on_press(msg)
+                    .into(),
+            );
         }
 
         container(
@@ -284,12 +315,20 @@ mod tests {
 
     #[test]
     fn view_pane_title_bar_renders() {
-        // Smoke test: rendering must not panic.
+        // Smoke test: rendering must not panic for all layout states.
         let app = crate::App::default();
-        let _ = app.view_pane_title_bar(
-            "LOCAL",
-            Path::new("/Users/aaron"),
-            crate::Message::LocalNavigateTo,
-        );
+        for layout in [
+            crate::PaneLayout::Split,
+            crate::PaneLayout::LocalExpanded,
+            crate::PaneLayout::AndroidExpanded,
+        ] {
+            let _ = app.view_pane_title_bar(
+                "LOCAL",
+                Path::new("/Users/aaron"),
+                false,
+                layout,
+                crate::Message::LocalNavigateTo,
+            );
+        }
     }
 }

@@ -80,6 +80,22 @@ impl std::fmt::Display for ViewMode {
     }
 }
 
+/// Layout state for the two file panes.
+///
+/// In `Split` mode both panes share equal width (the default).  In either
+/// expanded mode one pane fills the main area while the other collapses to a
+/// narrow sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PaneLayout {
+    /// Equal-width split — the default view.
+    #[default]
+    Split,
+    /// Local pane is expanded; Android pane becomes a narrow sidebar on the right.
+    LocalExpanded,
+    /// Android pane is expanded; local pane becomes a narrow sidebar on the left.
+    AndroidExpanded,
+}
+
 /// Minimum log level shown in the in-app log viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum LogLevel {
@@ -138,6 +154,12 @@ enum Message {
     PollDevices,
     DevicesLoaded(Arc<Vec<AdbDevice>>),
     AdbError(String),
+
+    // ── Pane Layout ───────────────────────────────────────────────────────────
+    /// Expand one pane: `true` = android, `false` = local.
+    ExpandPane(bool),
+    /// Restore the equal-split layout from any expanded state.
+    CollapsePanes,
 
     // ── View Modes ────────────────────────────────────────────────────────────
     /// Switch the local pane to the given view mode
@@ -368,6 +390,8 @@ struct App {
     local_view_mode: ViewMode,
     /// Active view mode for the android pane (persists during navigation)
     android_view_mode: ViewMode,
+    /// Current pane layout: equal split, local expanded, or android expanded.
+    pane_layout: PaneLayout,
 
     /// Index of the item shown in the large preview area (Gallery view)
     local_gallery_idx: usize,
@@ -449,6 +473,7 @@ impl Default for App {
             android_ctx: None,
             local_view_mode: ViewMode::default(),
             android_view_mode: ViewMode::default(),
+            pane_layout: PaneLayout::default(),
             local_gallery_idx: 0,
             android_gallery_idx: 0,
             active_transfer: None,

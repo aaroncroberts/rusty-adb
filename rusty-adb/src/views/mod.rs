@@ -10,7 +10,7 @@ mod rendering;
 mod setup;
 pub mod status_bar;
 
-use crate::{App, Message};
+use crate::{App, Message, PaneLayout};
 use std::path::PathBuf;
 use crate::adb::AdbClient;
 use crate::fs::AndroidContext;
@@ -20,7 +20,7 @@ use crate::ViewMode;
 use iced::widget::{
     button, column, container, row, stack, text, vertical_rule,
 };
-use iced::{Border, Element, Fill};
+use iced::{Border, Element, Fill, FillPortion};
 
 impl App {
     pub(super) fn view(&self) -> Element<Message> {
@@ -86,21 +86,114 @@ impl App {
         let android_sel_nonempty =
             !self.android_pane.selected.is_empty() && self.android_pane.rename_pending.is_none();
 
-        // ── Local pane ────────────────────────────────────────────────────────
-        let local_menu = self.view_pane_menu_bar(
-            false,
-            self.local_view_mode,
-            self.local_pane.show_hidden,
-            local_sel_has_files,
-            android_sel_has_files,
-            android_sel_single,
-            android_sel_nonempty,
-            has_device,
-            no_transfer,
-        );
+        let divider = container(vertical_rule(1))
+            .height(Fill)
+            .style(move |_theme| container::Style {
+                background: Some(t.border.into()),
+                ..Default::default()
+            });
 
-        let local_content: Element<Message> = match self.local_view_mode {
-            // Name-only rows with type icons — compact, maximum density
+        // ── Narrow sidebar helper — shown when the opposite pane is expanded ──
+        let sidebar = |label: &'static str, is_android: bool| -> Element<Message> {
+            let expand_msg = Message::ExpandPane(is_android);
+            let expand_btn = button(text("Expand").size(11).color(t.accent))
+                .style(t.transparent_button())
+                .padding([3, 8])
+                .on_press(expand_msg);
+            let restore_btn = button(text("Split").size(11).color(t.text_secondary))
+                .style(t.transparent_button())
+                .padding([3, 8])
+                .on_press(Message::CollapsePanes);
+            container(
+                column![
+                    text(format!("┌─ {label}")).size(11).font(iced::Font::MONOSPACE).color(t.accent),
+                    restore_btn,
+                    expand_btn,
+                ]
+                .spacing(6)
+                .padding([8, 6]),
+            )
+            .width(FillPortion(1))
+            .height(Fill)
+            .style(t.secondary_panel())
+            .into()
+        };
+
+        match self.pane_layout {
+            // ── Equal split (default) ─────────────────────────────────────────
+            PaneLayout::Split => {
+                let local_menu = self.view_pane_menu_bar(
+                    false, self.local_view_mode, self.local_pane.show_hidden,
+                    local_sel_has_files, android_sel_has_files,
+                    android_sel_single, android_sel_nonempty, has_device, no_transfer,
+                );
+                let local_content = self.build_local_content();
+                let local_path = self.local_pane.current_path.clone();
+                let local_title = self.view_pane_title_bar(
+                    "LOCAL", &local_path, false, self.pane_layout, Message::LocalNavigateTo,
+                );
+                let left: Element<Message> = column![local_title, local_menu, local_content]
+                    .width(Fill).height(Fill).into();
+
+                let android_menu = self.view_pane_menu_bar(
+                    true, self.android_view_mode, self.android_pane.show_hidden,
+                    local_sel_has_files, android_sel_has_files,
+                    android_sel_single, android_sel_nonempty, has_device, no_transfer,
+                );
+                let android_content = self.build_android_content();
+                let android_path = self.android_pane.current_path.clone();
+                let android_title = self.view_pane_title_bar(
+                    "ANDROID", &android_path, true, self.pane_layout, Message::AndroidNavigateTo,
+                );
+                let right: Element<Message> = column![android_title, android_menu, android_content]
+                    .width(Fill).height(Fill).into();
+
+                row![left, divider, right].width(Fill).height(Fill).into()
+            }
+
+            // ── Local pane expanded; Android sidebar on right ─────────────────
+            PaneLayout::LocalExpanded => {
+                let local_menu = self.view_pane_menu_bar(
+                    false, self.local_view_mode, self.local_pane.show_hidden,
+                    local_sel_has_files, android_sel_has_files,
+                    android_sel_single, android_sel_nonempty, has_device, no_transfer,
+                );
+                let local_content = self.build_local_content();
+                let local_path = self.local_pane.current_path.clone();
+                let local_title = self.view_pane_title_bar(
+                    "LOCAL", &local_path, false, self.pane_layout, Message::LocalNavigateTo,
+                );
+                let left: Element<Message> = column![local_title, local_menu, local_content]
+                    .width(FillPortion(5)).height(Fill).into();
+
+                row![left, divider, sidebar("ANDROID", true)]
+                    .width(Fill).height(Fill).into()
+            }
+
+            // ── Android pane expanded; local sidebar on left ──────────────────
+            PaneLayout::AndroidExpanded => {
+                let android_menu = self.view_pane_menu_bar(
+                    true, self.android_view_mode, self.android_pane.show_hidden,
+                    local_sel_has_files, android_sel_has_files,
+                    android_sel_single, android_sel_nonempty, has_device, no_transfer,
+                );
+                let android_content = self.build_android_content();
+                let android_path = self.android_pane.current_path.clone();
+                let android_title = self.view_pane_title_bar(
+                    "ANDROID", &android_path, true, self.pane_layout, Message::AndroidNavigateTo,
+                );
+                let right: Element<Message> = column![android_title, android_menu, android_content]
+                    .width(FillPortion(5)).height(Fill).into();
+
+                row![sidebar("LOCAL", false), divider, right]
+                    .width(Fill).height(Fill).into()
+            }
+        }
+    }
+
+    /// Build the local pane content element for the current view mode.
+    fn build_local_content(&self) -> Element<Message> {
+        match self.local_view_mode {
             ViewMode::List => self.local_pane.view_list(
                 &(),
                 self.theme,
@@ -109,33 +202,14 @@ impl App {
                 Message::LocalSortBy,
                 None,
             ),
-            // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(false),
             ViewMode::Grid => self.view_local_grid(),
             ViewMode::Icon => self.view_local_icon(),
-        };
+        }
+    }
 
-        let local_path = self.local_pane.current_path.clone();
-        let local_title = self.view_pane_title_bar("LOCAL", &local_path, Message::LocalNavigateTo);
-
-        let left: Element<Message> = column![local_title, local_menu, local_content]
-            .width(Fill)
-            .height(Fill)
-            .into();
-
-        // ── Android pane ──────────────────────────────────────────────────────
-        let android_menu = self.view_pane_menu_bar(
-            true,
-            self.android_view_mode,
-            self.android_pane.show_hidden,
-            local_sel_has_files,
-            android_sel_has_files,
-            android_sel_single,
-            android_sel_nonempty,
-            has_device,
-            no_transfer,
-        );
-
+    /// Build the android pane content element for the current view mode.
+    fn build_android_content(&self) -> Element<Message> {
         let default_android_ctx = AndroidContext {
             client: AdbClient { adb_path: PathBuf::new() },
             serial: String::new(),
@@ -143,8 +217,7 @@ impl App {
         };
         let android_ctx_ref = self.android_ctx.as_ref().unwrap_or(&default_android_ctx);
 
-        let android_content: Element<Message> = match self.android_view_mode {
-            // Name-only rows with type icons
+        let content: Element<Message> = match self.android_view_mode {
             ViewMode::List => self.android_pane.view_list(
                 android_ctx_ref,
                 self.theme,
@@ -156,47 +229,26 @@ impl App {
                     on_commit: Message::AndroidRenameCommit,
                 }),
             ),
-            // Finder-style column view: path ancestors on left, entries on right
             ViewMode::Details => self.view_columns_impl(true),
             ViewMode::Grid => self.view_android_grid(),
             ViewMode::Icon => self.view_android_icon(),
         };
 
-        // Wrap android content with drop-zone highlight
+        // Wrap with drop-zone highlight
         let hover = self.file_hover_active;
-        let android_content: Element<Message> = container(android_content)
+        let t = self.theme;
+        container(content)
             .width(Fill)
             .height(Fill)
             .style(move |_theme| container::Style {
                 border: Border {
-                    color: if hover {
-                        t.accent.scale_alpha(0.8)
-                    } else {
-                        iced::Color::TRANSPARENT
-                    },
+                    color: if hover { t.accent.scale_alpha(0.8) } else { iced::Color::TRANSPARENT },
                     width: if hover { 2.0 } else { 0.0 },
                     ..Default::default()
                 },
                 ..Default::default()
             })
-            .into();
-
-        let android_path = self.android_pane.current_path.clone();
-        let android_title = self.view_pane_title_bar("ANDROID", &android_path, Message::AndroidNavigateTo);
-
-        let right: Element<Message> = column![android_title, android_menu, android_content]
-            .width(Fill)
-            .height(Fill)
-            .into();
-
-        let divider = container(vertical_rule(1))
-            .height(Fill)
-            .style(move |_theme| container::Style {
-                background: Some(t.border.into()),
-                ..Default::default()
-            });
-
-        row![left, divider, right].width(Fill).height(Fill).into()
+            .into()
     }
 
     /// Delete confirmation banner — shown above the panes when paths are pending deletion.

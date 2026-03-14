@@ -16,6 +16,10 @@ mod ui;
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            // ── Pane Layout ───────────────────────────────────────────────────
+            Message::ExpandPane(is_android) => self.expand_pane(is_android),
+            Message::CollapsePanes => self.collapse_panes(),
+
             // ── View Modes ────────────────────────────────────────────────────
             Message::SetLocalViewMode(mode) => self.set_local_view_mode(mode),
             Message::SetAndroidViewMode(mode) => self.set_android_view_mode(mode),

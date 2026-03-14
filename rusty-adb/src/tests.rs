@@ -415,3 +415,80 @@ fn view_header_is_sole_header_entrypoint() {
     let app = App::default();
     let _: iced::Element<Message> = app.view_header();
 }
+
+// ── Pane layout state machine tests ────────────────────────────────────────
+
+#[test]
+fn default_pane_layout_is_split() {
+    let app = App::default();
+    assert_eq!(app.pane_layout, PaneLayout::Split);
+}
+
+#[test]
+fn expand_local_pane_transitions_to_local_expanded() {
+    let mut app = App::default();
+    let _ = app.update(Message::ExpandPane(false));
+    assert_eq!(app.pane_layout, PaneLayout::LocalExpanded);
+}
+
+#[test]
+fn expand_android_pane_transitions_to_android_expanded() {
+    let mut app = App::default();
+    let _ = app.update(Message::ExpandPane(true));
+    assert_eq!(app.pane_layout, PaneLayout::AndroidExpanded);
+}
+
+#[test]
+fn collapse_from_local_expanded_returns_to_split() {
+    let mut app = App::default();
+    let _ = app.update(Message::ExpandPane(false));
+    let _ = app.update(Message::CollapsePanes);
+    assert_eq!(app.pane_layout, PaneLayout::Split);
+}
+
+#[test]
+fn collapse_from_android_expanded_returns_to_split() {
+    let mut app = App::default();
+    let _ = app.update(Message::ExpandPane(true));
+    let _ = app.update(Message::CollapsePanes);
+    assert_eq!(app.pane_layout, PaneLayout::Split);
+}
+
+#[test]
+fn collapse_already_split_stays_split() {
+    let mut app = App::default();
+    let _ = app.update(Message::CollapsePanes);
+    assert_eq!(app.pane_layout, PaneLayout::Split);
+}
+
+#[test]
+fn expand_android_then_expand_local_transitions_correctly() {
+    let mut app = App::default();
+    let _ = app.update(Message::ExpandPane(true));
+    assert_eq!(app.pane_layout, PaneLayout::AndroidExpanded);
+    // Expanding local while android is expanded switches directly
+    let _ = app.update(Message::ExpandPane(false));
+    assert_eq!(app.pane_layout, PaneLayout::LocalExpanded);
+}
+
+// ── Pane layout view smoke tests ───────────────────────────────────────────
+
+#[test]
+fn view_panes_split_renders_without_panic() {
+    let app = App::default();
+    let _: iced::Element<Message> = app.view();
+}
+
+#[test]
+fn view_panes_local_expanded_renders_without_panic() {
+    let mut app = App::default();
+    app.pane_layout = PaneLayout::LocalExpanded;
+    let _: iced::Element<Message> = app.view();
+}
+
+#[test]
+fn view_panes_android_expanded_renders_without_panic() {
+    let mut app = App::default();
+    app.pane_layout = PaneLayout::AndroidExpanded;
+    let _: iced::Element<Message> = app.view();
+}
