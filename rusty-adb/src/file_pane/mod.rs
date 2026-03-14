@@ -124,15 +124,26 @@ impl<FS: FileSystem> FilePane<FS> {
 
     /// Called when the async `list_dir` task completes successfully.
     ///
-    /// Stale responses (where `path` no longer matches `current_path`) are
-    /// silently discarded — this prevents a race where the user navigates
-    /// away before a slow ADB listing arrives.
+    /// Stale responses are silently discarded — there are two staleness
+    /// conditions:
+    /// 1. The path no longer matches `current_path` (user navigated away).
+    /// 2. The pane is not in `Loading` state (e.g., device disconnected while
+    ///    the ADB call was in-flight — state was reset to `NoDevice` but the
+    ///    in-flight future still completed and we must not accept its result).
     pub fn on_entries_loaded(&mut self, path: PathBuf, mut entries: Vec<DirEntry>) {
         if self.current_path != path {
             tracing::debug!(
                 expected = %self.current_path.display(),
                 arrived  = %path.display(),
-                "file pane: discarding stale directory response"
+                "file pane: discarding stale directory response (path mismatch)"
+            );
+            return;
+        }
+        if self.state != PaneState::Loading {
+            tracing::debug!(
+                path     = %path.display(),
+                state    = ?self.state,
+                "file pane: discarding stale directory response (not in Loading state)"
             );
             return;
         }
@@ -290,6 +301,25 @@ mod tests {
         pane.on_entries_loaded(path, vec![]);
         // Should still be Loading (waiting for DCIM response), not Ready
         assert_eq!(pane.state, PaneState::Loading);
+    }
+
+    /// Regression test: a stale `AndroidEntriesLoaded` response that arrives
+    /// after a device disconnect must NOT transition the pane from `NoDevice`
+    /// to `Ready`.  Without the Loading-state guard this caused silent
+    /// "navigation does nothing" failures because the pane appeared ready but
+    /// `active_serial` was None.
+    #[test]
+    fn on_entries_loaded_after_disconnect_is_ignored() {
+        let path = PathBuf::from("/sdcard");
+        let mut pane = make_pane();
+        // Simulate the "device connected → loading /sdcard" sequence
+        pane.begin_navigate(path.clone());
+        assert_eq!(pane.state, PaneState::Loading);
+        // Simulate disconnect: state reset to NoDevice (current_path stays)
+        pane.state = PaneState::NoDevice;
+        // Stale in-flight response arrives — must be discarded
+        pane.on_entries_loaded(path, vec![]);
+        assert_eq!(pane.state, PaneState::NoDevice, "stale response must not override NoDevice");
     }
 
     #[test]

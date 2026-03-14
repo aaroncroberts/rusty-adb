@@ -89,9 +89,19 @@ fn parse_ls_line(line: &str, parent: &std::path::Path) -> Option<AndroidEntry> {
         return None;
     }
 
-    // Find the date token — always "YYYY-MM-DD" (10 chars, '-' at 4 and 7)
+    // Find the date token — always "YYYY-MM-DD".
+    // We require ASCII digits at the non-separator positions so that permission
+    // strings like "drwx------" (also length-10 with '-' at 4 and 7) are not
+    // mistaken for a date, which would set date_idx=0 and cause the parser to
+    // return None for any entry whose permissions have dashes at those positions.
     let date_idx = tokens.iter().position(|t| {
-        t.len() == 10 && t.as_bytes().get(4) == Some(&b'-') && t.as_bytes().get(7) == Some(&b'-')
+        let b = t.as_bytes();
+        b.len() == 10
+            && b[4] == b'-'
+            && b[7] == b'-'
+            && b[0..4].iter().all(|c| c.is_ascii_digit())
+            && b[5..7].iter().all(|c| c.is_ascii_digit())
+            && b[8..10].iter().all(|c| c.is_ascii_digit())
     })?;
 
     if date_idx < 1 || date_idx + 2 >= tokens.len() {
@@ -273,6 +283,25 @@ lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulate
         assert!(entries[0].is_symlink);
         assert!(!entries[0].is_dir);
         assert_eq!(entries[0].name, "sdcard0");
+    }
+
+    /// Regression: permission strings like "drwx------" are 10 chars with '-' at
+    /// positions 4 and 7 — they must NOT be mistaken for the date token.
+    /// Before the digit-check fix, these lines were silently dropped (parser
+    /// returned None) because date_idx=0 failed the `date_idx < 1` guard.
+    #[test]
+    fn ls_restricted_permissions_parsed() {
+        let input = "\
+drwx------   6 root   system      120 1970-11-03 03:05 data_mirror
+drwx------   2 root   root      16384 2009-01-01 08:00 lost+found
+drwx--x---   5 shell  everybody   100 2026-03-12 07:47 storage
+";
+        let parent = std::path::Path::new("/");
+        let entries = parse_ls_output(input, parent);
+        assert_eq!(entries.len(), 3, "all three restricted-permission entries must parse");
+        assert!(entries.iter().any(|e| e.name == "data_mirror"));
+        assert!(entries.iter().any(|e| e.name == "lost+found"));
+        assert!(entries.iter().any(|e| e.name == "storage"));
     }
 
     #[test]

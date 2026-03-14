@@ -108,11 +108,14 @@ impl App {
 
     pub(super) fn android_navigate_to(&mut self, path: PathBuf) -> Task<Message> {
         let Some(client) = self.adb_client.clone() else {
+            tracing::warn!(path = %path.display(), "android_navigate_to: no adb_client — navigation silently dropped");
             return Task::none();
         };
         let Some(serial) = self.active_serial.clone() else {
+            tracing::warn!(path = %path.display(), "android_navigate_to: no active_serial — navigation silently dropped");
             return Task::none();
         };
+        tracing::debug!(path = %path.display(), serial = %serial, "android_navigate_to: starting navigation");
 
         self.android_pane.begin_navigate(path.clone());
 

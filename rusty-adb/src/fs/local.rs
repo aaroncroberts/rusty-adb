@@ -76,7 +76,7 @@ pub fn sort_entries(
     ascending: bool,
 ) {
     entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
+        match (a.is_dir || a.is_symlink, b.is_dir || b.is_symlink) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => {

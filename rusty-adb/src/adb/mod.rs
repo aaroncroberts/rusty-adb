@@ -404,9 +404,14 @@ impl AdbClient {
     ) -> Result<Vec<AndroidEntry>> {
         let path_str = path.to_string_lossy();
 
+        // Always append a trailing slash so the shell dereferences symlinks.
+        // Without it, `ls -la /sdcard` (which is a symlink on many devices)
+        // shows the symlink entry itself rather than the directory contents.
+        let ls_target = format!("{}/", path_str.trim_end_matches('/'));
+
         let output = Command::new(&self.adb_path)
             .args(target_args(serial))
-            .args(["shell", "ls", "-la", &*path_str])
+            .args(["shell", "ls", "-la", &ls_target])
             .output()
             .await
             .context("failed to run adb shell ls -la")?;
@@ -517,29 +522,66 @@ impl AdbClient {
         Ok(local_path)
     }
 
-    /// Discover Android storage roots: always includes `/sdcard`; also
-    /// returns any SD-card entries from `/storage/` that are not `emulated`
-    /// or `self`.
+    /// Discover Android storage roots.
+    ///
+    /// Always includes `/sdcard` (legacy symlink present on all devices).
+    /// Also probes for `/storage/emulated/0` (the real internal-storage path
+    /// on Android 4.2+ multi-user devices) and any removable SD-card volumes
+    /// under `/storage/` whose names are not `emulated` or `self`.
+    ///
+    /// Both `ls` commands run in parallel so there is no extra latency beyond
+    /// what the concurrent `list_dir` call already incurs.
     pub async fn list_storage_roots(&self, serial: &str) -> Vec<PathBuf> {
         let mut roots = vec![PathBuf::from("/sdcard")];
 
-        let Ok(output) = Command::new(&self.adb_path)
-            .args(target_args(serial))
-            .args(["shell", "ls", "/storage/"])
-            .output()
-            .await
-        else {
+        // Run both ls commands concurrently to minimise latency.
+        let (storage_res, emulated_res) = tokio::join!(
+            Command::new(&self.adb_path)
+                .args(target_args(serial))
+                .args(["shell", "ls", "/storage/"])
+                .output(),
+            Command::new(&self.adb_path)
+                .args(target_args(serial))
+                .args(["shell", "ls", "/storage/emulated/"])
+                .output(),
+        );
+
+        // /storage/emulated/0 — primary-user internal storage on modern Android.
+        // Only add if the directory actually exists (user "0" is listed).
+        if let Ok(out) = emulated_res {
+            if let Ok(s) = str::from_utf8(&out.stdout) {
+                if s.lines().any(|l| l.trim() == "0") {
+                    let path = PathBuf::from("/storage/emulated/0");
+                    if !roots.contains(&path) {
+                        tracing::debug!(serial = %serial, "found /storage/emulated/0");
+                        roots.push(path);
+                    }
+                }
+            }
+        }
+
+        // SD card volumes: non-emulated, non-self entries under /storage/.
+        // Guard against error text (spaces/colons/slashes) leaking into names.
+        let Ok(storage_out) = storage_res else {
+            tracing::debug!(serial = %serial, count = roots.len(), "storage roots discovered (ls /storage/ failed)");
             return roots;
         };
 
-        if let Ok(s) = str::from_utf8(&output.stdout) {
+        if let Ok(s) = str::from_utf8(&storage_out.stdout) {
             for name in s.lines().map(str::trim).filter(|n| !n.is_empty()) {
-                if name != "emulated" && name != "self" {
-                    let candidate = PathBuf::from("/storage").join(name);
-                    if !roots.contains(&candidate) {
-                        tracing::info!(serial = %serial, volume = %name, "SD card volume detected");
-                        roots.push(candidate);
-                    }
+                if matches!(name, "emulated" | "self") {
+                    continue;
+                }
+                // Reject lines containing spaces, colons, or a leading slash —
+                // these indicate error output, never a valid volume UUID.
+                if name.contains(' ') || name.contains(':') || name.starts_with('/') {
+                    tracing::warn!(serial = %serial, line = %name, "ignoring suspicious /storage/ entry");
+                    continue;
+                }
+                let candidate = PathBuf::from("/storage").join(name);
+                if !roots.contains(&candidate) {
+                    tracing::info!(serial = %serial, volume = %name, "external storage volume detected");
+                    roots.push(candidate);
                 }
             }
         }
