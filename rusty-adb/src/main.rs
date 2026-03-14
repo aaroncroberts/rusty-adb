@@ -16,6 +16,7 @@ mod config;
 mod file_pane;
 mod fs;
 mod icons;
+mod queue;
 #[cfg(test)]
 mod tests;
 mod theme;
@@ -32,6 +33,7 @@ use adb::{AdbClient, AdbDevice};
 use adb::{AdbStatus, TransferEvent, TransferJob, TransferStatus};
 use file_pane::FilePane;
 use fs::{AndroidContext, AndroidFs, DirEntry, FileSystem, LocalFs, PaneState, SortField};
+use queue::QueueManager;
 use theme::ThemeColors;
 use views::status_bar::StatusBar;
 
@@ -266,6 +268,34 @@ enum Message {
     /// A file was dropped onto the window — queue a local→android transfer
     FileDropped(PathBuf),
 
+    // ── Copy Queue ────────────────────────────────────────────────────────────
+    /// User clicked "Copy to Device" in local pane toolbar → show confirm dialog
+    OpenCopyConfirm,
+    /// User clicked "Cancel" or Escape in the copy confirm dialog
+    CloseCopyConfirm,
+    /// User clicked "Confirm" in the copy confirm dialog → enqueue items
+    ConfirmCopyToDevice,
+    /// Open the queue management dialog
+    OpenQueueDialog,
+    /// Close the queue management dialog
+    CloseQueueDialog,
+    /// Pause/resume the copy queue
+    ToggleQueuePause,
+    /// Remove an item from the queue by id
+    QueueRemoveItem(u64),
+    /// Begin editing the destination of a queue item (id)
+    QueueEditItem(u64),
+    /// User typed a new destination path for the item being edited
+    QueueEditDestInput(String),
+    /// Confirm the new destination for the item being edited
+    QueueEditDestConfirm,
+    /// A queued copy completed (fired by the copy engine)
+    QueueItemComplete(u64),
+    /// A queued copy failed (fired by the copy engine)
+    QueueItemFailed { id: u64, reason: String },
+    /// Progress update for an active queue copy
+    QueueItemProgress { id: u64, percent: u8 },
+
     // ── About dialog ──────────────────────────────────────────────────────────
     /// Open the About modal
     OpenAbout,
@@ -456,6 +486,16 @@ struct App {
     /// Which pane's column/visibility panel is open: Some(false)=local, Some(true)=android, None=closed
     show_panel_open: Option<bool>,
 
+    // ── Copy Queue ────────────────────────────────────────────────────────────
+    /// Persistent background copy queue (local → Android)
+    copy_queue: QueueManager,
+    /// Whether the queue management dialog is open
+    queue_open: bool,
+    /// Whether the copy-to-device confirmation dialog is open
+    copy_confirm_open: bool,
+    /// Item being edited in the queue dialog: (item_id, current_dest_input)
+    queue_editing: Option<(u64, String)>,
+
     // ── Log viewer ────────────────────────────────────────────────────────────
     /// Whether the log viewer modal is open
     log_viewer_open: bool,
@@ -510,6 +550,16 @@ impl Default for App {
             log_viewer_content: String::new(),
             log_viewer_display: String::new(),
             log_viewer_level: LogLevel::Info,
+            copy_queue: {
+                let path = dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".rusty-adb")
+                    .join("queue.json");
+                QueueManager::load(path)
+            },
+            queue_open: false,
+            copy_confirm_open: false,
+            queue_editing: None,
             config: config::AppConfig::default(),
             config_path: PathBuf::new(),
             settings_open: false,

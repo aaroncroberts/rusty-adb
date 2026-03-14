@@ -83,8 +83,24 @@ impl App {
         .style(t.transparent_button())
         .on_press(Message::OpenSettings);
 
+        // Queue icon — accent color when the queue has active/pending items
+        let queue_summary = self.copy_queue.summary();
+        let queue_color = if queue_summary.has_activity() {
+            t.accent
+        } else {
+            t.text_secondary
+        };
+        let queue_btn = tooltip(
+            button(text(icons::queue_list()).font(icons::font()).size(14).color(queue_color))
+                .padding([4, 10])
+                .style(t.transparent_button())
+                .on_press(Message::OpenQueueDialog),
+            text("Copy queue").size(11),
+            TipPos::Bottom,
+        );
+
         let left = container(
-            row![settings_btn]
+            row![settings_btn, queue_btn]
                 .spacing(8)
                 .padding([0, 8])
                 .align_y(iced::Alignment::Center),

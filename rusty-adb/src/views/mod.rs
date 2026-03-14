@@ -36,9 +36,16 @@ impl App {
                 None,
                 None,
                 Some(Message::OpenLogViewer),
+                None,
             ));
             return column(items).into();
         }
+
+        let queue_summary = {
+            let s = self.copy_queue.summary();
+            let text = s.status_text();
+            if text.is_empty() { None } else { Some(text) }
+        };
 
         let mut items: Vec<Element<Message>> = vec![self.view_header()];
         if let Some(msg) = &self.error_banner {
@@ -59,12 +66,13 @@ impl App {
                     .as_ref()
                     .map(|_| Message::CancelTransfer),
                 Some(Message::OpenLogViewer),
+                queue_summary,
             ),
         );
 
         let base: Element<Message> = column(items).into();
 
-        // Stack-based modal overlays (log viewer > settings > about > preview)
+        // Stack-based modal overlays (log viewer > settings > about > preview > queue > copy-confirm)
         if self.log_viewer_open {
             stack![base, self.view_log_viewer()].into()
         } else if self.settings_open {
@@ -73,6 +81,10 @@ impl App {
             stack![base, self.view_about_modal()].into()
         } else if let Some(modal_content) = &self.preview_modal {
             stack![base, self.view_preview_modal(modal_content)].into()
+        } else if self.queue_open {
+            stack![base, self.view_queue_dialog()].into()
+        } else if self.copy_confirm_open {
+            stack![base, self.view_copy_confirm()].into()
         } else {
             base
         }

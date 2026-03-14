@@ -26,12 +26,14 @@ impl StatusBar {
     /// When `transfer` is `Some`, shows a progress bar + speed instead of
     /// the connection status text. `on_cancel` enables the Cancel button.
     /// `on_open_logs` wires the far-right "Logs" link.
+    /// `queue_summary` shows copy queue activity when non-empty.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         status: &AdbStatus,
         transfer: Option<&TransferStatus>,
         on_cancel: Option<Message>,
         on_open_logs: Option<Message>,
+        queue_summary: Option<String>,
     ) -> Element<'a, Message> {
         let theme = self.theme;
 
@@ -110,7 +112,14 @@ impl StatusBar {
         }
         .into();
 
-        let content = row![inner, iced::widget::horizontal_space(), logs_btn]
+        // Optional queue summary shown in the middle
+        let queue_el: Element<Message> = if let Some(q) = queue_summary {
+            text(q).size(11).color(theme.accent).into()
+        } else {
+            iced::widget::Space::new(0, 0).into()
+        };
+
+        let content = row![inner, iced::widget::horizontal_space(), queue_el, logs_btn]
             .padding([6, 15])
             .spacing(20)
             .align_y(iced::Alignment::Center);

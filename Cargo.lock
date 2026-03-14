@@ -3059,6 +3059,7 @@ dependencies = [
  "nerd_font",
  "rusty-logging",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "tokio",

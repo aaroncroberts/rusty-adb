@@ -10,6 +10,7 @@ use std::sync::Arc;
 mod file_ops;
 mod install;
 mod pane;
+mod queue;
 mod transfer;
 mod ui;
 
@@ -222,6 +223,21 @@ impl App {
             Message::AndroidDeleteConfirm => self.android_delete_confirm(),
             Message::AndroidDeleteComplete => self.android_delete_complete(),
             Message::AndroidDeleteFailed(msg) => self.android_delete_failed(msg),
+
+            // ── Copy Queue ────────────────────────────────────────────────────
+            Message::OpenCopyConfirm => self.open_copy_confirm(),
+            Message::CloseCopyConfirm => self.close_copy_confirm(),
+            Message::ConfirmCopyToDevice => self.confirm_copy_to_device(),
+            Message::OpenQueueDialog => self.open_queue_dialog(),
+            Message::CloseQueueDialog => self.close_queue_dialog(),
+            Message::ToggleQueuePause => self.toggle_queue_pause(),
+            Message::QueueRemoveItem(id) => self.queue_remove_item(id),
+            Message::QueueEditItem(id) => self.queue_edit_item(id),
+            Message::QueueEditDestInput(val) => self.queue_edit_dest_input(val),
+            Message::QueueEditDestConfirm => self.queue_edit_dest_confirm(),
+            Message::QueueItemComplete(id) => self.queue_item_complete(id),
+            Message::QueueItemFailed { id, reason } => self.queue_item_failed(id, reason),
+            Message::QueueItemProgress { id, percent } => self.queue_item_progress(id, percent),
 
             // ── About dialog ──────────────────────────────────────────────────
             Message::OpenAbout => self.open_about(),

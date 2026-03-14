@@ -122,6 +122,16 @@ pub fn close() -> String {
     Cod::Close.to_string()
 }
 
+/// Add-to-queue / enqueue glyph — used for the "Copy to Device" queue button.
+pub fn add_to_queue() -> String {
+    Cod::Add.to_string()
+}
+
+/// Queue-list glyph — used for the main toolbar queue icon.
+pub fn queue_list() -> String {
+    Cod::ListOrdered.to_string()
+}
+
 /// Chevron pointing right (sort ascending indicator).
 pub fn chevron_right() -> String {
     Cod::ChevronRight.to_string()

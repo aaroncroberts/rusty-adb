@@ -292,8 +292,15 @@ pub(crate) fn preferred_android_root(roots: &[std::path::PathBuf]) -> std::path:
         return emu.clone();
     }
 
-    // Fallback
-    std::path::PathBuf::from("/sdcard")
+    // If /sdcard was explicitly returned by the device, use it rather than
+    // fabricating a path that may not exist.
+    if let Some(sdcard) = roots.iter().find(|r| *r == std::path::Path::new("/sdcard")) {
+        return sdcard.clone();
+    }
+
+    // Ultimate fallback: canonical internal storage path on modern Android devices.
+    // Reached only when the device returned no recognisable roots at all.
+    std::path::PathBuf::from("/storage/emulated/0")
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -408,12 +415,14 @@ mod tests {
 
     #[test]
     fn falls_back_to_sdcard_when_only_root() {
+        // /sdcard is itself a valid root when it's all we have
         let roots = vec![p("/sdcard")];
         assert_eq!(preferred_android_root(&roots), p("/sdcard"));
     }
 
     #[test]
-    fn empty_roots_returns_sdcard_fallback() {
-        assert_eq!(preferred_android_root(&[]), p("/sdcard"));
+    fn empty_roots_returns_internal_storage_fallback() {
+        // When root discovery fails entirely, default to canonical internal path
+        assert_eq!(preferred_android_root(&[]), p("/storage/emulated/0"));
     }
 }

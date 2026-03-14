@@ -205,6 +205,31 @@ impl App {
                     )
                     .into(),
                 );
+                // Queue button: enqueues selected files for background copy
+                cmd_items.push(
+                    tooltip(
+                        cmd_btn(
+                            Some(icons::add_to_queue()),
+                            "Copy to Device",
+                            t.accent,
+                            Some(Message::OpenCopyConfirm),
+                        ),
+                        text("Copy selected to device (queued)").size(11),
+                        TipPos::Bottom,
+                    )
+                    .into(),
+                );
+            } else if !local_sel_has_files {
+                // Show disabled "Copy to Device" hint when nothing selected
+                cmd_items.push(
+                    cmd_btn(
+                        Some(icons::add_to_queue()),
+                        "Copy to Device",
+                        t.text_secondary.scale_alpha(0.4),
+                        None, // disabled
+                    )
+                    .into(),
+                );
             }
         }
 

@@ -257,6 +257,12 @@ impl App {
         if self.preview_modal.is_some() {
             return self.update(Message::ClosePreview);
         }
+        if self.queue_open {
+            return self.update(Message::CloseQueueDialog);
+        }
+        if self.copy_confirm_open {
+            return self.update(Message::CloseCopyConfirm);
+        }
         self.update(Message::AndroidRenameCancel)
     }
 }

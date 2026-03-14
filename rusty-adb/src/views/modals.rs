@@ -1,9 +1,11 @@
 //! Modal overlay views: preview, log viewer, about, and settings.
 
 use crate::adb::AdbStatus;
+use crate::queue::QueueStatus;
 use crate::{App, LogLevel, Message, PreviewContent};
 use iced::widget::{
-    button, column, container, image, pick_list, row, scrollable, text, toggler, Row,
+    button, column, container, image, pick_list, progress_bar, row, scrollable, text, text_input,
+    toggler, Row,
 };
 use iced::{Border, Element, Fill};
 
@@ -456,6 +458,292 @@ impl App {
             .width(Fill),
         )
         .width(420)
+        .style(t.primary_panel());
+
+        super::modal_backdrop(card)
+    }
+
+    // ── Copy Confirm Dialog ───────────────────────────────────────────────────
+
+    /// Confirmation dialog before enqueuing local files for copy to Android.
+    ///
+    /// Shows the list of selected files, the destination (current android path),
+    /// and Change / Confirm buttons.
+    pub(super) fn view_copy_confirm(&self) -> Element<Message> {
+        let t = self.theme;
+
+        // Selected file names
+        let selected: Vec<&str> = self
+            .local_pane
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.local_pane.selected.contains(i))
+            .map(|(_, e)| e.name.as_str())
+            .collect();
+
+        let count = selected.len();
+        let dest = self.android_pane.current_path.display().to_string();
+
+        // File list — scrollable when many items selected
+        let file_rows: Vec<Element<Message>> = selected
+            .iter()
+            .map(|name| {
+                text(format!("  • {name}"))
+                    .size(11)
+                    .color(t.text)
+                    .into()
+            })
+            .collect();
+
+        let file_list = scrollable(column(file_rows).spacing(2).padding([4, 0]))
+            .height(iced::Length::Fixed(180.0));
+
+        let dest_label = row![
+            text("Destination: ").size(11).color(t.text_secondary),
+            text(dest.clone())
+                .size(11)
+                .color(t.accent)
+                .font(iced::Font::MONOSPACE),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+
+        let change_btn = button(text("Change destination").size(11).color(t.text_secondary))
+            .style(t.transparent_button())
+            .padding([4, 12])
+            .on_press(Message::CloseCopyConfirm);
+
+        let confirm_btn = button(
+            text(format!("Queue {count} item{}", if count == 1 { "" } else { "s" }))
+                .size(12)
+                .color(iced::Color::WHITE),
+        )
+        .style(t.accent_button())
+        .padding([4, 16])
+        .on_press(Message::ConfirmCopyToDevice);
+
+        let footer = container(
+            row![
+                text("").width(Fill), // spacer
+                change_btn,
+                confirm_btn,
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .padding([6, 10]),
+        )
+        .width(Fill)
+        .style(t.secondary_panel());
+
+        let body = container(
+            column![
+                text(format!("{count} item{} selected:", if count == 1 { "" } else { "s" }))
+                    .size(11)
+                    .color(t.text_secondary),
+                file_list,
+                iced::widget::Space::new(Fill, 8),
+                dest_label,
+                text("Click 'Change destination' to return and pick a different folder.")
+                    .size(10)
+                    .color(t.text_secondary),
+            ]
+            .spacing(6)
+            .padding([10, 14])
+            .width(Fill),
+        )
+        .width(Fill);
+
+        let card = container(
+            column![
+                container(
+                    row![
+                        text("Copy to Device").size(13).color(t.text).width(Fill),
+                        button(text("X").size(11).color(t.text_secondary))
+                            .style(t.transparent_button())
+                            .padding([2, 6])
+                            .on_press(Message::CloseCopyConfirm),
+                    ]
+                    .padding([6, 10])
+                    .align_y(iced::Alignment::Center),
+                )
+                .width(Fill)
+                .style(t.secondary_panel()),
+                body,
+                footer,
+            ]
+            .width(Fill),
+        )
+        .width(460)
+        .style(t.primary_panel());
+
+        super::modal_backdrop(card)
+    }
+
+    // ── Queue Management Dialog ───────────────────────────────────────────────
+
+    /// Queue management dialog: shows all items with live progress, pause/resume,
+    /// edit destination, and delete controls.
+    pub(super) fn view_queue_dialog(&self) -> Element<Message> {
+        let t = self.theme;
+
+        let summary = self.copy_queue.summary();
+
+        // ── Controls row ─────────────────────────────────────────────────────
+        let pause_label = if self.copy_queue.is_paused {
+            "Resume"
+        } else {
+            "Pause"
+        };
+        let pause_btn = button(text(pause_label).size(11).color(t.accent))
+            .style(t.transparent_button())
+            .padding([3, 10])
+            .on_press(Message::ToggleQueuePause);
+
+        let status_text = summary.status_text();
+        let controls = row![
+            text("Copy Queue").size(13).color(t.text).width(Fill),
+            text(status_text).size(11).color(t.text_secondary),
+            pause_btn,
+            button(text("X").size(11).color(t.text_secondary))
+                .style(t.transparent_button())
+                .padding([2, 6])
+                .on_press(Message::CloseQueueDialog),
+        ]
+        .spacing(8)
+        .padding([6, 10])
+        .align_y(iced::Alignment::Center);
+
+        // ── Item list ─────────────────────────────────────────────────────────
+        let items: Vec<Element<Message>> = self
+            .copy_queue
+            .items
+            .iter()
+            .map(|item| {
+                let is_editing = self
+                    .queue_editing
+                    .as_ref()
+                    .map(|(id, _)| *id == item.id)
+                    .unwrap_or(false);
+
+                let name_text = text(item.display_name()).size(12).color(t.text);
+                let id = item.id;
+
+                // Status badge
+                let status_color = match &item.status {
+                    QueueStatus::Done => t.accent,
+                    QueueStatus::Failed { .. } => t.error,
+                    QueueStatus::Copying { .. } => t.text,
+                    _ => t.text_secondary,
+                };
+                let status_badge = text(item.status.label()).size(10).color(status_color);
+
+                // Progress bar (visible while copying)
+                let progress_el: Element<Message> =
+                    if let QueueStatus::Copying { percent } = &item.status {
+                        progress_bar(0.0..=100.0, *percent as f32)
+                            .height(4)
+                            .into()
+                    } else if let QueueStatus::Done = &item.status {
+                        progress_bar(0.0..=100.0, 100.0).height(4).into()
+                    } else {
+                        iced::widget::Space::new(Fill, 4).into()
+                    };
+
+                // Destination display or edit input
+                let dest_el: Element<Message> = if is_editing {
+                    let current_input = self
+                        .queue_editing
+                        .as_ref()
+                        .map(|(_, s)| s.as_str())
+                        .unwrap_or("");
+                    row![
+                        text_input("Destination path", current_input)
+                            .on_input(Message::QueueEditDestInput)
+                            .on_submit(Message::QueueEditDestConfirm)
+                            .size(11)
+                            .padding([2, 6])
+                            .width(Fill),
+                        button(text("OK").size(10).color(t.accent))
+                            .style(t.transparent_button())
+                            .padding([2, 6])
+                            .on_press(Message::QueueEditDestConfirm),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+                } else {
+                    text(item.android_dest.to_string_lossy().into_owned())
+                        .size(10)
+                        .color(t.text_secondary)
+                        .into()
+                };
+
+                let action_btns = row![
+                    button(text("Edit").size(10).color(t.text_secondary))
+                        .style(t.transparent_button())
+                        .padding([1, 6])
+                        .on_press(Message::QueueEditItem(id)),
+                    button(text("Remove").size(10).color(t.error))
+                        .style(t.transparent_button())
+                        .padding([1, 6])
+                        .on_press(Message::QueueRemoveItem(id)),
+                ]
+                .spacing(2);
+
+                container(
+                    column![
+                        row![name_text, iced::widget::Space::new(Fill, 1), status_badge, action_btns]
+                            .spacing(4)
+                            .align_y(iced::Alignment::Center),
+                        dest_el,
+                        progress_el,
+                    ]
+                    .spacing(3)
+                    .padding([6, 10]),
+                )
+                .width(Fill)
+                .style(move |_th| container::Style {
+                    border: Border {
+                        color: t.border,
+                        width: 0.0,
+                        ..Default::default()
+                    },
+                    background: Some(t.background_secondary.into()),
+                    ..Default::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list_body: Element<Message> = if items.is_empty() {
+            container(
+                text("Queue is empty. Select local files and click 'Copy to Device'.")
+                    .size(11)
+                    .color(t.text_secondary),
+            )
+            .padding([24, 16])
+            .center_x(Fill)
+            .into()
+        } else {
+            scrollable(
+                column(items)
+                    .spacing(2)
+                    .padding([4, 0])
+                    .width(Fill),
+            )
+            .height(iced::Length::Fixed(400.0))
+            .into()
+        };
+
+        let card = container(
+            column![
+                container(controls).width(Fill).style(t.secondary_panel()),
+                list_body,
+            ]
+            .width(Fill),
+        )
+        .width(580)
         .style(t.primary_panel());
 
         super::modal_backdrop(card)
