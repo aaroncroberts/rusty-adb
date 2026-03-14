@@ -846,3 +846,410 @@ fn adb_error_increments_error_count() {
     let _ = app.update(Message::AdbError("timeout".to_string()));
     assert_eq!(app.daemon_error_count, 2);
 }
+
+// ── Transfer handler unit tests ───────────────────────────────────────────
+//
+// These tests drive the state-machine handlers in update/transfer.rs through
+// App::update() without ever spawning an adb subprocess.  The subscription
+// that actually calls run_transfer is lazy (Iced only starts it when the
+// runtime polls it) so discarding the returned Task is safe here.
+
+/// Build a fake local file entry for testing.
+fn local_file(name: &str, path: &str) -> DirEntry {
+    DirEntry {
+        name: name.to_string(),
+        path: PathBuf::from(path),
+        size: 1024,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: false,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: None,
+    }
+}
+
+/// Build a fake local directory entry.
+fn local_dir(name: &str, path: &str) -> DirEntry {
+    DirEntry {
+        name: name.to_string(),
+        path: PathBuf::from(path),
+        size: 0,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: true,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: None,
+    }
+}
+
+/// Return an App pre-configured with a fake ADB client, device serial,
+/// and the given local pane entries with all indices selected.
+fn app_with_local_selection(entries: Vec<DirEntry>) -> App {
+    let count = entries.len();
+    let mut app = App {
+        adb_client: Some(adb::AdbClient {
+            adb_path: PathBuf::from("/fake/adb"),
+        }),
+        active_serial: Some("device1234".to_string()),
+        ..Default::default()
+    };
+    app.local_pane.entries = entries;
+    app.local_pane.selected = (0..count).collect();
+    app
+}
+
+// ── copy_to_android ───────────────────────────────────────────────────────
+
+#[test]
+fn copy_to_android_no_client_is_noop() {
+    let mut app = App::default(); // adb_client = None
+    let _ = app.update(Message::CopyToAndroid);
+    assert!(app.active_transfer.is_none());
+    assert!(app.transfer_status.is_none());
+}
+
+#[test]
+fn copy_to_android_no_serial_is_noop() {
+    let mut app = App {
+        adb_client: Some(adb::AdbClient {
+            adb_path: PathBuf::from("/fake/adb"),
+        }),
+        ..Default::default() // active_serial = None
+    };
+    let _ = app.update(Message::CopyToAndroid);
+    assert!(app.active_transfer.is_none());
+}
+
+#[test]
+fn copy_to_android_empty_selection_is_noop() {
+    let mut app = app_with_local_selection(vec![]);
+    let _ = app.update(Message::CopyToAndroid);
+    assert!(app.active_transfer.is_none());
+    assert!(app.transfer_status.is_none());
+}
+
+#[test]
+fn copy_to_android_directory_only_selection_is_noop() {
+    // Directories are skipped — only files are transferred.
+    let mut app = app_with_local_selection(vec![local_dir("Documents", "/home/user/Documents")]);
+    let _ = app.update(Message::CopyToAndroid);
+    assert!(app.active_transfer.is_none(), "directories must not queue a transfer");
+}
+
+#[test]
+fn copy_to_android_single_file_sets_active_transfer() {
+    let mut app = app_with_local_selection(vec![local_file("photo.jpg", "/home/user/photo.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    let job = app.active_transfer.as_ref().expect("active_transfer must be set");
+    assert_eq!(job.filename, "photo.jpg");
+    assert_eq!(job.source, PathBuf::from("/home/user/photo.jpg"));
+    assert_eq!(job.destination, app.android_pane.current_path);
+    assert!(matches!(job.direction, adb::TransferDirection::ToAndroid));
+}
+
+#[test]
+fn copy_to_android_single_file_initialises_transfer_status() {
+    let mut app = app_with_local_selection(vec![local_file("photo.jpg", "/home/user/photo.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    let status = app.transfer_status.as_ref().expect("transfer_status must be set");
+    assert_eq!(status.filename, "photo.jpg");
+    assert_eq!(status.percent, 0);
+    assert_eq!(status.job_index, 1);
+    assert_eq!(status.job_total, 1);
+    assert!(status.speed_display.is_empty());
+}
+
+#[test]
+fn copy_to_android_multiple_files_queues_remainder() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/home/user/a.jpg"),
+        local_file("b.jpg", "/home/user/b.jpg"),
+        local_file("c.jpg", "/home/user/c.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    // First job is active; two remain in the queue.
+    assert!(app.active_transfer.is_some(), "first job must be active");
+    assert_eq!(app.transfer_queue.len(), 2, "remaining 2 jobs must be queued");
+    assert_eq!(app.transfer_queue_total, 3);
+    assert_eq!(app.transfer_queue_done, 0);
+
+    let status = app.transfer_status.as_ref().unwrap();
+    assert_eq!(status.job_total, 3);
+    assert_eq!(status.job_index, 1);
+}
+
+#[test]
+fn copy_to_android_mixed_selection_skips_dirs() {
+    // 1 dir + 2 files → only the 2 files should transfer.
+    let mut app = app_with_local_selection(vec![
+        local_dir("DCIM", "/home/user/DCIM"),
+        local_file("a.jpg", "/home/user/a.jpg"),
+        local_file("b.jpg", "/home/user/b.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    assert!(app.active_transfer.is_some());
+    assert_eq!(app.transfer_queue_total, 2, "only file count, dirs excluded");
+    assert_eq!(app.transfer_queue.len(), 1);
+}
+
+#[test]
+fn copy_to_android_creates_cancel_flag() {
+    let mut app = app_with_local_selection(vec![local_file("f.txt", "/home/user/f.txt")]);
+    let _ = app.update(Message::CopyToAndroid);
+    assert!(app.cancel_flag.is_some(), "cancel_flag must be initialised");
+    // Flag starts as false — not yet cancelled.
+    let flag = app.cancel_flag.as_ref().unwrap();
+    assert!(!flag.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+// ── transfer_progress ─────────────────────────────────────────────────────
+
+#[test]
+fn transfer_progress_updates_percent() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    let _ = app.update(Message::TransferProgress { percent: 42 });
+
+    assert_eq!(app.transfer_status.as_ref().unwrap().percent, 42);
+}
+
+#[test]
+fn transfer_progress_noop_without_active_status() {
+    let mut app = App::default();
+    // Should not panic even with no transfer in progress.
+    let _ = app.update(Message::TransferProgress { percent: 50 });
+    assert!(app.transfer_status.is_none());
+}
+
+#[test]
+fn transfer_progress_successive_updates() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    for pct in [25u8, 50, 75, 100] {
+        let _ = app.update(Message::TransferProgress { percent: pct });
+        assert_eq!(app.transfer_status.as_ref().unwrap().percent, pct);
+    }
+}
+
+// ── transfer_complete ─────────────────────────────────────────────────────
+
+#[test]
+fn transfer_complete_single_job_clears_state() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+    let _ = app.update(Message::TransferComplete {
+        speed_display: "1.2 MB/s".to_string(),
+    });
+
+    assert!(app.active_transfer.is_none(), "active_transfer must be cleared");
+    assert!(app.transfer_status.is_none(), "transfer_status must be cleared");
+    assert!(app.cancel_flag.is_none(), "cancel_flag must be cleared");
+    assert!(app.transfer_queue.is_empty());
+}
+
+#[test]
+fn transfer_complete_with_queued_jobs_advances_to_next() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/tmp/a.jpg"),
+        local_file("b.jpg", "/tmp/b.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    // Complete the first job.
+    let _ = app.update(Message::TransferComplete {
+        speed_display: "1.0 MB/s".to_string(),
+    });
+
+    // The second job should now be active.
+    let job = app.active_transfer.as_ref().expect("second job must be active");
+    assert_eq!(job.filename, "b.jpg");
+    assert_eq!(app.transfer_queue.len(), 0, "queue should be empty after advancing");
+}
+
+#[test]
+fn transfer_complete_advances_job_index() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/tmp/a.jpg"),
+        local_file("b.jpg", "/tmp/b.jpg"),
+        local_file("c.jpg", "/tmp/c.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    let _ = app.update(Message::TransferComplete {
+        speed_display: String::new(),
+    });
+
+    let status = app.transfer_status.as_ref().unwrap();
+    assert_eq!(status.job_index, 2, "job_index must advance to 2 after first completes");
+    assert_eq!(status.job_total, 3);
+}
+
+#[test]
+fn transfer_complete_resets_percent_for_next_job() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/tmp/a.jpg"),
+        local_file("b.jpg", "/tmp/b.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+    let _ = app.update(Message::TransferProgress { percent: 80 });
+
+    // Complete first — second job should start at 0%.
+    let _ = app.update(Message::TransferComplete {
+        speed_display: String::new(),
+    });
+
+    assert_eq!(app.transfer_status.as_ref().unwrap().percent, 0);
+}
+
+#[test]
+fn transfer_complete_creates_new_cancel_flag_for_next_job() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/tmp/a.jpg"),
+        local_file("b.jpg", "/tmp/b.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+    let first_flag = app.cancel_flag.clone().unwrap();
+
+    let _ = app.update(Message::TransferComplete {
+        speed_display: String::new(),
+    });
+
+    let second_flag = app.cancel_flag.as_ref().expect("new flag must exist");
+    // Each job gets a fresh flag (different Arc pointer).
+    assert!(
+        !std::sync::Arc::ptr_eq(&first_flag, second_flag),
+        "each job must have its own cancel flag"
+    );
+}
+
+// ── transfer_failed ───────────────────────────────────────────────────────
+
+#[test]
+fn transfer_failed_clears_active_transfer() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+    let _ = app.update(Message::TransferFailed("adb exited with 1".to_string()));
+
+    assert!(app.active_transfer.is_none());
+    assert!(app.transfer_status.is_none());
+    assert!(app.cancel_flag.is_none());
+}
+
+#[test]
+fn transfer_failed_sets_error_banner() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+    let _ = app.update(Message::TransferFailed("connection lost".to_string()));
+
+    let banner = app.error_banner.as_deref().expect("error_banner must be set");
+    assert!(banner.contains("connection lost"), "banner should contain the error: {banner}");
+}
+
+#[test]
+fn transfer_failed_clears_remaining_queue() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/tmp/a.jpg"),
+        local_file("b.jpg", "/tmp/b.jpg"),
+        local_file("c.jpg", "/tmp/c.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+    assert_eq!(app.transfer_queue.len(), 2);
+
+    let _ = app.update(Message::TransferFailed("timeout".to_string()));
+    assert!(app.transfer_queue.is_empty(), "queue must be cleared after failure");
+}
+
+// ── cancel_transfer ───────────────────────────────────────────────────────
+
+#[test]
+fn cancel_transfer_sets_cancel_flag() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+
+    let flag = app.cancel_flag.clone().unwrap();
+    let _ = app.update(Message::CancelTransfer);
+
+    assert!(
+        flag.load(std::sync::atomic::Ordering::Relaxed),
+        "cancel flag must be set to true"
+    );
+}
+
+#[test]
+fn cancel_transfer_clears_queue() {
+    let mut app = app_with_local_selection(vec![
+        local_file("a.jpg", "/tmp/a.jpg"),
+        local_file("b.jpg", "/tmp/b.jpg"),
+    ]);
+    let _ = app.update(Message::CopyToAndroid);
+    assert_eq!(app.transfer_queue.len(), 1);
+
+    let _ = app.update(Message::CancelTransfer);
+    assert!(app.transfer_queue.is_empty(), "queue must be cleared on cancel");
+}
+
+#[test]
+fn cancel_transfer_noop_without_active_transfer() {
+    let mut app = App::default();
+    // Should not panic even with no transfer.
+    let _ = app.update(Message::CancelTransfer);
+}
+
+// ── transfer_cancelled ────────────────────────────────────────────────────
+
+#[test]
+fn transfer_cancelled_clears_all_state() {
+    let mut app = app_with_local_selection(vec![local_file("f.jpg", "/tmp/f.jpg")]);
+    let _ = app.update(Message::CopyToAndroid);
+    let _ = app.update(Message::TransferCancelled);
+
+    assert!(app.active_transfer.is_none());
+    assert!(app.transfer_status.is_none());
+    assert!(app.cancel_flag.is_none());
+    assert!(app.transfer_queue.is_empty());
+}
+
+// ── copy_to_local ─────────────────────────────────────────────────────────
+
+#[test]
+fn copy_to_local_no_client_is_noop() {
+    let mut app = App::default();
+    let _ = app.update(Message::CopyToLocal);
+    assert!(app.active_transfer.is_none());
+}
+
+#[test]
+fn copy_to_local_single_file_sets_active_transfer() {
+    let mut app = App {
+        adb_client: Some(adb::AdbClient {
+            adb_path: PathBuf::from("/fake/adb"),
+        }),
+        active_serial: Some("device1234".to_string()),
+        ..Default::default()
+    };
+    app.android_pane.entries = vec![DirEntry {
+        name: "photo.jpg".to_string(),
+        path: PathBuf::from("/sdcard/photo.jpg"),
+        size: 3_145_728,
+        modified_display: "2024-01-01".to_string(),
+        is_dir: false,
+        is_symlink: false,
+        is_hidden: false,
+        child_count: None,
+    }];
+    app.android_pane.selected = vec![0];
+
+    let _ = app.update(Message::CopyToLocal);
+
+    let job = app.active_transfer.as_ref().expect("active_transfer must be set");
+    assert_eq!(job.filename, "photo.jpg");
+    assert_eq!(job.source, PathBuf::from("/sdcard/photo.jpg"));
+    assert_eq!(job.destination, app.local_pane.current_path);
+    assert!(matches!(job.direction, adb::TransferDirection::ToLocal));
+}
