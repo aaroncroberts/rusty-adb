@@ -146,12 +146,30 @@ impl App {
         entries: Vec<DirEntry>,
         roots: Vec<PathBuf>,
     ) -> Task<Message> {
+        let first_load = self.android_pane.storage_roots.is_empty();
+
         // Update storage roots in the context so is_nav_root works correctly
         if let Some(ref mut ctx) = self.android_ctx {
             ctx.storage_roots = roots.clone();
         }
         self.android_pane.storage_roots = roots;
-        self.android_pane.on_entries_loaded(path, entries);
+        self.android_pane.on_entries_loaded(path.clone(), entries);
+
+        // On the very first load the app always starts at /sdcard (the legacy
+        // symlink). Once we have the real roots, redirect to the preferred one:
+        // external storage first, /storage/emulated/0 second, /sdcard as fallback.
+        if first_load && path == std::path::Path::new("/sdcard") {
+            let preferred = preferred_android_root(&self.android_pane.storage_roots);
+            if preferred != path {
+                tracing::info!(
+                    from = "/sdcard",
+                    to   = %preferred.display(),
+                    "redirecting to preferred storage root on first connect"
+                );
+                return self.update(Message::AndroidNavigateTo(preferred));
+            }
+        }
+
         Task::none()
     }
 
@@ -248,6 +266,36 @@ pub(crate) async fn fetch_android_dir(
         .map_err(|e| e.to_string())
 }
 
+/// Choose the best initial root to display after a device connects.
+///
+/// Preference order:
+/// 1. External storage (`/storage/<name>` where name ≠ `emulated` and ≠ `self`)
+/// 2. Internal canonical path (`/storage/emulated/0`)
+/// 3. Legacy symlink (`/sdcard`) — fallback when nothing better is available
+pub(crate) fn preferred_android_root(roots: &[std::path::PathBuf]) -> std::path::PathBuf {
+    // External: any /storage/* root that isn't emulated or the sdcard symlink
+    let external = roots.iter().find(|r| {
+        let s = r.to_string_lossy();
+        s.starts_with("/storage/")
+            && !s.starts_with("/storage/emulated/")
+            && *r != std::path::Path::new("/sdcard")
+    });
+    if let Some(ext) = external {
+        return ext.clone();
+    }
+
+    // Internal canonical: /storage/emulated/0 or any /storage/emulated/N
+    let emulated = roots
+        .iter()
+        .find(|r| r.to_string_lossy().starts_with("/storage/emulated/"));
+    if let Some(emu) = emulated {
+        return emu.clone();
+    }
+
+    // Fallback
+    std::path::PathBuf::from("/sdcard")
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -334,5 +382,38 @@ mod tests {
             calls.iter().any(|c| c.contains("R5CWA0X")),
             "serial should appear in call log: {calls:?}"
         );
+    }
+
+    // ── preferred_android_root ────────────────────────────────────────────────
+
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
+
+    #[test]
+    fn prefers_external_over_emulated() {
+        let roots = vec![
+            p("/sdcard"),
+            p("/storage/emulated/0"),
+            p("/storage/external_sd"),
+        ];
+        assert_eq!(preferred_android_root(&roots), p("/storage/external_sd"));
+    }
+
+    #[test]
+    fn falls_back_to_emulated_when_no_external() {
+        let roots = vec![p("/sdcard"), p("/storage/emulated/0")];
+        assert_eq!(preferred_android_root(&roots), p("/storage/emulated/0"));
+    }
+
+    #[test]
+    fn falls_back_to_sdcard_when_only_root() {
+        let roots = vec![p("/sdcard")];
+        assert_eq!(preferred_android_root(&roots), p("/sdcard"));
+    }
+
+    #[test]
+    fn empty_roots_returns_sdcard_fallback() {
+        assert_eq!(preferred_android_root(&[]), p("/sdcard"));
     }
 }
