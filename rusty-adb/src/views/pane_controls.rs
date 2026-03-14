@@ -238,6 +238,7 @@ impl App {
 
         if panel_open {
             let toggle_row = row![
+                text("Show:").size(11).color(t.text_secondary),
                 tog("Type", show_type, type_msg),
                 tog("Size", show_size, size_msg),
                 tog("Modified", show_modified, modified_msg),
