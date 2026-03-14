@@ -67,6 +67,12 @@ pub trait AdbOperations: Clone + Send + Sync + 'static {
         &self,
         serial: &str,
     ) -> impl std::future::Future<Output = Vec<std::path::PathBuf>> + Send;
+
+    /// Fetch rich device details (model, OS version, connection info, etc.).
+    fn fetch_device_details(
+        &self,
+        serial: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<DeviceDetails>> + Send;
 }
 
 // ─── AdbOperations impl for AdbClient ────────────────────────────────────────
@@ -104,6 +110,10 @@ impl AdbOperations for AdbClient {
 
     async fn list_storage_roots(&self, serial: &str) -> Vec<std::path::PathBuf> {
         self.list_storage_roots(serial).await
+    }
+
+    async fn fetch_device_details(&self, serial: &str) -> anyhow::Result<DeviceDetails> {
+        self.fetch_device_details(serial).await
     }
 }
 
@@ -224,6 +234,19 @@ pub mod mock {
         async fn list_storage_roots(&self, serial: &str) -> Vec<PathBuf> {
             self.log(format!("list_storage_roots serial={serial}"));
             self.roots.clone()
+        }
+
+        async fn fetch_device_details(&self, serial: &str) -> anyhow::Result<super::DeviceDetails> {
+            self.log(format!("fetch_device_details serial={serial}"));
+            Ok(super::DeviceDetails {
+                serial: serial.to_string(),
+                model: Some("Mock Device".to_string()),
+                manufacturer: Some("MockCorp".to_string()),
+                android_version: Some("14".to_string()),
+                api_level: Some("34".to_string()),
+                transport: Some("USB".to_string()),
+                ..Default::default()
+            })
         }
     }
 }
@@ -823,6 +846,182 @@ impl AdbClient {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
+// ─── Device Details ───────────────────────────────────────────────────────────
+
+/// Rich device information fetched via `adb shell getprop` and related commands.
+///
+/// All fields are `Option<String>` because property availability varies across
+/// Android versions, OEMs, and emulators.
+#[derive(Debug, Clone, Default)]
+pub struct DeviceDetails {
+    // ── Device identity ──────────────────────────────────────────────────────
+    pub serial: String,
+    pub model: Option<String>,
+    pub manufacturer: Option<String>,
+    pub brand: Option<String>,
+    pub device_codename: Option<String>,
+
+    // ── OS / Build ───────────────────────────────────────────────────────────
+    pub android_version: Option<String>,
+    pub api_level: Option<String>,
+    pub security_patch: Option<String>,
+    pub build_fingerprint: Option<String>,
+
+    // ── Hardware ─────────────────────────────────────────────────────────────
+    pub cpu_abi: Option<String>,
+    pub screen_resolution: Option<String>,
+    pub screen_density: Option<String>,
+
+    // ── Connection ───────────────────────────────────────────────────────────
+    /// "USB", "TCP/IP", or derived from sys.usb.state / serial format
+    pub transport: Option<String>,
+    pub ip_address: Option<String>,
+    pub usb_state: Option<String>,
+
+    // ── Misc ─────────────────────────────────────────────────────────────────
+    pub is_emulator: bool,
+    pub build_characteristics: Option<String>,
+}
+
+/// Fetch a single Android system property via `adb shell getprop <key>`.
+///
+/// Returns `None` when the property is empty or the command fails.
+async fn shell_getprop(adb_path: &std::path::Path, serial: &str, key: &str) -> Option<String> {
+    let out = Command::new(adb_path)
+        .args(target_args(serial))
+        .args(["shell", "getprop", key])
+        .output()
+        .await
+        .ok()?;
+    let val = str::from_utf8(&out.stdout).ok()?.trim().to_string();
+    if val.is_empty() { None } else { Some(val) }
+}
+
+/// Run an arbitrary `adb shell <cmd>` and return trimmed stdout, or `None`.
+async fn shell_cmd(
+    adb_path: &std::path::Path,
+    serial: &str,
+    cmd: &str,
+) -> Option<String> {
+    let out = Command::new(adb_path)
+        .args(target_args(serial))
+        .args(["shell", cmd])
+        .output()
+        .await
+        .ok()?;
+    let val = str::from_utf8(&out.stdout).ok()?.trim().to_string();
+    if val.is_empty() { None } else { Some(val) }
+}
+
+impl AdbClient {
+    /// Fetch rich device details by running multiple ADB shell commands concurrently.
+    ///
+    /// All sub-commands run in parallel via `tokio::join!`; total latency is
+    /// approximately the slowest single command rather than the sum of all.
+    pub async fn fetch_device_details(&self, serial: &str) -> Result<DeviceDetails> {
+        let p = &self.adb_path;
+        let s = serial;
+
+        // Run all property fetches concurrently
+        let (
+            model,
+            manufacturer,
+            brand,
+            device_codename,
+            android_version,
+            api_level,
+            security_patch,
+            build_fingerprint,
+            cpu_abi,
+            usb_state,
+            is_qemu,
+            build_characteristics,
+            wm_size,
+            wm_density,
+            ip_raw,
+        ) = tokio::join!(
+            shell_getprop(p, s, "ro.product.model"),
+            shell_getprop(p, s, "ro.product.manufacturer"),
+            shell_getprop(p, s, "ro.product.brand"),
+            shell_getprop(p, s, "ro.product.device"),
+            shell_getprop(p, s, "ro.build.version.release"),
+            shell_getprop(p, s, "ro.build.version.sdk"),
+            shell_getprop(p, s, "ro.build.version.security_patch"),
+            shell_getprop(p, s, "ro.build.fingerprint"),
+            shell_getprop(p, s, "ro.product.cpu.abi"),
+            shell_getprop(p, s, "sys.usb.state"),
+            shell_getprop(p, s, "ro.kernel.qemu"),
+            shell_getprop(p, s, "ro.build.characteristics"),
+            shell_cmd(p, s, "wm size"),
+            shell_cmd(p, s, "wm density"),
+            shell_cmd(p, s, "ip addr show wlan0 2>/dev/null"),
+        );
+
+        // Parse wm size: "Physical size: 1080x2400" → "1080x2400"
+        let screen_resolution = wm_size.as_deref().and_then(|raw| {
+            raw.lines()
+                .find(|l| l.contains("size:") || l.contains("Physical"))
+                .and_then(|l| l.split(':').nth(1))
+                .map(|s| s.trim().to_string())
+        });
+
+        // Parse wm density: "Physical density: 420" → "420 dpi"
+        let screen_density = wm_density.as_deref().and_then(|raw| {
+            raw.lines()
+                .find(|l| l.contains("density:") || l.contains("Physical"))
+                .and_then(|l| l.split(':').nth(1))
+                .map(|s| format!("{} dpi", s.trim()))
+        });
+
+        // Parse IP from `ip addr show wlan0` output: look for "inet X.X.X.X/..."
+        let ip_address = ip_raw.as_deref().and_then(|raw| {
+            raw.lines()
+                .find(|l| l.trim().starts_with("inet "))
+                .and_then(|l| l.trim().split_whitespace().nth(1))
+                .and_then(|cidr| cidr.split('/').next())
+                .map(|ip| ip.to_string())
+        });
+
+        // Determine transport type from serial pattern or USB state
+        let transport = Some(if serial.contains(':') && serial.starts_with(|c: char| c.is_ascii_digit()) {
+            // "192.168.1.x:5555" pattern → TCP/IP
+            "TCP/IP".to_string()
+        } else if serial.starts_with("emulator-") {
+            "Emulator".to_string()
+        } else {
+            "USB".to_string()
+        });
+
+        let is_emulator = is_qemu.as_deref() == Some("1")
+            || serial.starts_with("emulator-");
+
+        Ok(DeviceDetails {
+            serial: serial.to_string(),
+            model,
+            manufacturer,
+            brand,
+            device_codename,
+            android_version,
+            api_level,
+            security_patch,
+            build_fingerprint,
+            cpu_abi,
+            screen_resolution,
+            screen_density,
+            transport,
+            ip_address,
+            usb_state,
+            is_emulator,
+            build_characteristics,
+        })
+    }
+}
+
+// ─── DeviceDetails in MockAdbClient ──────────────────────────────────────────
+
+// The mock returns a pre-populated DeviceDetails to avoid spawning real ADB.
+// This lives in the mock submodule below; extend the mock trait impl there.
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -950,5 +1149,42 @@ mod tests {
     fn adb_status_text_error() {
         let s = AdbStatus::Error("timeout".to_string()).text();
         assert!(s.contains("Error") && s.contains("timeout"));
+    }
+
+    // ── fetch_device_details (via MockAdbClient) ──────────────────────────────
+
+    #[tokio::test]
+    async fn mock_fetch_device_details_records_call_and_returns_details() {
+        use crate::adb::mock::MockAdbClient;
+        let mock = MockAdbClient::default();
+
+        let details = mock
+            .fetch_device_details("R5CWA0TEST")
+            .await
+            .expect("mock should succeed");
+
+        // Serial is echoed back
+        assert_eq!(details.serial, "R5CWA0TEST");
+
+        // Mock pre-populates these fields
+        assert_eq!(details.model.as_deref(), Some("Mock Device"));
+        assert_eq!(details.manufacturer.as_deref(), Some("MockCorp"));
+        assert_eq!(details.android_version.as_deref(), Some("14"));
+        assert_eq!(details.api_level.as_deref(), Some("34"));
+
+        // Verify the call was logged
+        let calls = mock.calls();
+        assert!(
+            calls.iter().any(|c| c.contains("fetch_device_details") && c.contains("R5CWA0TEST")),
+            "call log missing fetch_device_details: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn transport_type_from_serial_usb() {
+        use crate::adb::mock::MockAdbClient;
+        let mock = MockAdbClient::default();
+        let details = mock.fetch_device_details("R5CWA0TEST").await.unwrap();
+        assert_eq!(details.transport.as_deref(), Some("USB"));
     }
 }

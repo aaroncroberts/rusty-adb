@@ -37,6 +37,7 @@ impl App {
                 None,
                 Some(Message::OpenLogViewer),
                 None,
+                None,
             ));
             return column(items).into();
         }
@@ -67,18 +68,21 @@ impl App {
                     .map(|_| Message::CancelTransfer),
                 Some(Message::OpenLogViewer),
                 queue_summary,
+                Some(Message::OpenDeviceDetails),
             ),
         );
 
         let base: Element<Message> = column(items).into();
 
-        // Stack-based modal overlays (log viewer > settings > about > preview > queue > copy-confirm)
+        // Stack-based modal overlays (log viewer > settings > about > device details > preview > queue > copy-confirm)
         if self.log_viewer_open {
             stack![base, self.view_log_viewer()].into()
         } else if self.settings_open {
             stack![base, self.view_settings_modal()].into()
         } else if self.about_open {
             stack![base, self.view_about_modal()].into()
+        } else if self.device_details_open {
+            stack![base, self.view_device_details_modal()].into()
         } else if let Some(modal_content) = &self.preview_modal {
             stack![base, self.view_preview_modal(modal_content)].into()
         } else if self.queue_open {

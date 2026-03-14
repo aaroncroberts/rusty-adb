@@ -34,6 +34,7 @@ impl StatusBar {
         on_cancel: Option<Message>,
         on_open_logs: Option<Message>,
         queue_summary: Option<String>,
+        on_device_details: Option<Message>,
     ) -> Element<'a, Message> {
         let theme = self.theme;
 
@@ -93,7 +94,23 @@ impl StatusBar {
                 AdbStatus::Connected(_) => theme.success,
                 AdbStatus::Error(_) => theme.error,
             };
-            text(status.text()).size(12).color(status_color).into()
+            // When connected, make the status text a clickable button that opens device details
+            if matches!(status, AdbStatus::Connected(_)) {
+                if let Some(msg) = on_device_details {
+                    button(text(status.text()).size(12).color(status_color))
+                        .padding([0, 0])
+                        .style(move |_t, _s| button::Style {
+                            background: None,
+                            ..Default::default()
+                        })
+                        .on_press(msg)
+                        .into()
+                } else {
+                    text(status.text()).size(12).color(status_color).into()
+                }
+            } else {
+                text(status.text()).size(12).color(status_color).into()
+            }
         };
 
         // ── Far-right "Logs" link ─────────────────────────────────────────────

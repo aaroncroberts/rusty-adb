@@ -45,6 +45,55 @@ impl App {
         Task::none()
     }
 
+    // ── Device Details ────────────────────────────────────────────────────────
+
+    pub(super) fn open_device_details(&mut self) -> Task<Message> {
+        self.device_details_open = true;
+        self.device_details_loading = true;
+        self.update(Message::RefreshDeviceDetails)
+    }
+
+    pub(super) fn close_device_details(&mut self) -> Task<Message> {
+        self.device_details_open = false;
+        Task::none()
+    }
+
+    pub(super) fn refresh_device_details(&mut self) -> Task<Message> {
+        let Some(client) = self.adb_client.clone() else {
+            self.device_details_loading = false;
+            return Task::none();
+        };
+        let Some(serial) = self.active_serial.clone() else {
+            self.device_details_loading = false;
+            return Task::none();
+        };
+        self.device_details_loading = true;
+        Task::perform(
+            async move {
+                client.fetch_device_details(&serial).await.map_err(|e| e.to_string())
+            },
+            |result| match result {
+                Ok(details) => Message::DeviceDetailsLoaded(details),
+                Err(e) => Message::DeviceDetailsFailed(e),
+            },
+        )
+    }
+
+    pub(super) fn device_details_loaded(
+        &mut self,
+        details: crate::adb::DeviceDetails,
+    ) -> Task<Message> {
+        self.device_details = Some(details);
+        self.device_details_loading = false;
+        Task::none()
+    }
+
+    pub(super) fn device_details_failed(&mut self, msg: String) -> Task<Message> {
+        tracing::warn!(error = %msg, "device details fetch failed");
+        self.device_details_loading = false;
+        Task::none()
+    }
+
     // ── About ─────────────────────────────────────────────────────────────────
 
     pub(super) fn open_about(&mut self) -> Task<Message> {
@@ -253,6 +302,9 @@ impl App {
         }
         if self.about_open {
             return self.update(Message::CloseAbout);
+        }
+        if self.device_details_open {
+            return self.update(Message::CloseDeviceDetails);
         }
         if self.preview_modal.is_some() {
             return self.update(Message::ClosePreview);

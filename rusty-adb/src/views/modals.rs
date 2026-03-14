@@ -748,4 +748,137 @@ impl App {
 
         super::modal_backdrop(card)
     }
+
+    /// Device Details modal — shows rich ADB property data for the connected device.
+    pub(super) fn view_device_details_modal(&self) -> Element<Message> {
+        let t = self.theme;
+
+        // ── Header ────────────────────────────────────────────────────────────
+        let title = if let Some(ref d) = self.device_details {
+            d.model.as_deref().unwrap_or("Connected Device").to_string()
+        } else {
+            "Device Details".to_string()
+        };
+
+        let close_btn = button(text("X  Close").size(12).color(t.text))
+            .style(t.secondary_button())
+            .padding([4, 12])
+            .on_press(Message::CloseDeviceDetails);
+
+        let refresh_btn = button(text("Refresh").size(12).color(t.accent))
+            .style(t.transparent_button())
+            .padding([4, 10])
+            .on_press(Message::RefreshDeviceDetails);
+
+        let header = container(
+            row![
+                text(title).size(14).color(t.text).width(Fill),
+                refresh_btn,
+                close_btn,
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(8)
+            .padding([6, 10]),
+        )
+        .width(Fill)
+        .style(t.secondary_panel());
+
+        // ── Body ──────────────────────────────────────────────────────────────
+        let na = "N/A";
+
+        // Helper: render a key-value row
+        let kv_row = |key: &str, val: &str, monospace: bool| -> Row<Message> {
+            let val_text = if monospace {
+                text(val.to_string())
+                    .size(11)
+                    .color(t.text_secondary)
+                    .font(iced::Font::MONOSPACE)
+            } else {
+                text(val.to_string()).size(12).color(t.text_secondary)
+            };
+            row![
+                text(key.to_string()).size(12).color(t.text).width(160),
+                val_text.width(Fill),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Start)
+        };
+
+        // Section header helper
+        let section_head = |label: &str| -> Element<Message> {
+            container(
+                text(label.to_string()).size(11).color(t.accent),
+            )
+            .padding([4, 0])
+            .width(Fill)
+            .into()
+        };
+
+        let body: Element<Message> = if self.device_details_loading && self.device_details.is_none() {
+            // Loading state
+            container(
+                text("Fetching device information…")
+                    .size(12)
+                    .color(t.text_secondary),
+            )
+            .width(Fill)
+            .height(iced::Length::Fixed(200.0))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else if let Some(ref d) = self.device_details {
+            let is_emu = if d.is_emulator { "Yes" } else { "No" };
+            let details_col = column![
+                // ── Device ────────────────────────────────────────────────────
+                section_head("DEVICE"),
+                kv_row("Model", d.model.as_deref().unwrap_or(na), false),
+                kv_row("Manufacturer", d.manufacturer.as_deref().unwrap_or(na), false),
+                kv_row("Brand", d.brand.as_deref().unwrap_or(na), false),
+                kv_row("Codename", d.device_codename.as_deref().unwrap_or(na), false),
+                kv_row("Serial", &d.serial, false),
+                kv_row("Emulator", is_emu, false),
+                // ── OS ────────────────────────────────────────────────────────
+                text("").size(6), // spacer
+                section_head("OS / BUILD"),
+                kv_row("Android Version", d.android_version.as_deref().unwrap_or(na), false),
+                kv_row("API Level", d.api_level.as_deref().unwrap_or(na), false),
+                kv_row("Security Patch", d.security_patch.as_deref().unwrap_or(na), false),
+                kv_row("CPU ABI", d.cpu_abi.as_deref().unwrap_or(na), false),
+                kv_row("Characteristics", d.build_characteristics.as_deref().unwrap_or(na), false),
+                kv_row("Build Fingerprint", d.build_fingerprint.as_deref().unwrap_or(na), true),
+                // ── Connection ────────────────────────────────────────────────
+                text("").size(6),
+                section_head("CONNECTION"),
+                kv_row("Transport", d.transport.as_deref().unwrap_or(na), false),
+                kv_row("IP Address", d.ip_address.as_deref().unwrap_or(na), false),
+                kv_row("USB State", d.usb_state.as_deref().unwrap_or(na), false),
+                // ── Display ───────────────────────────────────────────────────
+                text("").size(6),
+                section_head("DISPLAY"),
+                kv_row("Resolution", d.screen_resolution.as_deref().unwrap_or(na), false),
+                kv_row("Density", d.screen_density.as_deref().unwrap_or(na), false),
+            ]
+            .spacing(4)
+            .padding([8, 12]);
+
+            scrollable(details_col)
+                .height(iced::Length::Fixed(420.0))
+                .into()
+        } else {
+            container(
+                text("No device data available.").size(12).color(t.text_secondary),
+            )
+            .width(Fill)
+            .height(iced::Length::Fixed(80.0))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
+        };
+
+        let card = container(column![header, body].width(Fill))
+            .width(560)
+            .style(t.primary_panel());
+
+        super::modal_backdrop(card)
+    }
 }

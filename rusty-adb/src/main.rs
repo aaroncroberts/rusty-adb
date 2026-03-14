@@ -296,6 +296,18 @@ enum Message {
     /// Progress update for an active queue copy
     QueueItemProgress { id: u64, percent: u8 },
 
+    // ── Device Details dialog ─────────────────────────────────────────────────
+    /// Open the device details modal and start fetching properties
+    OpenDeviceDetails,
+    /// Close the device details modal
+    CloseDeviceDetails,
+    /// ADB property fetch completed — store and show the result
+    DeviceDetailsLoaded(crate::adb::DeviceDetails),
+    /// ADB property fetch failed
+    DeviceDetailsFailed(String),
+    /// User clicked Refresh — re-fetch all properties
+    RefreshDeviceDetails,
+
     // ── About dialog ──────────────────────────────────────────────────────────
     /// Open the About modal
     OpenAbout,
@@ -486,6 +498,14 @@ struct App {
     /// Which pane's column/visibility panel is open: Some(false)=local, Some(true)=android, None=closed
     show_panel_open: Option<bool>,
 
+    // ── Device Details dialog ─────────────────────────────────────────────────
+    /// Whether the device details modal is open
+    device_details_open: bool,
+    /// Fetched device details (None = not yet loaded)
+    device_details: Option<crate::adb::DeviceDetails>,
+    /// True while the async fetch is in flight
+    device_details_loading: bool,
+
     // ── Copy Queue ────────────────────────────────────────────────────────────
     /// Persistent background copy queue (local → Android)
     copy_queue: QueueManager,
@@ -557,6 +577,9 @@ impl Default for App {
                     .join("queue.json");
                 QueueManager::load(path)
             },
+            device_details_open: false,
+            device_details: None,
+            device_details_loading: false,
             queue_open: false,
             copy_confirm_open: false,
             queue_editing: None,

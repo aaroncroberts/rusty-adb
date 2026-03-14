@@ -239,6 +239,13 @@ impl App {
             Message::QueueItemFailed { id, reason } => self.queue_item_failed(id, reason),
             Message::QueueItemProgress { id, percent } => self.queue_item_progress(id, percent),
 
+            // ── Device Details dialog ─────────────────────────────────────────
+            Message::OpenDeviceDetails => self.open_device_details(),
+            Message::CloseDeviceDetails => self.close_device_details(),
+            Message::RefreshDeviceDetails => self.refresh_device_details(),
+            Message::DeviceDetailsLoaded(details) => self.device_details_loaded(details),
+            Message::DeviceDetailsFailed(e) => self.device_details_failed(e),
+
             // ── About dialog ──────────────────────────────────────────────────
             Message::OpenAbout => self.open_about(),
             Message::CloseAbout => self.close_about(),
