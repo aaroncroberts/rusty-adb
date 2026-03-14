@@ -7,8 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+use super::{DirEntry, FileSystem, FsError};
 use crate::adb::{AdbClient, AndroidEntry};
-use super::{DirEntry, FsError, FileSystem};
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -16,10 +16,14 @@ use super::{DirEntry, FsError, FileSystem};
 ///
 /// Populated when a device connects; cleared on disconnect. Passed by reference
 /// to every [`FileSystem`] method call so the backend can reach the ADB daemon.
+///
+/// # Generic parameter
+/// `C` defaults to [`AdbClient`] for all production code. In tests, substitute
+/// any type that implements [`AdbOperations`] (e.g. `MockAdbClient`).
 #[derive(Debug, Clone)]
-pub struct AndroidContext {
-    /// ADB client (wraps the adb binary path).
-    pub client: AdbClient,
+pub struct AndroidContext<C = AdbClient> {
+    /// ADB operations implementation (real or mock).
+    pub client: C,
     /// Device serial number (passed to every `adb -s <serial>` invocation).
     pub serial: String,
     /// Storage roots discovered on the device (e.g. `/sdcard`, `/storage/…`).
@@ -40,14 +44,18 @@ impl FileSystem for AndroidFs {
         ctx.client
             .list_dir(&ctx.serial, path)
             .await
-            .map(|entries| entries.into_iter().map(android_entry_to_dir_entry).collect())
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(android_entry_to_dir_entry)
+                    .collect()
+            })
             .map_err(|e| FsError(e.to_string()))
     }
 
     fn is_nav_root(ctx: &AndroidContext, path: &Path) -> bool {
         path == Path::new("/") || ctx.storage_roots.contains(&path.to_path_buf())
     }
-
 }
 
 // ─── Entry Conversion ─────────────────────────────────────────────────────────

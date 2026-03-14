@@ -25,11 +25,13 @@ impl StatusBar {
     ///
     /// When `transfer` is `Some`, shows a progress bar + speed instead of
     /// the connection status text. `on_cancel` enables the Cancel button.
+    /// `on_open_logs` wires the far-right "Logs" link.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         status: &AdbStatus,
         transfer: Option<&TransferStatus>,
         on_cancel: Option<Message>,
+        on_open_logs: Option<Message>,
     ) -> Element<'a, Message> {
         let theme = self.theme;
 
@@ -92,7 +94,26 @@ impl StatusBar {
             text(status.text()).size(12).color(status_color).into()
         };
 
-        let content = row![inner].padding([6, 15]).spacing(20);
+        // ── Far-right "Logs" link ─────────────────────────────────────────────
+        let logs_btn: Element<Message> = {
+            let b = button(text("Logs").size(11).color(theme.text_secondary)).style(
+                move |_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                },
+            );
+            if let Some(msg) = on_open_logs {
+                b.on_press(msg)
+            } else {
+                b
+            }
+        }
+        .into();
+
+        let content = row![inner, iced::widget::horizontal_space(), logs_btn]
+            .padding([6, 15])
+            .spacing(20)
+            .align_y(iced::Alignment::Center);
 
         container(content)
             .width(Fill)

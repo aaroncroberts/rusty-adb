@@ -14,11 +14,11 @@
 
 use std::path::{Path, PathBuf};
 
-pub mod local;
 pub mod android;
+pub mod local;
 
-pub use local::{LocalFs, sort_entries};
-pub use android::{AndroidFs, AndroidContext, android_entry_to_dir_entry};
+pub use android::{android_entry_to_dir_entry, AndroidContext, AndroidFs};
+pub use local::{sort_entries, LocalFs};
 
 // ─── Unified Entry Type ───────────────────────────────────────────────────────
 

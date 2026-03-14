@@ -19,6 +19,205 @@ pub mod transfer;
 pub use parser::AndroidEntry;
 pub use transfer::{run_transfer, TransferDirection, TransferEvent, TransferJob, TransferStatus};
 
+// ─── ADB Operations Trait ─────────────────────────────────────────────────────
+
+/// Abstraction over the ADB filesystem operations used by the app.
+///
+/// [`AdbClient`] is the production implementation. [`MockAdbClient`]
+/// (available in `adb::mock` under `#[cfg(test)]`) satisfies this trait for
+/// unit tests without spawning a real ADB process.
+///
+/// # Note on object safety
+/// This trait uses `impl Future` return types (RPITIT, stable since Rust 1.75)
+/// and is therefore **not object-safe** — you cannot use `dyn AdbOperations`.
+/// Callers must use generic bounds: `fn foo<C: AdbOperations>(client: &C)`.
+#[allow(dead_code)]
+pub trait AdbOperations: Clone + Send + Sync + 'static {
+    /// List directory entries on the device at `path`.
+    fn list_dir(
+        &self,
+        serial: &str,
+        path: &std::path::Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<AndroidEntry>>> + Send;
+
+    /// Rename `from` to `to` on the device.
+    fn rename(
+        &self,
+        serial: &str,
+        from: &std::path::Path,
+        to: &std::path::Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+
+    /// Delete `path` on the device (recursive).
+    fn delete(
+        &self,
+        serial: &str,
+        path: &std::path::Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+
+    /// Pull a single file from the device to a local temp path.
+    fn pull_to_temp(
+        &self,
+        serial: &str,
+        remote: &std::path::Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<std::path::PathBuf>> + Send;
+
+    /// Discover storage roots on the device (e.g. `/sdcard`, `/storage/…`).
+    fn list_storage_roots(
+        &self,
+        serial: &str,
+    ) -> impl std::future::Future<Output = Vec<std::path::PathBuf>> + Send;
+}
+
+// ─── AdbOperations impl for AdbClient ────────────────────────────────────────
+
+impl AdbOperations for AdbClient {
+    async fn list_dir(
+        &self,
+        serial: &str,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Vec<AndroidEntry>> {
+        // Calls the inherent AdbClient::list_dir (inherent methods beat trait dispatch)
+        self.list_dir(serial, path).await
+    }
+
+    async fn rename(
+        &self,
+        serial: &str,
+        from: &std::path::Path,
+        to: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        self.rename(serial, from, to).await
+    }
+
+    async fn delete(&self, serial: &str, path: &std::path::Path) -> anyhow::Result<()> {
+        self.delete(serial, path).await
+    }
+
+    async fn pull_to_temp(
+        &self,
+        serial: &str,
+        remote: &std::path::Path,
+    ) -> anyhow::Result<std::path::PathBuf> {
+        self.pull_to_temp(serial, remote).await
+    }
+
+    async fn list_storage_roots(&self, serial: &str) -> Vec<std::path::PathBuf> {
+        self.list_storage_roots(serial).await
+    }
+}
+
+// ─── Mock ADB Client (test only) ─────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::{AdbOperations, AndroidEntry};
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+
+    /// Mock ADB client for unit tests.
+    ///
+    /// Pre-populate `entries` and `roots` to control what `list_dir` and
+    /// `list_storage_roots` return. Set `fail_*` flags to simulate errors.
+    /// Inspect `.calls()` after the test to verify which operations ran.
+    #[derive(Debug, Clone)]
+    pub struct MockAdbClient {
+        /// Entries returned by `list_dir` (same for all calls).
+        pub entries: Vec<AndroidEntry>,
+        /// Roots returned by `list_storage_roots`.
+        pub roots: Vec<PathBuf>,
+        /// When `true`, `list_dir` returns an error.
+        pub fail_list_dir: bool,
+        /// When `true`, `rename` returns an error.
+        pub fail_rename: bool,
+        /// When `true`, `delete` returns an error.
+        pub fail_delete: bool,
+        /// Append-only log of method calls for post-test assertions.
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Default for MockAdbClient {
+        fn default() -> Self {
+            Self {
+                entries: vec![],
+                roots: vec![PathBuf::from("/sdcard")],
+                fail_list_dir: false,
+                fail_rename: false,
+                fail_delete: false,
+                calls: Arc::new(Mutex::new(vec![])),
+            }
+        }
+    }
+
+    impl MockAdbClient {
+        /// Returns a snapshot of all method calls recorded so far.
+        pub fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn log(&self, call: impl Into<String>) {
+            self.calls.lock().unwrap().push(call.into());
+        }
+    }
+
+    impl AdbOperations for MockAdbClient {
+        async fn list_dir(
+            &self,
+            serial: &str,
+            path: &Path,
+        ) -> anyhow::Result<Vec<AndroidEntry>> {
+            self.log(format!(
+                "list_dir serial={serial} path={}",
+                path.display()
+            ));
+            if self.fail_list_dir {
+                anyhow::bail!("mock list_dir failure");
+            }
+            Ok(self.entries.clone())
+        }
+
+        async fn rename(&self, serial: &str, from: &Path, to: &Path) -> anyhow::Result<()> {
+            self.log(format!(
+                "rename serial={serial} from={} to={}",
+                from.display(),
+                to.display()
+            ));
+            if self.fail_rename {
+                anyhow::bail!("mock rename failure");
+            }
+            Ok(())
+        }
+
+        async fn delete(&self, serial: &str, path: &Path) -> anyhow::Result<()> {
+            self.log(format!(
+                "delete serial={serial} path={}",
+                path.display()
+            ));
+            if self.fail_delete {
+                anyhow::bail!("mock delete failure");
+            }
+            Ok(())
+        }
+
+        async fn pull_to_temp(
+            &self,
+            serial: &str,
+            remote: &Path,
+        ) -> anyhow::Result<PathBuf> {
+            self.log(format!(
+                "pull_to_temp serial={serial} remote={}",
+                remote.display()
+            ));
+            Ok(PathBuf::from("/tmp/mock-pull-target"))
+        }
+
+        async fn list_storage_roots(&self, serial: &str) -> Vec<PathBuf> {
+            self.log(format!("list_storage_roots serial={serial}"));
+            self.roots.clone()
+        }
+    }
+}
+
 use std::path::PathBuf;
 use std::str;
 
