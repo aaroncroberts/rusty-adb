@@ -157,17 +157,26 @@ pub mod mock {
 
         /// Constructor: mock that fails on `list_dir`.
         pub fn failing_list_dir() -> Self {
-            Self { fail_list_dir: true, ..Self::default() }
+            Self {
+                fail_list_dir: true,
+                ..Self::default()
+            }
         }
 
         /// Constructor: mock that fails on `rename`.
         pub fn failing_rename() -> Self {
-            Self { fail_rename: true, ..Self::default() }
+            Self {
+                fail_rename: true,
+                ..Self::default()
+            }
         }
 
         /// Constructor: mock that fails on `delete`.
         pub fn failing_delete() -> Self {
-            Self { fail_delete: true, ..Self::default() }
+            Self {
+                fail_delete: true,
+                ..Self::default()
+            }
         }
 
         fn log(&self, call: impl Into<String>) {
@@ -176,15 +185,8 @@ pub mod mock {
     }
 
     impl AdbOperations for MockAdbClient {
-        async fn list_dir(
-            &self,
-            serial: &str,
-            path: &Path,
-        ) -> anyhow::Result<Vec<AndroidEntry>> {
-            self.log(format!(
-                "list_dir serial={serial} path={}",
-                path.display()
-            ));
+        async fn list_dir(&self, serial: &str, path: &Path) -> anyhow::Result<Vec<AndroidEntry>> {
+            self.log(format!("list_dir serial={serial} path={}", path.display()));
             if self.fail_list_dir {
                 anyhow::bail!("mock list_dir failure");
             }
@@ -204,21 +206,14 @@ pub mod mock {
         }
 
         async fn delete(&self, serial: &str, path: &Path) -> anyhow::Result<()> {
-            self.log(format!(
-                "delete serial={serial} path={}",
-                path.display()
-            ));
+            self.log(format!("delete serial={serial} path={}", path.display()));
             if self.fail_delete {
                 anyhow::bail!("mock delete failure");
             }
             Ok(())
         }
 
-        async fn pull_to_temp(
-            &self,
-            serial: &str,
-            remote: &Path,
-        ) -> anyhow::Result<PathBuf> {
+        async fn pull_to_temp(&self, serial: &str, remote: &Path) -> anyhow::Result<PathBuf> {
             self.log(format!(
                 "pull_to_temp serial={serial} remote={}",
                 remote.display()

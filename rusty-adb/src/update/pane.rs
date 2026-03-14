@@ -242,8 +242,7 @@ pub(crate) async fn fetch_android_dir(
     let (entries_res, roots) = tokio::join!(entries_fut, roots_fut);
     entries_res
         .map(|raw| {
-            let entries: Vec<DirEntry> =
-                raw.into_iter().map(android_entry_to_dir_entry).collect();
+            let entries: Vec<DirEntry> = raw.into_iter().map(android_entry_to_dir_entry).collect();
             (path, entries, roots)
         })
         .map_err(|e| e.to_string())
@@ -280,15 +279,15 @@ mod tests {
             make_entry("Download", true),
             make_entry("photo.jpg", false),
         ];
-        mock.roots = vec![PathBuf::from("/sdcard"), PathBuf::from("/storage/emulated/0")];
-
-        let (path, entries, roots) = fetch_android_dir(
-            &mock,
-            "serial123",
+        mock.roots = vec![
             PathBuf::from("/sdcard"),
-        )
-        .await
-        .expect("should succeed");
+            PathBuf::from("/storage/emulated/0"),
+        ];
+
+        let (path, entries, roots) =
+            fetch_android_dir(&mock, "serial123", PathBuf::from("/sdcard"))
+                .await
+                .expect("should succeed");
 
         assert_eq!(path, PathBuf::from("/sdcard"));
         assert_eq!(entries.len(), 3);
@@ -317,8 +316,9 @@ mod tests {
     #[tokio::test]
     async fn fetch_android_dir_empty_directory() {
         let mock = MockAdbClient::default(); // entries = []
-        let (_, entries, roots) =
-            fetch_android_dir(&mock, "device1", PathBuf::from("/sdcard")).await.unwrap();
+        let (_, entries, roots) = fetch_android_dir(&mock, "device1", PathBuf::from("/sdcard"))
+            .await
+            .unwrap();
 
         assert!(entries.is_empty());
         assert!(!roots.is_empty()); // always at least /sdcard from default mock

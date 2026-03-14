@@ -117,29 +117,39 @@ impl App {
         // ── Developer mode steps (same on all platforms) ─────────────────────
         let dev_steps: Element<Message> = column![
             text("After installing ADB, enable Developer Mode on your phone:")
-                .size(12).color(t.text_secondary),
+                .size(12)
+                .color(t.text_secondary),
             Space::with_height(6),
             text("  1.  Settings › About Phone › tap Build Number 7 times")
-                .size(12).color(t.text_secondary),
+                .size(12)
+                .color(t.text_secondary),
             text("      Samsung:  About Phone › Software Information › Build Number")
-                .size(11).color(t.text_secondary),
+                .size(11)
+                .color(t.text_secondary),
             text("      Xiaomi:   About Phone › tap MIUI Version 7 times")
-                .size(11).color(t.text_secondary),
+                .size(11)
+                .color(t.text_secondary),
             text("      OnePlus:  About Device › Version › Build Number")
-                .size(11).color(t.text_secondary),
+                .size(11)
+                .color(t.text_secondary),
             Space::with_height(4),
             text("  2.  Settings › Developer Options › enable USB Debugging")
-                .size(12).color(t.text_secondary),
+                .size(12)
+                .color(t.text_secondary),
             Space::with_height(4),
             text("  3.  Plug in USB cable and set USB mode to \"File Transfer\"")
-                .size(12).color(t.text_secondary),
+                .size(12)
+                .color(t.text_secondary),
             text("      Swipe down the notification shade and tap the USB notification.")
-                .size(11).color(t.text_secondary),
+                .size(11)
+                .color(t.text_secondary),
             Space::with_height(4),
             text("  4.  Tap \"Allow\" on the USB Debugging dialog on your phone")
-                .size(12).color(t.text_secondary),
+                .size(12)
+                .color(t.text_secondary),
             text("      Tick \"Always allow from this computer\" to skip this next time.")
-                .size(11).color(t.text_secondary),
+                .size(11)
+                .color(t.text_secondary),
         ]
         .spacing(2)
         .into();
@@ -152,9 +162,10 @@ impl App {
             });
 
         // ── Main card layout ─────────────────────────────────────────────────
-        let card = container(
-            scrollable(
-                column![
+        let card =
+            container(
+                scrollable(
+                    column![
                     text("Setup Guide").size(22).color(t.text),
                     Space::with_height(4),
                     text("ADB gives rusty-adb full read/write access to your device's filesystem.")
@@ -175,14 +186,14 @@ impl App {
                     Space::with_height(8),
                     dev_steps,
                 ]
-                .spacing(0)
-                .width(560)
-                .padding([0, 4]),
+                    .spacing(0)
+                    .width(560)
+                    .padding([0, 4]),
+                )
+                .height(Fill),
             )
-            .height(Fill),
-        )
-        .padding(32)
-        .style(t.secondary_panel());
+            .padding(32)
+            .style(t.secondary_panel());
 
         container(card)
             .width(Fill)

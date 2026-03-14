@@ -30,7 +30,12 @@ impl App {
         if self.adb_status == AdbStatus::NotFound {
             let mut items: Vec<Element<Message>> = vec![self.view_header()];
             items.push(self.view_adb_not_found());
-            items.push(self.status_bar.view(&self.adb_status, None, None, Some(Message::OpenLogViewer)));
+            items.push(self.status_bar.view(
+                &self.adb_status,
+                None,
+                None,
+                Some(Message::OpenLogViewer),
+            ));
             return column(items).into();
         }
 

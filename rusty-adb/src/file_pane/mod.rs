@@ -451,10 +451,7 @@ mod tests {
         );
         pane.begin_rename(0);
         pane.update_rename_input("new_name.txt".to_string());
-        assert_eq!(
-            pane.rename_pending,
-            Some((0, "new_name.txt".to_string()))
-        );
+        assert_eq!(pane.rename_pending, Some((0, "new_name.txt".to_string())));
     }
 
     #[test]

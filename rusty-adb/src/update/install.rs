@@ -1,8 +1,8 @@
 //! ADB install flow handlers: InstallAdb, InstallComplete, InstallFailed,
 //! AdbNotFound, RetryAdbFind, DaemonStartFailed, RestartDaemon, OpenUrl.
-use crate::{App, Message};
 use crate::adb::AdbClient;
 use crate::adb::AdbStatus;
+use crate::{App, Message};
 use iced::Task;
 use std::sync::Arc;
 
@@ -58,18 +58,26 @@ impl App {
                     .stderr(std::process::Stdio::piped())
                     .spawn()
                     .map_err(|e| {
-                        format!(
-                            "brew not found: {e}. Install Homebrew from https://brew.sh"
-                        )
+                        format!("brew not found: {e}. Install Homebrew from https://brew.sh")
                     })?;
 
                 #[cfg(target_os = "windows")]
                 let mut child = tokio::process::Command::new("winget")
-                    .args(["install", "--id", "Google.PlatformTools", "--accept-source-agreements", "--accept-package-agreements"])
+                    .args([
+                        "install",
+                        "--id",
+                        "Google.PlatformTools",
+                        "--accept-source-agreements",
+                        "--accept-package-agreements",
+                    ])
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
                     .spawn()
-                    .map_err(|e| format!("winget not found: {e}. Install App Installer from the Microsoft Store"))?;
+                    .map_err(|e| {
+                        format!(
+                            "winget not found: {e}. Install App Installer from the Microsoft Store"
+                        )
+                    })?;
 
                 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 return Err("Automatic install not supported on this platform. Download from developer.android.com/tools/releases/platform-tools".to_string());
@@ -79,7 +87,9 @@ impl App {
                     Ok(())
                 } else {
                     let code = status.code().unwrap_or(-1);
-                    Err(format!("Package manager exited with code {code}. Check the log above for details."))
+                    Err(format!(
+                        "Package manager exited with code {code}. Check the log above for details."
+                    ))
                 }
             },
             |result| match result {
@@ -128,7 +138,9 @@ impl App {
                     .await
                 {
                     Ok(s) => tracing::debug!(status = %s, "adb kill-server completed"),
-                    Err(e) => tracing::debug!(error = %e, "adb kill-server spawn failed (non-fatal)"),
+                    Err(e) => {
+                        tracing::debug!(error = %e, "adb kill-server spawn failed (non-fatal)")
+                    }
                 }
                 // start-server fresh
                 client.start_server().await.map_err(|e| e.to_string())?;

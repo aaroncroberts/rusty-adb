@@ -214,7 +214,10 @@ mod tests {
             make_entry("apple.txt", 0, "2024-01-01", false),
         ];
         sort_entries(&mut entries, SortField::Name, true);
-        assert_eq!(entries[0].name, "apple.txt", "lowercase 'a' should sort before 'Z'");
+        assert_eq!(
+            entries[0].name, "apple.txt",
+            "lowercase 'a' should sort before 'Z'"
+        );
     }
 
     #[test]

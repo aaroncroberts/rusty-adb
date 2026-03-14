@@ -1,12 +1,12 @@
 //! Transfer handlers: CopyToAndroid, CopyToLocal, TransferProgress,
 //! TransferComplete, TransferCancelled, TransferFailed, CancelTransfer,
 //! and the drag-and-drop FileHovered/FilesHoveredLeft/FileDropped handlers.
-use crate::{App, Message};
 use crate::adb::{TransferDirection, TransferJob, TransferStatus};
+use crate::{App, Message};
 use iced::Task;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 impl App {
     pub(super) fn copy_to_android(&mut self) -> Task<Message> {

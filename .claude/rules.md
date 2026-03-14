@@ -21,15 +21,11 @@ The `scripts/` directory exists so all build/test/run actions are consistent. **
 
 | Task | Use this |
 |------|----------|
-| Run the app (dev loop) | `./scripts/dev.sh` |
-| Run once without watch | `./scripts/dev.sh --no-watch` |
+| Run the app | `./scripts/dev.sh` |
 | Full quality gate | `./scripts/test.sh` |
 | Release build | `./scripts/build.sh` |
 | Debug build | `./scripts/build.sh --debug` |
 | Install binary | `./scripts/install.sh` |
-
-### cargo-watch is required
-`cargo-watch` must be installed (`cargo install cargo-watch`). `dev.sh` uses it automatically. Without it, every code change requires a manual restart.
 
 ---
 
@@ -121,7 +117,7 @@ git push origin aaron/agentic-coder
 ### If Build Fails
 1. Read the error carefully
 2. Fix the Rust compile error
-3. Re-run `cargo build` (or let cargo-watch handle it)
+3. Re-run `cargo build`
 4. DO NOT commit until build succeeds
 
 ### If Tests Fail
@@ -175,4 +171,3 @@ git push origin aaron/agentic-coder   # Push work
 4. **Branch Discipline** — always on `aaron/agentic-coder`
 5. **Authorization Required** — get approval before releases or force-pushes
 6. **Document Changes** — update docs in the same PR as structural changes
-7. **cargo-watch is your friend** — it eliminates the manual kill/rebuild/rerun loop

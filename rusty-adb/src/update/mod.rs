@@ -1,11 +1,11 @@
 //! Message update handlers for `App`.
 use super::{App, Message};
-use std::path::PathBuf;
-use std::sync::Arc;
-use iced::Task;
+use crate::adb::AdbStatus;
 use crate::adb::{AdbDevice, DeviceState};
 use crate::fs::{AndroidContext, PaneState};
-use crate::adb::AdbStatus;
+use iced::Task;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 mod file_ops;
 mod install;
@@ -61,8 +61,7 @@ impl App {
                 match detect_device_transition(self.active_serial.as_deref(), &self.devices) {
                     DeviceTransition::Connected { serial, .. } => {
                         tracing::info!(serial = %serial, "device connected, loading /sdcard");
-                        let client = self.adb_client.clone()
-                            .expect("adb_client set at AdbReady");
+                        let client = self.adb_client.clone().expect("adb_client set at AdbReady");
                         self.active_serial = Some(serial.clone());
                         self.android_ctx = Some(AndroidContext {
                             client,
@@ -114,7 +113,9 @@ impl App {
 
             // ── Local Pane ────────────────────────────────────────────────────
             Message::LocalNavigateTo(path) => self.local_navigate_to(path),
-            Message::LocalEntriesLoaded { path, entries } => self.local_entries_loaded(path, entries),
+            Message::LocalEntriesLoaded { path, entries } => {
+                self.local_entries_loaded(path, entries)
+            }
             Message::LocalLoadError(msg) => self.local_load_error(msg),
             Message::LocalSelectEntry(i) => self.local_select_entry(i),
             Message::LocalToggleHidden => self.local_toggle_hidden(),
@@ -130,7 +131,11 @@ impl App {
             Message::AndroidToggleSize => self.android_toggle_size(),
             Message::AndroidToggleModified => self.android_toggle_modified(),
             Message::AndroidNavigateTo(path) => self.android_navigate_to(path),
-            Message::AndroidEntriesLoaded { path, entries, roots } => self.android_entries_loaded(path, entries, roots),
+            Message::AndroidEntriesLoaded {
+                path,
+                entries,
+                roots,
+            } => self.android_entries_loaded(path, entries, roots),
             Message::AndroidLoadError(msg) => self.android_load_error(msg),
             Message::AndroidSelectEntry(i) => self.android_select_entry(i),
             Message::SpinnerTick => self.spinner_tick(),
@@ -287,7 +292,12 @@ mod tests {
     use super::*;
 
     fn dev(serial: &str, state: DeviceState, model: Option<&str>) -> AdbDevice {
-        AdbDevice { serial: serial.to_string(), state, model: model.map(String::from), product: None }
+        AdbDevice {
+            serial: serial.to_string(),
+            state,
+            model: model.map(String::from),
+            product: None,
+        }
     }
 
     // ── detect_device_transition ──────────────────────────────────────────────
@@ -297,7 +307,10 @@ mod tests {
         let devices = vec![dev("ABC123", DeviceState::Device, Some("Pixel 7"))];
         assert_eq!(
             detect_device_transition(None, &devices),
-            DeviceTransition::Connected { serial: "ABC123".into(), label: "Pixel 7".into() }
+            DeviceTransition::Connected {
+                serial: "ABC123".into(),
+                label: "Pixel 7".into()
+            }
         );
     }
 
@@ -306,7 +319,10 @@ mod tests {
         let devices = vec![dev("emulator-5554", DeviceState::Device, None)];
         assert_eq!(
             detect_device_transition(None, &devices),
-            DeviceTransition::Connected { serial: "emulator-5554".into(), label: "emulator-5554".into() }
+            DeviceTransition::Connected {
+                serial: "emulator-5554".into(),
+                label: "emulator-5554".into()
+            }
         );
     }
 
@@ -329,13 +345,19 @@ mod tests {
 
     #[test]
     fn transition_no_device_before_or_after_is_no_change() {
-        assert_eq!(detect_device_transition(None, &[]), DeviceTransition::NoChange);
+        assert_eq!(
+            detect_device_transition(None, &[]),
+            DeviceTransition::NoChange
+        );
     }
 
     #[test]
     fn transition_unauthorized_only_is_no_change() {
         let devices = vec![dev("ABC123", DeviceState::Unauthorized, None)];
-        assert_eq!(detect_device_transition(None, &devices), DeviceTransition::NoChange);
+        assert_eq!(
+            detect_device_transition(None, &devices),
+            DeviceTransition::NoChange
+        );
     }
 
     // ── derive_status ─────────────────────────────────────────────────────────
@@ -343,7 +365,10 @@ mod tests {
     #[test]
     fn status_authorized_device_uses_model() {
         let devices = vec![dev("S1", DeviceState::Device, Some("Pixel 7"))];
-        assert_eq!(derive_status(&devices), AdbStatus::Connected("Pixel 7".into()));
+        assert_eq!(
+            derive_status(&devices),
+            AdbStatus::Connected("Pixel 7".into())
+        );
     }
 
     #[test]

@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use rusty_adb::adb::{AdbClient, DeviceState};
 use rusty_adb::adb::{run_transfer, TransferDirection, TransferEvent, TransferJob};
+use rusty_adb::adb::{AdbClient, DeviceState};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

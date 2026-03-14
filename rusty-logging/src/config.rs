@@ -172,7 +172,9 @@ impl LoggingConfig {
                     .filename_prefix(&self.file_prefix)
                     .filename_suffix("log")
                     .build(&self.file_directory)
-                    .map_err(|e| LoggingError::ConfigError(format!("Failed to build file appender: {e}")))?;
+                    .map_err(|e| {
+                        LoggingError::ConfigError(format!("Failed to build file appender: {e}"))
+                    })?;
 
                 // Handle all combinations of console and file formats
                 match (self.console_format, self.console_writer, self.file_format) {
@@ -445,7 +447,9 @@ impl LoggingConfig {
                     .filename_prefix(&self.file_prefix)
                     .filename_suffix("log")
                     .build(&self.file_directory)
-                    .map_err(|e| LoggingError::ConfigError(format!("Failed to build file appender: {e}")))?;
+                    .map_err(|e| {
+                        LoggingError::ConfigError(format!("Failed to build file appender: {e}"))
+                    })?;
 
                 // Build file layer based on format
                 match self.file_format {

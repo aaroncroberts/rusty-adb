@@ -196,7 +196,10 @@ pub(crate) async fn do_rename(
     from: std::path::PathBuf,
     to: std::path::PathBuf,
 ) -> Result<(), String> {
-    client.rename(serial, &from, &to).await.map_err(|e| e.to_string())
+    client
+        .rename(serial, &from, &to)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Delete one or more files on the device sequentially.
@@ -208,7 +211,10 @@ pub(crate) async fn do_delete_all(
     paths: Vec<std::path::PathBuf>,
 ) -> Result<(), String> {
     for path in &paths {
-        client.delete(serial, path).await.map_err(|e| e.to_string())?;
+        client
+            .delete(serial, path)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -290,7 +296,11 @@ mod tests {
 
         let calls = mock.calls();
         let delete_calls: Vec<_> = calls.iter().filter(|c| c.contains("delete")).collect();
-        assert_eq!(delete_calls.len(), 2, "expected 2 delete calls, got: {calls:?}");
+        assert_eq!(
+            delete_calls.len(),
+            2,
+            "expected 2 delete calls, got: {calls:?}"
+        );
     }
 
     #[tokio::test]
@@ -306,7 +316,11 @@ mod tests {
         let calls = mock.calls();
         let delete_calls: Vec<_> = calls.iter().filter(|c| c.contains("delete")).collect();
         // Should stop after first failure — only 1 delete call
-        assert_eq!(delete_calls.len(), 1, "should stop at first failure: {calls:?}");
+        assert_eq!(
+            delete_calls.len(),
+            1,
+            "should stop at first failure: {calls:?}"
+        );
     }
 
     #[tokio::test]

@@ -1,9 +1,9 @@
 //! Grid, icon, and column rendering implementations for file browser panes.
 
-use crate::{App, Message};
 use crate::adb::AdbClient;
-use crate::fs::AndroidContext;
 use crate::file_pane::RenameCbs;
+use crate::fs::AndroidContext;
+use crate::{App, Message};
 use iced::widget::{button, column, container, image, row, scrollable, text};
 use iced::{Border, Element, Fill, Theme};
 use std::path::PathBuf;
@@ -70,7 +70,9 @@ impl App {
 
         if visible.is_empty() {
             return container(
-                text("This directory is empty").size(11).color(t.text_secondary),
+                text("This directory is empty")
+                    .size(11)
+                    .color(t.text_secondary),
             )
             .padding([20, 20])
             .width(Fill)
@@ -80,19 +82,31 @@ impl App {
 
         // ── Large preview pane ────────────────────────────────────────────────
         let (_, preview_name, preview_is_dir, _) = visible[gallery_idx].clone();
-        let preview_fg = if preview_is_dir { t.accent } else { t.text_secondary };
+        let preview_fg = if preview_is_dir {
+            t.accent
+        } else {
+            t.text_secondary
+        };
 
-        let ext = preview_name.rsplit('.').next()
+        let ext = preview_name
+            .rsplit('.')
+            .next()
             .map(|e| e.to_lowercase())
             .unwrap_or_default();
-        let is_image = !preview_is_dir && !is_android
-            && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
+        let is_image = !preview_is_dir
+            && !is_android
+            && matches!(
+                ext.as_str(),
+                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+            );
 
         let large_preview: Element<Message> = if is_image {
-            image(image::Handle::from_path(current_path.join(preview_name.as_str())))
-                .width(Fill)
-                .height(Fill)
-                .into()
+            image(image::Handle::from_path(
+                current_path.join(preview_name.as_str()),
+            ))
+            .width(Fill)
+            .height(Fill)
+            .into()
         } else {
             let big_art = if preview_is_dir {
                 "╔═══════════╗\n║           ║\n║     /     ║\n║           ║\n╚═══════════╝"
@@ -134,11 +148,17 @@ impl App {
             } else {
                 name.clone()
             };
-            let ext2 = name.rsplit('.').next()
+            let ext2 = name
+                .rsplit('.')
+                .next()
                 .map(|e| e.to_lowercase())
                 .unwrap_or_default();
-            let is_img = !is_dir && !is_android
-                && matches!(ext2.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
+            let is_img = !is_dir
+                && !is_android
+                && matches!(
+                    ext2.as_str(),
+                    "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+                );
 
             let thumb: Element<Message> = if is_img {
                 image(image::Handle::from_path(current_path.join(name.as_str())))
@@ -146,7 +166,11 @@ impl App {
                     .height(STRIP_TILE_H - 22)
                     .into()
             } else {
-                let art = if is_dir { "┌──┐\n│/ │\n└──┘" } else { "┌──┐\n│──│\n└──┘" };
+                let art = if is_dir {
+                    "┌──┐\n│/ │\n└──┘"
+                } else {
+                    "┌──┐\n│──│\n└──┘"
+                };
                 text(art)
                     .size(9)
                     .font(iced::Font::MONOSPACE)
@@ -175,7 +199,10 @@ impl App {
                 button(
                     column![
                         thumb,
-                        text(short).size(9).font(iced::Font::MONOSPACE).color(name_fg),
+                        text(short)
+                            .size(9)
+                            .font(iced::Font::MONOSPACE)
+                            .color(name_fg),
                     ]
                     .spacing(2)
                     .width(Fill)
@@ -261,7 +288,13 @@ impl App {
                 .enumerate()
                 .filter(|(_, e)| self.android_pane.show_hidden || !e.is_hidden)
                 .map(|(i, e)| {
-                    (i, e.name.clone(), e.is_navigable(), self.android_pane.selected.contains(&i), e.is_hidden)
+                    (
+                        i,
+                        e.name.clone(),
+                        e.is_navigable(),
+                        self.android_pane.selected.contains(&i),
+                        e.is_hidden,
+                    )
                 })
                 .collect()
         } else {
@@ -270,7 +303,15 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| self.local_pane.show_hidden || !e.is_hidden)
-                .map(|(i, e)| (i, e.name.clone(), e.is_navigable(), self.local_pane.selected.contains(&i), e.is_hidden))
+                .map(|(i, e)| {
+                    (
+                        i,
+                        e.name.clone(),
+                        e.is_navigable(),
+                        self.local_pane.selected.contains(&i),
+                        e.is_hidden,
+                    )
+                })
                 .collect()
         };
 
@@ -284,18 +325,29 @@ impl App {
 
         if visible.is_empty() {
             col = col.push(
-                container(text("This directory is empty").size(11).color(t.text_secondary))
-                    .padding([8, 12]),
+                container(
+                    text("This directory is empty")
+                        .size(11)
+                        .color(t.text_secondary),
+                )
+                .padding([8, 12]),
             );
         } else {
             for chunk in visible.chunks(COLS) {
                 let mut tile_row: Vec<Element<Message>> = Vec::new();
                 for &(orig_idx, ref name, can_navigate, is_selected, is_hidden) in chunk {
-                    let bg: Option<iced::Background> =
-                        if is_selected { Some(t.accent.scale_alpha(0.20).into()) } else { None };
+                    let bg: Option<iced::Background> = if is_selected {
+                        Some(t.accent.scale_alpha(0.20).into())
+                    } else {
+                        None
+                    };
                     let border_color = if is_selected { t.accent } else { t.border };
                     let border_width = if is_selected { 2.0 } else { 1.0 };
-                    let icon_fg = if can_navigate { t.accent } else { t.text_secondary };
+                    let icon_fg = if can_navigate {
+                        t.accent
+                    } else {
+                        t.text_secondary
+                    };
                     let name_fg = if is_hidden { t.text_secondary } else { t.text };
 
                     let display_name = if name.len() > 16 {
@@ -316,11 +368,17 @@ impl App {
                     };
                     let press_msg = if can_navigate { nav_msg } else { sel_msg };
 
-                    let ext = name.rsplit('.').next()
+                    let ext = name
+                        .rsplit('.')
+                        .next()
                         .map(|e| e.to_lowercase())
                         .unwrap_or_default();
-                    let is_image = !can_navigate && !is_android
-                        && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp");
+                    let is_image = !can_navigate
+                        && !is_android
+                        && matches!(
+                            ext.as_str(),
+                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+                        );
 
                     // 3-line icon art — compact enough to leave room for the filename
                     let icon_art: Element<Message> = if is_image {
@@ -329,7 +387,11 @@ impl App {
                             .height(44)
                             .into()
                     } else {
-                        let art = if can_navigate { "┌───┐\n│ / │\n└───┘" } else { "┌───┐\n│───│\n└───┘" };
+                        let art = if can_navigate {
+                            "┌───┐\n│ / │\n└───┘"
+                        } else {
+                            "┌───┐\n│───│\n└───┘"
+                        };
                         text(art)
                             .size(13)
                             .font(iced::Font::MONOSPACE)
@@ -369,7 +431,9 @@ impl App {
                     tile_row.push(iced::widget::Space::new(TILE_W, TILE_H).into());
                 }
                 col = col.push(
-                    iced::widget::Row::from_vec(tile_row).spacing(10).padding([0, 2]),
+                    iced::widget::Row::from_vec(tile_row)
+                        .spacing(10)
+                        .padding([0, 2]),
                 );
             }
         }
@@ -441,16 +505,16 @@ impl App {
             );
         }
 
-        let ancestor_panel = container(
-            scrollable(ancestor_col.width(Fill)).height(Fill),
-        )
-        .width(180)
-        .height(Fill)
-        .style(t.secondary_panel());
+        let ancestor_panel = container(scrollable(ancestor_col.width(Fill)).height(Fill))
+            .width(180)
+            .height(Fill)
+            .style(t.secondary_panel());
 
         // ── Right: current directory entry list ───────────────────────────────
         let default_ctx = AndroidContext {
-            client: AdbClient { adb_path: PathBuf::new() },
+            client: AdbClient {
+                adb_path: PathBuf::new(),
+            },
             serial: String::new(),
             storage_roots: Vec::new(),
         };
