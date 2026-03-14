@@ -58,9 +58,31 @@ pub fn expand() -> String {
     Cod::ScreenFull.to_string()
 }
 
-/// Collapse-pane glyph (expanded → restore split).
-pub fn collapse() -> String {
-    Cod::ScreenNormal.to_string()
+/// Split / restore-equal glyph (two panels side-by-side).
+pub fn split() -> String {
+    Cod::SplitHorizontal.to_string()
+}
+
+// ── Column / visibility toggle icons ─────────────────────────────────────────
+
+/// Eye — "show hidden files" indicator (active state).
+pub fn eye() -> String {
+    Cod::Eye.to_string()
+}
+
+/// Calendar — "Modified date" column indicator.
+pub fn calendar() -> String {
+    Cod::Calendar.to_string()
+}
+
+/// Layout — general "show/columns" button icon.
+pub fn layout() -> String {
+    Cod::Layout.to_string()
+}
+
+/// Filter icon — general columns/visibility menu trigger.
+pub fn filter() -> String {
+    Cod::Filter.to_string()
 }
 
 // ── Action / toolbar icons ────────────────────────────────────────────────────
@@ -129,7 +151,11 @@ mod tests {
         assert!(!file().is_empty());
         assert!(!symlink().is_empty());
         assert!(!expand().is_empty());
-        assert!(!collapse().is_empty());
+        assert!(!split().is_empty());
+        assert!(!eye().is_empty());
+        assert!(!calendar().is_empty());
+        assert!(!layout().is_empty());
+        assert!(!filter().is_empty());
         assert!(!settings().is_empty());
         assert!(!refresh().is_empty());
         assert!(!trash().is_empty());

@@ -112,7 +112,7 @@ impl App {
             }
         };
 
-        // ── "Show" dropdown ─────────────────────────────────────────────────
+        // ── Column / visibility icon-toggle buttons ──────────────────────────
         // Read column/hidden visibility from the appropriate pane.
         let (show_type, show_size, show_modified) = if is_android {
             (
@@ -128,55 +128,44 @@ impl App {
             )
         };
 
-        // Build item labels — checkmark prefix indicates enabled state.
-        let type_item: &'static str = if show_type { "✓ Type" } else { "  Type" };
-        let size_item: &'static str = if show_size { "✓ Size" } else { "  Size" };
-        let modified_item: &'static str = if show_modified {
-            "✓ Modified"
+        // Small icon-toggle button: accent when active, secondary when off.
+        let toggle_btn =
+            move |glyph: String, label: &'static str, active: bool, msg: Message| {
+                let color = if active { t.accent } else { t.text_secondary };
+                tooltip(
+                    button(text(glyph).font(icons::font()).size(13).color(color))
+                        .style(t.transparent_button())
+                        .padding([2, 4])
+                        .on_press(msg),
+                    text(label).size(11),
+                    TipPos::Bottom,
+                )
+            };
+
+        let (type_msg, size_msg, modified_msg, hidden_msg) = if is_android {
+            (
+                Message::AndroidToggleType,
+                Message::AndroidToggleSize,
+                Message::AndroidToggleModified,
+                Message::AndroidToggleHidden,
+            )
         } else {
-            "  Modified"
-        };
-        let hidden_item: &'static str = if show_hidden {
-            "✓ Hidden files"
-        } else {
-            "  Hidden files"
+            (
+                Message::LocalToggleType,
+                Message::LocalToggleSize,
+                Message::LocalToggleModified,
+                Message::LocalToggleHidden,
+            )
         };
 
-        let show_items: Vec<&'static str> = vec![type_item, size_item, modified_item, hidden_item];
-
-        let show_picker = pick_list(show_items, None::<&str>, move |picked: &str| match picked {
-            s if s.contains("Type") => {
-                if is_android {
-                    Message::AndroidToggleType
-                } else {
-                    Message::LocalToggleType
-                }
-            }
-            s if s.contains("Size") => {
-                if is_android {
-                    Message::AndroidToggleSize
-                } else {
-                    Message::LocalToggleSize
-                }
-            }
-            s if s.contains("Modified") => {
-                if is_android {
-                    Message::AndroidToggleModified
-                } else {
-                    Message::LocalToggleModified
-                }
-            }
-            _ => {
-                if is_android {
-                    Message::AndroidToggleHidden
-                } else {
-                    Message::LocalToggleHidden
-                }
-            }
-        })
-        .placeholder("Show")
-        .text_size(11)
-        .padding([2, 8]);
+        let show_toggles = row![
+            toggle_btn(icons::filter(), "Type column", show_type, type_msg),
+            toggle_btn(icons::layout(), "Size column", show_size, size_msg),
+            toggle_btn(icons::calendar(), "Modified column", show_modified, modified_msg),
+            toggle_btn(icons::eye(), "Hidden files", show_hidden, hidden_msg),
+        ]
+        .spacing(0)
+        .align_y(iced::Alignment::Center);
 
         // ── file commands ───────────────────────────────────────────────────
         let mut cmd_items: Vec<Element<Message>> = Vec::new();
@@ -231,10 +220,8 @@ impl App {
             text("View").size(11).color(t.text_secondary),
             iced::widget::Space::new(6, 1),
             view_picker,
-            iced::widget::Space::new(8, 1),
-            text("Show").size(11).color(t.text_secondary),
-            iced::widget::Space::new(6, 1),
-            show_picker,
+            iced::widget::Space::new(4, 1),
+            show_toggles,
             iced::widget::horizontal_space(),
             cmd_row,
         ]
@@ -344,7 +331,7 @@ impl App {
         } else {
             let (icon, tip, msg) = if this_is_expanded {
                 (
-                    icons::collapse(),
+                    icons::split(),
                     "Restore equal split",
                     Message::CollapsePanes,
                 )

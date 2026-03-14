@@ -14,6 +14,7 @@ use crate::adb::AdbClient;
 use crate::adb::AdbStatus;
 use crate::file_pane::RenameCbs;
 use crate::fs::AndroidContext;
+use crate::icons;
 use crate::ViewMode;
 use crate::{App, Message, PaneLayout};
 use iced::widget::tooltip::Position as TipPos;
@@ -118,10 +119,10 @@ impl App {
             // >> = expand this pane, >< = restore equal split
             let expand_btn = tooltip(
                 button(
-                    text(">>")
-                        .size(11)
+                    text(icons::expand())
+                        .size(14)
                         .color(t.accent)
-                        .font(iced::Font::MONOSPACE),
+                        .font(icons::font()),
                 )
                 .style(t.transparent_button())
                 .padding([4, 4])
@@ -131,10 +132,10 @@ impl App {
             );
             let restore_btn = tooltip(
                 button(
-                    text("><")
-                        .size(11)
+                    text(icons::split())
+                        .size(14)
                         .color(t.text_secondary)
-                        .font(iced::Font::MONOSPACE),
+                        .font(icons::font()),
                 )
                 .style(t.transparent_button())
                 .padding([4, 4])
@@ -150,7 +151,7 @@ impl App {
                 |col, ch| {
                     col.push(
                         text(ch.to_string())
-                            .size(13)
+                            .size(11)
                             .color(t.text_secondary)
                             .font(iced::Font::MONOSPACE),
                     )
