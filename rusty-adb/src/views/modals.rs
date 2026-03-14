@@ -137,24 +137,9 @@ impl App {
         .text_size(11)
         .padding([2, 8]);
 
-        // ── Filter log lines by level ──────────────────────────────────────
-        let level = self.log_viewer_level;
-        let filtered_lines: String = self
-            .log_viewer_content
-            .lines()
-            .filter(|l| level.matches(l))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let log_display = if filtered_lines.is_empty() {
-            "(No lines match the selected level filter)".to_string()
-        } else {
-            filtered_lines
-        };
-
         let log_scroll = scrollable(
             container(
-                text(log_display)
+                text(self.log_viewer_display.clone())
                     .size(11)
                     .font(iced::Font::MONOSPACE)
                     .color(t.text),

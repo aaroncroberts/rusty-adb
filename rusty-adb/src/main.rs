@@ -15,11 +15,11 @@ mod adb;
 mod config;
 mod file_pane;
 mod fs;
+#[cfg(test)]
+mod tests;
 mod theme;
 mod update;
 mod views;
-#[cfg(test)]
-mod tests;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -28,15 +28,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adb::{AdbClient, AdbDevice};
-use fs::{AndroidContext, AndroidFs, DirEntry, FileSystem, LocalFs, PaneState, SortField};
-use file_pane::FilePane;
-use theme::ThemeColors;
 use adb::{AdbStatus, TransferEvent, TransferJob, TransferStatus};
+use file_pane::FilePane;
+use fs::{AndroidContext, AndroidFs, DirEntry, FileSystem, LocalFs, PaneState, SortField};
+use theme::ThemeColors;
 use views::status_bar::StatusBar;
 
 use iced::keyboard::{self, key::Named};
 use iced::{Subscription, Task, Theme};
-
 
 // ─── View Mode ─────────────────────────────────────────────────────────────────
 
@@ -72,9 +71,9 @@ impl ViewMode {
 impl std::fmt::Display for ViewMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ViewMode::Icon    => f.write_str("As Icons"),
-            ViewMode::List    => f.write_str("As List"),
-            ViewMode::Grid    => f.write_str("As Gallery"),
+            ViewMode::Icon => f.write_str("As Icons"),
+            ViewMode::List => f.write_str("As List"),
+            ViewMode::Grid => f.write_str("As Gallery"),
             ViewMode::Details => f.write_str("As Columns"),
         }
     }
@@ -108,8 +107,13 @@ enum LogLevel {
 }
 
 impl LogLevel {
-    const ALL: &'static [LogLevel] =
-        &[LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error];
+    const ALL: &'static [LogLevel] = &[
+        LogLevel::Trace,
+        LogLevel::Debug,
+        LogLevel::Info,
+        LogLevel::Warn,
+        LogLevel::Error,
+    ];
 
     /// Returns `true` if a raw log line's level is at or above `self`.
     fn matches(self, line: &str) -> bool {
@@ -138,8 +142,8 @@ impl std::fmt::Display for LogLevel {
         match self {
             LogLevel::Trace => f.write_str("TRACE+"),
             LogLevel::Debug => f.write_str("DEBUG+"),
-            LogLevel::Info  => f.write_str("INFO+"),
-            LogLevel::Warn  => f.write_str("WARN+"),
+            LogLevel::Info => f.write_str("INFO+"),
+            LogLevel::Warn => f.write_str("WARN+"),
             LogLevel::Error => f.write_str("ERROR"),
         }
     }
@@ -173,7 +177,10 @@ enum Message {
 
     // ── Local Pane ────────────────────────────────────────────────────────────
     LocalNavigateTo(PathBuf),
-    LocalEntriesLoaded { path: PathBuf, entries: Vec<DirEntry> },
+    LocalEntriesLoaded {
+        path: PathBuf,
+        entries: Vec<DirEntry>,
+    },
     LocalLoadError(String),
     LocalSelectEntry(usize),
     LocalToggleHidden,
@@ -454,6 +461,8 @@ struct App {
     log_viewer_selected: Option<std::path::PathBuf>,
     /// Raw content of the currently selected log file
     log_viewer_content: String,
+    /// Pre-filtered display string — recomputed only when content or level changes
+    log_viewer_display: String,
     /// Minimum level filter applied to displayed lines
     log_viewer_level: LogLevel,
 }
@@ -495,6 +504,7 @@ impl Default for App {
             log_viewer_files: Vec::new(),
             log_viewer_selected: None,
             log_viewer_content: String::new(),
+            log_viewer_display: String::new(),
             log_viewer_level: LogLevel::Info,
             config: config::AppConfig::default(),
             config_path: PathBuf::new(),
@@ -614,14 +624,24 @@ pub fn main() -> iced::Result {
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let load_path = home_dir.clone();
         let local_task = Task::perform(
-            async move { LocalFs::list_dir(&(), &load_path).await.map_err(|e| e.to_string()) },
+            async move {
+                LocalFs::list_dir(&(), &load_path)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
             move |result| match result {
-                Ok(entries) => Message::LocalEntriesLoaded { path: home_dir.clone(), entries },
+                Ok(entries) => Message::LocalEntriesLoaded {
+                    path: home_dir.clone(),
+                    entries,
+                },
                 Err(e) => Message::LocalLoadError(e),
             },
         );
 
-        (App::with_config(cfg, config_path), Task::batch([adb_task, local_task]))
+        (
+            App::with_config(cfg, config_path),
+            Task::batch([adb_task, local_task]),
+        )
     })
 }
 

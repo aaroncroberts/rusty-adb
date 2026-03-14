@@ -98,9 +98,9 @@ impl App {
                 std::fs::write(&path, yaml).map_err(|e| e.to_string())
             },
             |result| match result {
-                Ok(()) => Message::ShowToast(
-                    "Settings saved — changes apply on next launch".to_string(),
-                ),
+                Ok(()) => {
+                    Message::ShowToast("Settings saved — changes apply on next launch".to_string())
+                }
                 Err(e) => Message::ShowError(format!("Failed to save settings: {e}")),
             },
         )
@@ -144,9 +144,7 @@ impl App {
                     .flatten()
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
-                    .filter(|p| {
-                        p.extension().and_then(|e| e.to_str()) == Some("log")
-                    })
+                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("log"))
                     .collect();
                 // Sort newest-first by filename (date is embedded: rusty-adb.YYYY-MM-DD.log)
                 files.sort_by(|a, b| b.cmp(a));
@@ -168,6 +166,7 @@ impl App {
             self.update(Message::LogViewerSelectFile(first))
         } else {
             self.log_viewer_content = "(No log files found)".to_string();
+            self.log_viewer_display = self.log_viewer_content.clone();
             Task::none()
         }
     }
@@ -176,8 +175,25 @@ impl App {
         self.log_viewer_selected = Some(path.clone());
         Task::perform(
             async move {
-                std::fs::read_to_string(&path)
-                    .unwrap_or_else(|e| format!("(Failed to read log: {e})"))
+                // spawn_blocking so we don't stall the async executor on large files
+                tokio::task::spawn_blocking(move || {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            // Cap to the last 5 000 lines — log files can be huge
+                            const MAX_LINES: usize = 5_000;
+                            let lines: Vec<&str> = content.lines().collect();
+                            if lines.len() > MAX_LINES {
+                                let truncated = lines[lines.len() - MAX_LINES..].join("\n");
+                                format!("(showing last {MAX_LINES} lines)\n{truncated}")
+                            } else {
+                                content
+                            }
+                        }
+                        Err(e) => format!("(Failed to read log: {e})"),
+                    }
+                })
+                .await
+                .unwrap_or_else(|e| format!("(Task failed: {e})"))
             },
             Message::LogViewerFileLoaded,
         )
@@ -185,11 +201,13 @@ impl App {
 
     pub(super) fn log_viewer_file_loaded(&mut self, content: String) -> Task<Message> {
         self.log_viewer_content = content;
+        self.log_viewer_display = filter_log(&self.log_viewer_content, self.log_viewer_level);
         Task::none()
     }
 
     pub(super) fn log_viewer_set_level(&mut self, level: super::super::LogLevel) -> Task<Message> {
         self.log_viewer_level = level;
+        self.log_viewer_display = filter_log(&self.log_viewer_content, self.log_viewer_level);
         Task::none()
     }
 
@@ -240,5 +258,19 @@ impl App {
             return self.update(Message::ClosePreview);
         }
         self.update(Message::AndroidRenameCancel)
+    }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Filter `content` to lines matching `level`, returning the display string.
+///
+/// Called only when content or level changes — not on every render frame.
+fn filter_log(content: &str, level: super::super::LogLevel) -> String {
+    let filtered: Vec<&str> = content.lines().filter(|l| level.matches(l)).collect();
+    if filtered.is_empty() {
+        "(No lines match the selected level filter)".to_string()
+    } else {
+        filtered.join("\n")
     }
 }
