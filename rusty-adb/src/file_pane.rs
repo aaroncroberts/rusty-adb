@@ -22,7 +22,7 @@
 use std::path::PathBuf;
 
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
-use iced::{Border, Color, Element, Fill};
+use iced::{Border, Element, Fill};
 
 use crate::filesystem::{DirEntry, FileSystem, PaneState, SortField};
 use crate::local_fs::sort_entries;

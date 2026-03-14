@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::adb::{AdbClient, AndroidEntry};
-use crate::filesystem::{DirEntry, FsError, FileSystem, format_unix_date};
+use crate::filesystem::{DirEntry, FsError, FileSystem};
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -25,8 +25,6 @@ pub struct AndroidContext {
     /// Storage roots discovered on the device (e.g. `/sdcard`, `/storage/…`).
     /// Populated after the first successful `list_dir` call.
     pub storage_roots: Vec<PathBuf>,
-    /// Human-readable device label shown in the pane header (e.g. `"Pixel 7"`).
-    pub device_label: String,
 }
 
 // ─── Backend Struct ───────────────────────────────────────────────────────────
@@ -46,31 +44,10 @@ impl FileSystem for AndroidFs {
             .map_err(|e| FsError(e.to_string()))
     }
 
-    async fn rename(ctx: &AndroidContext, from: &Path, to: &Path) -> Result<(), FsError> {
-        ctx.client
-            .rename(&ctx.serial, from, to)
-            .await
-            .map_err(|e| FsError(e.to_string()))
-    }
-
-    async fn delete(ctx: &AndroidContext, path: &Path) -> Result<(), FsError> {
-        ctx.client
-            .delete(&ctx.serial, path)
-            .await
-            .map_err(|e| FsError(e.to_string()))
-    }
-
     fn is_nav_root(ctx: &AndroidContext, path: &Path) -> bool {
         path == Path::new("/") || ctx.storage_roots.contains(&path.to_path_buf())
     }
 
-    fn pane_label(ctx: &AndroidContext) -> String {
-        if ctx.device_label.is_empty() {
-            "Android Device".to_string()
-        } else {
-            ctx.device_label.clone()
-        }
-    }
 }
 
 // ─── Entry Conversion ─────────────────────────────────────────────────────────
@@ -89,26 +66,4 @@ pub fn android_entry_to_dir_entry(e: AndroidEntry) -> DirEntry {
         is_symlink: e.is_symlink,
         is_hidden: e.is_hidden,
     }
-}
-
-/// Convert a [`DirEntry`] back to a minimal [`AndroidEntry`] for callers that
-/// still need the old type (e.g. file preview). Remove once those callers
-/// are migrated to use [`DirEntry`] directly.
-pub fn dir_entry_to_android_entry(e: &DirEntry) -> AndroidEntry {
-    AndroidEntry {
-        name: e.name.clone(),
-        path: e.path.clone(),
-        size: e.size,
-        modified: e.modified_display.clone(),
-        is_dir: e.is_dir,
-        is_symlink: e.is_symlink,
-        is_hidden: e.is_hidden,
-    }
-}
-
-// suppress unused warning — format_unix_date is used transitively; keep the
-// import so the module is self-contained once callers are wired up.
-#[allow(dead_code)]
-fn _use_format_unix_date(secs: u64) -> String {
-    format_unix_date(secs)
 }

@@ -26,34 +26,6 @@ pub struct AndroidEntry {
     pub is_hidden: bool,
 }
 
-impl AndroidEntry {
-    /// Human-readable file size; directories always show "--".
-    pub fn size_display(&self) -> String {
-        if self.is_dir {
-            "--".to_string()
-        } else {
-            format_size(self.size)
-        }
-    }
-}
-
-// ─── Size formatting ───────────────────────────────────────────────────────────
-
-pub(crate) fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1_024;
-    const MB: u64 = 1_024 * KB;
-    const GB: u64 = 1_024 * MB;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.0} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 // ─── Parser ────────────────────────────────────────────────────────────────────
 
 /// Parse the output of `adb shell ls -la <dir>` (Android Toybox format).
@@ -197,7 +169,6 @@ lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulate
         let f = entries.iter().find(|e| e.name == "notes.txt").unwrap();
         assert!(!f.is_dir);
         assert_eq!(f.size, 1234);
-        assert_eq!(f.size_display(), "1 KB");
     }
 
     #[test]
@@ -312,40 +283,4 @@ lrwxrwxrwx  1 root   sdcard_rw   21 2024-01-01 00:00 sdcard0 -> /storage/emulate
         assert_eq!(entries[0].path, std::path::PathBuf::from("/sdcard/DCIM"));
     }
 
-    // ── Size formatting ───────────────────────────────────────────────────────
-
-    #[test]
-    fn format_size_bytes() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(999), "999 B");
-    }
-
-    #[test]
-    fn format_size_kb() {
-        assert_eq!(format_size(2048), "2 KB");
-    }
-
-    #[test]
-    fn format_size_mb() {
-        assert_eq!(format_size(5 * 1024 * 1024), "5.0 MB");
-    }
-
-    #[test]
-    fn format_size_gb() {
-        assert_eq!(format_size(2 * 1024 * 1024 * 1024), "2.0 GB");
-    }
-
-    #[test]
-    fn android_entry_dir_size_display() {
-        let e = AndroidEntry {
-            name: "DCIM".into(),
-            path: PathBuf::from("/sdcard/DCIM"),
-            size: 4096,
-            modified: "2024-01-10".into(),
-            is_dir: true,
-            is_symlink: false,
-            is_hidden: false,
-        };
-        assert_eq!(e.size_display(), "--");
-    }
 }

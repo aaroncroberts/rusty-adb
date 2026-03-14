@@ -69,7 +69,7 @@ impl App {
                 tracing::debug!(count = self.devices.len(), "devices refreshed");
 
                 match detect_device_transition(self.active_serial.as_deref(), &self.devices) {
-                    DeviceTransition::Connected { serial, label } => {
+                    DeviceTransition::Connected { serial, .. } => {
                         tracing::info!(serial = %serial, "device connected, loading /sdcard");
                         let client = self.adb_client.clone()
                             .expect("adb_client set at AdbReady");
@@ -78,7 +78,6 @@ impl App {
                             client,
                             serial: serial.clone(),
                             storage_roots: Vec::new(),
-                            device_label: label,
                         });
                         self.android_pane.state = PaneState::Loading;
                         self.update(Message::AndroidNavigateTo(PathBuf::from("/sdcard")))

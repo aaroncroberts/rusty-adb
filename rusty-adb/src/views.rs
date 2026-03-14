@@ -1411,7 +1411,6 @@ impl App {
             client: AdbClient { adb_path: PathBuf::new() },
             serial: String::new(),
             storage_roots: Vec::new(),
-            device_label: String::new(),
         };
         let android_ctx_ref = self.android_ctx.as_ref().unwrap_or(&default_android_ctx);
 
@@ -1553,7 +1552,6 @@ impl App {
             client: AdbClient { adb_path: PathBuf::new() },
             serial: String::new(),
             storage_roots: Vec::new(),
-            device_label: String::new(),
         };
         let entry_list: Element<Message> = if is_android {
             let ctx = self.android_ctx.as_ref().unwrap_or(&default_ctx);

@@ -128,25 +128,9 @@ pub trait FileSystem: Clone + std::fmt::Debug + Send + 'static {
         path: &Path,
     ) -> impl std::future::Future<Output = Result<Vec<DirEntry>, FsError>> + Send;
 
-    /// Rename `from` to `to` on the same filesystem.
-    fn rename(
-        ctx: &Self::Context,
-        from: &Path,
-        to: &Path,
-    ) -> impl std::future::Future<Output = Result<(), FsError>> + Send;
-
-    /// Delete `path` recursively.
-    fn delete(
-        ctx: &Self::Context,
-        path: &Path,
-    ) -> impl std::future::Future<Output = Result<(), FsError>> + Send;
-
     /// Returns `true` if `path` is a navigation root where the `".."` button
     /// should be hidden. Always `false` for the local filesystem.
     fn is_nav_root(ctx: &Self::Context, path: &Path) -> bool;
-
-    /// Display label for the pane header (e.g. `"Local Files"` or device model).
-    fn pane_label(ctx: &Self::Context) -> String;
 }
 
 // ─── Error Type ───────────────────────────────────────────────────────────────

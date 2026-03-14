@@ -25,27 +25,10 @@ impl FileSystem for LocalFs {
             .map_err(|e| FsError(e.to_string()))?
     }
 
-    async fn rename(_ctx: &(), from: &Path, to: &Path) -> Result<(), FsError> {
-        std::fs::rename(from, to).map_err(|e| FsError(e.to_string()))
-    }
-
-    async fn delete(_ctx: &(), path: &Path) -> Result<(), FsError> {
-        if path.is_dir() {
-            std::fs::remove_dir_all(path)
-        } else {
-            std::fs::remove_file(path)
-        }
-        .map_err(|e| FsError(e.to_string()))
-    }
-
     /// The local filesystem has no navigation root — the user can always
     /// navigate up to `/` (or the drive root on Windows).
     fn is_nav_root(_ctx: &(), _path: &Path) -> bool {
         false
-    }
-
-    fn pane_label(_ctx: &()) -> String {
-        "Local Files".to_string()
     }
 }
 
