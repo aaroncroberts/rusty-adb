@@ -8,13 +8,14 @@ mod modals;
 mod pane_controls;
 mod rendering;
 mod setup;
+pub mod status_bar;
 
 use crate::{App, Message, TOOLBAR_HEIGHT};
 use std::path::PathBuf;
 use crate::adb::AdbClient;
 use crate::fs::AndroidContext;
 use crate::file_pane::{view_breadcrumb, RenameCbs};
-use crate::status_bar::AdbStatus;
+use crate::adb::AdbStatus;
 use crate::ViewMode;
 use iced::widget::{
     button, column, container, row, stack, text, vertical_rule,

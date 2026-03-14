@@ -2,8 +2,7 @@
 //! TransferComplete, TransferCancelled, TransferFailed, CancelTransfer,
 //! and the drag-and-drop FileHovered/FilesHoveredLeft/FileDropped handlers.
 use crate::{App, Message};
-use crate::status_bar::TransferStatus;
-use crate::adb::{TransferDirection, TransferJob};
+use crate::adb::{TransferDirection, TransferJob, TransferStatus};
 use iced::Task;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

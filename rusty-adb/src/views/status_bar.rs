@@ -1,9 +1,6 @@
-//! Status bar component for rusty-adb
-//!
-//! Renders a horizontal bar at the bottom of the window showing:
-//! - ADB connection state (when idle)
-//! - File transfer progress bar + speed (when a transfer is active)
+//! Status bar widget — renders ADB connection state and transfer progress.
 
+use crate::adb::{AdbStatus, TransferStatus};
 use crate::theme::ThemeColors;
 use iced::widget::{button, container, progress_bar, row, text};
 use iced::{Border, Element, Fill};
@@ -11,96 +8,9 @@ use iced::{Border, Element, Fill};
 /// Height of the status bar in pixels
 pub const STATUS_BAR_HEIGHT: f32 = 30.0;
 
-/// ADB device connection status
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum AdbStatus {
-    /// ADB binary not found on this system — install screen is shown
-    NotFound,
-    /// No device connected
-    #[default]
-    Disconnected,
-    /// Device found but user hasn't authorized USB debugging yet
-    Unauthorized,
-    /// ADB daemon is starting / device handshake in progress (reserved for future use)
-    #[allow(dead_code)]
-    Connecting(String),
-    /// Device connected and authorized — shows device model
-    Connected(String),
-    /// An error occurred (message included)
-    Error(String),
-}
-
-impl AdbStatus {
-    /// Human-readable status text shown in the status bar
-    pub fn text(&self) -> String {
-        match self {
-            AdbStatus::NotFound => "ADB not installed — follow the setup guide".to_string(),
-            AdbStatus::Disconnected => "No device connected".to_string(),
-            AdbStatus::Unauthorized => {
-                "Device found — check your phone screen and tap Allow".to_string()
-            }
-            AdbStatus::Connecting(name) => format!("Connecting to {}…", name),
-            AdbStatus::Connected(name) => format!("Connected: {}", name),
-            AdbStatus::Error(msg) => format!("Error: {}", msg),
-        }
-    }
-}
-
-// ─── Transfer status ───────────────────────────────────────────────────────────
-
-/// Live transfer state shown in the status bar during an active copy
-#[derive(Debug, Clone)]
-pub struct TransferStatus {
-    /// Display name of the file being transferred
-    pub filename: String,
-    /// Progress 0–100
-    pub percent: u8,
-    /// Human-readable speed e.g. "12.3 MB/s" (empty until adb reports it)
-    pub speed_display: String,
-    /// 1-based index of the current job in the queue
-    pub job_index: usize,
-    /// Total jobs in the queue
-    pub job_total: usize,
-}
-
-// ─── Tests ─────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn text_disconnected() {
-        assert_eq!(AdbStatus::Disconnected.text(), "No device connected");
-    }
-
-    #[test]
-    fn text_unauthorized() {
-        assert!(AdbStatus::Unauthorized.text().contains("Allow"));
-    }
-
-    #[test]
-    fn text_connecting() {
-        let s = AdbStatus::Connecting("Pixel 7".to_string()).text();
-        assert!(s.contains("Pixel 7"), "expected device name in: {}", s);
-    }
-
-    #[test]
-    fn text_connected() {
-        let s = AdbStatus::Connected("Pixel 7".to_string()).text();
-        assert!(s.contains("Pixel 7") && s.contains("Connected"));
-    }
-
-    #[test]
-    fn text_error() {
-        let s = AdbStatus::Error("timeout".to_string()).text();
-        assert!(s.contains("Error") && s.contains("timeout"));
-    }
-}
-
-// ─── Widget ────────────────────────────────────────────────────────────────────
-
-/// Status bar rendered at the bottom of the application window
+/// Status bar rendered at the bottom of the application window.
+///
+/// Delegates all state to its callers — owns only the theme needed for styling.
 #[derive(Debug, Clone)]
 pub struct StatusBar {
     theme: ThemeColors,

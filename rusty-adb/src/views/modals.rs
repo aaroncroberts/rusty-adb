@@ -1,7 +1,7 @@
 //! Modal overlay views: preview, log viewer, about, and settings.
 
 use crate::{App, LogLevel, Message, PreviewContent};
-use crate::status_bar::AdbStatus;
+use crate::adb::AdbStatus;
 use iced::widget::{
     button, column, container, image, pick_list, row, scrollable, text, toggler, Row,
 };

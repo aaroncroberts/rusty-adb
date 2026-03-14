@@ -2,7 +2,7 @@
 //! AdbNotFound, RetryAdbFind, DaemonStartFailed, RestartDaemon, OpenUrl.
 use crate::{App, Message};
 use crate::adb::AdbClient;
-use crate::status_bar::AdbStatus;
+use crate::adb::AdbStatus;
 use iced::Task;
 use std::sync::Arc;
 

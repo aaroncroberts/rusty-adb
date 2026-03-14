@@ -66,6 +66,27 @@ pub enum TransferEvent {
     Failed(String),
 }
 
+// ─── Transfer Status ───────────────────────────────────────────────────────────
+
+/// Live transfer state used by the UI during an active copy operation.
+///
+/// Constructed in `update/transfer.rs` from incoming [`TransferEvent`]s and
+/// stored on `App` so the status bar view can render progress without
+/// coupling to the event stream directly.
+#[derive(Debug, Clone)]
+pub struct TransferStatus {
+    /// Display name of the file being transferred
+    pub filename: String,
+    /// Progress 0–100
+    pub percent: u8,
+    /// Human-readable speed e.g. "12.3 MB/s" (empty until adb reports it)
+    pub speed_display: String,
+    /// 1-based index of the current job in the queue
+    pub job_index: usize,
+    /// Total jobs in the queue
+    pub job_total: usize,
+}
+
 // ─── Parsers ───────────────────────────────────────────────────────────────────
 
 /// Parse a progress line from `adb push/pull --progress` stderr.

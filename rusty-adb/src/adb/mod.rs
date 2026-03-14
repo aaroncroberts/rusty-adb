@@ -17,13 +17,54 @@ pub mod parser;
 pub mod transfer;
 
 pub use parser::AndroidEntry;
-pub use transfer::{run_transfer, TransferDirection, TransferEvent, TransferJob};
+pub use transfer::{run_transfer, TransferDirection, TransferEvent, TransferJob, TransferStatus};
 
 use std::path::PathBuf;
 use std::str;
 
 use anyhow::{Context, Result};
 use tokio::process::Command;
+
+// ─── App-level ADB Status ─────────────────────────────────────────────────────
+
+/// Application-level ADB connection state, derived from the device list.
+///
+/// This is the high-level state shown in the status bar and used throughout
+/// the app to gate UI — distinct from [`DeviceState`] which describes a single
+/// raw `adb devices` entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AdbStatus {
+    /// ADB binary not found on this system — install screen is shown
+    NotFound,
+    /// No device connected
+    #[default]
+    Disconnected,
+    /// Device found but the user hasn't tapped "Allow" yet
+    Unauthorized,
+    /// ADB daemon is starting / device handshake in progress
+    #[allow(dead_code)]
+    Connecting(String),
+    /// Device connected and authorized — carries the device display name
+    Connected(String),
+    /// An error occurred (human-readable message)
+    Error(String),
+}
+
+impl AdbStatus {
+    /// Human-readable status text shown in the status bar.
+    pub fn text(&self) -> String {
+        match self {
+            AdbStatus::NotFound => "ADB not installed — follow the setup guide".to_string(),
+            AdbStatus::Disconnected => "No device connected".to_string(),
+            AdbStatus::Unauthorized => {
+                "Device found — check your phone screen and tap Allow".to_string()
+            }
+            AdbStatus::Connecting(name) => format!("Connecting to {}…", name),
+            AdbStatus::Connected(name) => format!("Connected: {}", name),
+            AdbStatus::Error(msg) => format!("Error: {}", msg),
+        }
+    }
+}
 
 // ─── Device State ──────────────────────────────────────────────────────────────
 
@@ -607,5 +648,35 @@ mod tests {
             DeviceState::from_str("fastboot"),
             DeviceState::Other("fastboot".to_string())
         );
+    }
+
+    // ── AdbStatus::text ───────────────────────────────────────────────────────
+
+    #[test]
+    fn adb_status_text_disconnected() {
+        assert_eq!(AdbStatus::Disconnected.text(), "No device connected");
+    }
+
+    #[test]
+    fn adb_status_text_unauthorized() {
+        assert!(AdbStatus::Unauthorized.text().contains("Allow"));
+    }
+
+    #[test]
+    fn adb_status_text_connecting() {
+        let s = AdbStatus::Connecting("Pixel 7".to_string()).text();
+        assert!(s.contains("Pixel 7"), "expected device name in: {}", s);
+    }
+
+    #[test]
+    fn adb_status_text_connected() {
+        let s = AdbStatus::Connected("Pixel 7".to_string()).text();
+        assert!(s.contains("Pixel 7") && s.contains("Connected"));
+    }
+
+    #[test]
+    fn adb_status_text_error() {
+        let s = AdbStatus::Error("timeout".to_string()).text();
+        assert!(s.contains("Error") && s.contains("timeout"));
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use iced::Task;
 use crate::adb::{AdbDevice, DeviceState};
 use crate::fs::{AndroidContext, PaneState};
-use crate::status_bar::AdbStatus;
+use crate::adb::AdbStatus;
 
 mod file_ops;
 mod install;
