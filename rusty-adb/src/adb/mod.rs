@@ -571,6 +571,21 @@ fn extract_kv(s: &str, key: &str) -> Option<String> {
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
+/// Wrap a path in POSIX single quotes for safe use inside `adb shell` commands.
+///
+/// `adb shell ls -la <path>` sends the arguments through the Android shell,
+/// which splits on whitespace.  Paths with spaces (e.g. artist folders) must
+/// be quoted.  Single quotes inside the path are escaped using `'\''`.
+///
+/// Example:
+/// ```text
+/// /storage/external_sd/Music/2 Pac/  →  '/storage/external_sd/Music/2 Pac/'
+/// /sdcard/it's here/                 →  '/sdcard/it'\''s here/'
+/// ```
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Check the output of a fire-and-forget `adb shell` command.
 ///
 /// Returns `Ok(())` when the command succeeded and produced no error output.
@@ -618,9 +633,13 @@ impl AdbClient {
         // shows the symlink entry itself rather than the directory contents.
         let ls_target = format!("{}/", path_str.trim_end_matches('/'));
 
+        // Pass the whole shell command as one argument so the Android shell
+        // receives a pre-quoted string — paths with spaces would otherwise be
+        // split by the shell into multiple tokens.
+        let shell_cmd = format!("ls -la {}", shell_quote(&ls_target));
         let output = Command::new(&self.adb_path)
             .args(target_args(serial))
-            .args(["shell", "ls", "-la", &ls_target])
+            .args(["shell", &shell_cmd])
             .output()
             .await
             .context("failed to run adb shell ls -la")?;
@@ -662,9 +681,10 @@ impl AdbClient {
     ) -> Result<()> {
         let from_str = from.to_string_lossy();
         let to_str = to.to_string_lossy();
+        let shell_cmd = format!("mv {} {}", shell_quote(&from_str), shell_quote(&to_str));
         let output = Command::new(&self.adb_path)
             .args(target_args(serial))
-            .args(["shell", "mv", &*from_str, &*to_str])
+            .args(["shell", &shell_cmd])
             .output()
             .await
             .context("failed to run adb shell mv")?;
@@ -678,9 +698,10 @@ impl AdbClient {
     /// Delete a file or directory on the device using `adb shell rm -rf`.
     pub async fn delete(&self, serial: &str, path: &std::path::Path) -> Result<()> {
         let path_str = path.to_string_lossy();
+        let shell_cmd = format!("rm -rf {}", shell_quote(&path_str));
         let output = Command::new(&self.adb_path)
             .args(target_args(serial))
-            .args(["shell", "rm", "-rf", &*path_str])
+            .args(["shell", &shell_cmd])
             .output()
             .await
             .context("failed to run adb shell rm -rf")?;

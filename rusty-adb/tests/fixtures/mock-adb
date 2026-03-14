@@ -83,11 +83,16 @@ case "$CMD" in
         ;;
 
     shell)
-        SUB="${ARGS[0]:-}"
-        case "$SUB" in
-            ls)
-                # ARGS: ls -la PATH  →  ARGS[0]=ls ARGS[1]=-la ARGS[2]=PATH
-                PATH_ARG="${ARGS[2]:-/sdcard}"
+        # Commands are passed as a single pre-quoted shell string:
+        #   shell "ls -la '/sdcard/'"
+        #   shell "mv '/from' '/to'"
+        #   shell "rm -rf '/path'"
+        SHELL_CMD="${ARGS[0]:-}"
+        case "$SHELL_CMD" in
+            ls\ *)
+                # Strip "ls -la " prefix and remove single quotes to get the path.
+                PATH_ARG="${SHELL_CMD#ls -la }"
+                PATH_ARG="${PATH_ARG//\'/}"
                 case "$PATH_ARG" in
                     */DCIM|*/DCIM/)
                         echo "$CANNED_LS_DCIM"
@@ -97,11 +102,11 @@ case "$CMD" in
                         ;;
                 esac
                 ;;
-            mv|rm)
+            mv\ *|rm\ *)
                 exit 0
                 ;;
             *)
-                echo "mock-adb: unrecognised shell sub-command: $SUB" >&2
+                echo "mock-adb: unrecognised shell command: $SHELL_CMD" >&2
                 exit 1
                 ;;
         esac

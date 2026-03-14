@@ -3,7 +3,7 @@
 use crate::icons;
 use crate::{App, Message, PaneLayout, ViewMode};
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, container, horizontal_space, pick_list, row, text, tooltip};
+use iced::widget::{button, column, container, horizontal_space, pick_list, row, text, tooltip};
 use iced::{Element, Fill, FillPortion};
 use std::path::{Path, PathBuf};
 
@@ -47,6 +47,24 @@ pub(crate) struct PaneMenuState {
     pub android_sel_nonempty: bool,
     pub has_device: bool,
     pub no_transfer: bool,
+}
+
+/// Human-readable label for a storage root path.
+///
+/// `/sdcard` and `/storage/emulated/0` → "Internal".
+/// `/storage/external_sd` → "SD Card".
+/// Other volumes → their last path component.
+fn storage_root_label(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    if s == "/sdcard" || s.starts_with("/storage/emulated/") {
+        "Internal".to_string()
+    } else if s.contains("external_sd") {
+        "SD Card".to_string()
+    } else {
+        path.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Storage".to_string())
+    }
 }
 
 impl App {
@@ -384,11 +402,63 @@ impl App {
                 .into()
         };
 
-        container(iced::widget::row![breadcrumbs, action].align_y(iced::Alignment::Center))
-            .width(Fill)
-            .padding([6, 8])
-            .style(t.secondary_panel())
-            .into()
+        let title_row =
+            container(iced::widget::row![breadcrumbs, action].align_y(iced::Alignment::Center))
+                .width(Fill)
+                .padding([6, 8])
+                .style(t.secondary_panel());
+
+        // ── Storage root chips (android only, when external media is present) ─
+        if is_android {
+            // Deduplicate: skip /storage/emulated/N when /sdcard is also present.
+            let has_sdcard = self
+                .android_pane
+                .storage_roots
+                .iter()
+                .any(|r| r == Path::new("/sdcard"));
+            let display_roots: Vec<&PathBuf> = self
+                .android_pane
+                .storage_roots
+                .iter()
+                .filter(|r| {
+                    if has_sdcard {
+                        !r.to_string_lossy().starts_with("/storage/emulated/")
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+
+            if display_roots.len() >= 2 {
+                let current = &self.android_pane.current_path;
+                let mut chips: Vec<Element<'a, Message>> = Vec::new();
+                for root in display_roots {
+                    let label = storage_root_label(root);
+                    let is_active = current.starts_with(root);
+                    let color = if is_active { t.accent } else { t.text_secondary };
+                    let path = root.clone();
+                    chips.push(
+                        button(text(label).size(11).color(color))
+                            .style(t.transparent_button())
+                            .padding([1, 6])
+                            .on_press(Message::AndroidNavigateTo(path))
+                            .into(),
+                    );
+                }
+                let chips_row = container(
+                    iced::widget::Row::from_vec(chips)
+                        .spacing(2)
+                        .padding([0, 8])
+                        .align_y(iced::Alignment::Center),
+                )
+                .width(Fill)
+                .style(t.secondary_panel());
+
+                return column![title_row, chips_row].width(Fill).into();
+            }
+        }
+
+        title_row.into()
     }
 }
 
