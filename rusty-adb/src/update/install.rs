@@ -82,14 +82,17 @@ impl App {
                 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 return Err("Automatic install not supported on this platform. Download from developer.android.com/tools/releases/platform-tools".to_string());
 
-                let status = child.wait().await.map_err(|e| e.to_string())?;
-                if status.success() {
-                    Ok(())
-                } else {
-                    let code = status.code().unwrap_or(-1);
-                    Err(format!(
-                        "Package manager exited with code {code}. Check the log above for details."
-                    ))
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
+                {
+                    let status = child.wait().await.map_err(|e| e.to_string())?;
+                    if status.success() {
+                        Ok(())
+                    } else {
+                        let code = status.code().unwrap_or(-1);
+                        Err(format!(
+                            "Package manager exited with code {code}. Check the log above for details."
+                        ))
+                    }
                 }
             },
             |result| match result {
