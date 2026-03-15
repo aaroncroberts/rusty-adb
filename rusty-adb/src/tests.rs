@@ -6,8 +6,7 @@ use adb::DeviceState;
 /// Path to the mock-adb script bundled with the crate's test fixtures.
 /// Stable because CARGO_MANIFEST_DIR is always the crate root.
 fn mock_adb_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/mock-adb")
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock-adb")
 }
 
 /// Feed a `TransferEvent` into `App` exactly as the subscription does,
@@ -962,7 +961,10 @@ fn copy_to_android_directory_only_selection_is_noop() {
     // Directories are skipped — only files are transferred.
     let mut app = app_with_local_selection(vec![local_dir("Documents", "/home/user/Documents")]);
     let _ = app.update(Message::CopyToAndroid);
-    assert!(app.active_transfer.is_none(), "directories must not queue a transfer");
+    assert!(
+        app.active_transfer.is_none(),
+        "directories must not queue a transfer"
+    );
 }
 
 #[test]
@@ -970,7 +972,10 @@ fn copy_to_android_single_file_sets_active_transfer() {
     let mut app = app_with_local_selection(vec![local_file("photo.jpg", "/home/user/photo.jpg")]);
     let _ = app.update(Message::CopyToAndroid);
 
-    let job = app.active_transfer.as_ref().expect("active_transfer must be set");
+    let job = app
+        .active_transfer
+        .as_ref()
+        .expect("active_transfer must be set");
     assert_eq!(job.filename, "photo.jpg");
     assert_eq!(job.source, PathBuf::from("/home/user/photo.jpg"));
     assert_eq!(job.destination, app.android_pane.current_path);
@@ -982,7 +987,10 @@ fn copy_to_android_single_file_initialises_transfer_status() {
     let mut app = app_with_local_selection(vec![local_file("photo.jpg", "/home/user/photo.jpg")]);
     let _ = app.update(Message::CopyToAndroid);
 
-    let status = app.transfer_status.as_ref().expect("transfer_status must be set");
+    let status = app
+        .transfer_status
+        .as_ref()
+        .expect("transfer_status must be set");
     assert_eq!(status.filename, "photo.jpg");
     assert_eq!(status.percent, 0);
     assert_eq!(status.job_index, 1);
@@ -1001,7 +1009,11 @@ fn copy_to_android_multiple_files_queues_remainder() {
 
     // First job is active; two remain in the queue.
     assert!(app.active_transfer.is_some(), "first job must be active");
-    assert_eq!(app.transfer_queue.len(), 2, "remaining 2 jobs must be queued");
+    assert_eq!(
+        app.transfer_queue.len(),
+        2,
+        "remaining 2 jobs must be queued"
+    );
     assert_eq!(app.transfer_queue_total, 3);
     assert_eq!(app.transfer_queue_done, 0);
 
@@ -1021,7 +1033,10 @@ fn copy_to_android_mixed_selection_skips_dirs() {
     let _ = app.update(Message::CopyToAndroid);
 
     assert!(app.active_transfer.is_some());
-    assert_eq!(app.transfer_queue_total, 2, "only file count, dirs excluded");
+    assert_eq!(
+        app.transfer_queue_total, 2,
+        "only file count, dirs excluded"
+    );
     assert_eq!(app.transfer_queue.len(), 1);
 }
 
@@ -1076,8 +1091,14 @@ fn transfer_complete_single_job_clears_state() {
         speed_display: "1.2 MB/s".to_string(),
     });
 
-    assert!(app.active_transfer.is_none(), "active_transfer must be cleared");
-    assert!(app.transfer_status.is_none(), "transfer_status must be cleared");
+    assert!(
+        app.active_transfer.is_none(),
+        "active_transfer must be cleared"
+    );
+    assert!(
+        app.transfer_status.is_none(),
+        "transfer_status must be cleared"
+    );
     assert!(app.cancel_flag.is_none(), "cancel_flag must be cleared");
     assert!(app.transfer_queue.is_empty());
 }
@@ -1096,9 +1117,16 @@ fn transfer_complete_with_queued_jobs_advances_to_next() {
     });
 
     // The second job should now be active.
-    let job = app.active_transfer.as_ref().expect("second job must be active");
+    let job = app
+        .active_transfer
+        .as_ref()
+        .expect("second job must be active");
     assert_eq!(job.filename, "b.jpg");
-    assert_eq!(app.transfer_queue.len(), 0, "queue should be empty after advancing");
+    assert_eq!(
+        app.transfer_queue.len(),
+        0,
+        "queue should be empty after advancing"
+    );
 }
 
 #[test]
@@ -1115,7 +1143,10 @@ fn transfer_complete_advances_job_index() {
     });
 
     let status = app.transfer_status.as_ref().unwrap();
-    assert_eq!(status.job_index, 2, "job_index must advance to 2 after first completes");
+    assert_eq!(
+        status.job_index, 2,
+        "job_index must advance to 2 after first completes"
+    );
     assert_eq!(status.job_total, 3);
 }
 
@@ -1176,8 +1207,14 @@ fn transfer_failed_sets_error_banner() {
     let _ = app.update(Message::CopyToAndroid);
     let _ = app.update(Message::TransferFailed("connection lost".to_string()));
 
-    let banner = app.error_banner.as_deref().expect("error_banner must be set");
-    assert!(banner.contains("connection lost"), "banner should contain the error: {banner}");
+    let banner = app
+        .error_banner
+        .as_deref()
+        .expect("error_banner must be set");
+    assert!(
+        banner.contains("connection lost"),
+        "banner should contain the error: {banner}"
+    );
 }
 
 #[test]
@@ -1191,7 +1228,10 @@ fn transfer_failed_clears_remaining_queue() {
     assert_eq!(app.transfer_queue.len(), 2);
 
     let _ = app.update(Message::TransferFailed("timeout".to_string()));
-    assert!(app.transfer_queue.is_empty(), "queue must be cleared after failure");
+    assert!(
+        app.transfer_queue.is_empty(),
+        "queue must be cleared after failure"
+    );
 }
 
 // ── cancel_transfer ───────────────────────────────────────────────────────
@@ -1220,7 +1260,10 @@ fn cancel_transfer_clears_queue() {
     assert_eq!(app.transfer_queue.len(), 1);
 
     let _ = app.update(Message::CancelTransfer);
-    assert!(app.transfer_queue.is_empty(), "queue must be cleared on cancel");
+    assert!(
+        app.transfer_queue.is_empty(),
+        "queue must be cleared on cancel"
+    );
 }
 
 #[test]
@@ -1276,7 +1319,10 @@ fn copy_to_local_single_file_sets_active_transfer() {
 
     let _ = app.update(Message::CopyToLocal);
 
-    let job = app.active_transfer.as_ref().expect("active_transfer must be set");
+    let job = app
+        .active_transfer
+        .as_ref()
+        .expect("active_transfer must be set");
     assert_eq!(job.filename, "photo.jpg");
     assert_eq!(job.source, PathBuf::from("/sdcard/photo.jpg"));
     assert_eq!(job.destination, app.local_pane.current_path);
@@ -1301,7 +1347,9 @@ fn app_for_push(tmp: &tempfile::TempDir) -> (App, std::path::PathBuf) {
     std::fs::write(&src, b"fake image data").expect("write source file");
 
     let mut app = App {
-        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        adb_client: Some(adb::AdbClient {
+            adb_path: mock_adb_path(),
+        }),
         active_serial: Some("device1234".to_string()),
         ..Default::default()
     };
@@ -1328,13 +1376,18 @@ async fn push_progress_events_reach_transfer_status() {
     let (mut app, _src) = app_for_push(&tmp);
 
     let _ = app.update(Message::CopyToAndroid);
-    assert_eq!(app.transfer_status.as_ref().unwrap().percent, 0,
-        "should start at 0% before any events");
+    assert_eq!(
+        app.transfer_status.as_ref().unwrap().percent,
+        0,
+        "should start at 0% before any events"
+    );
 
-    let job   = app.active_transfer.clone().expect("active_transfer set");
+    let job = app.active_transfer.clone().expect("active_transfer set");
     let cancel = app.cancel_flag.clone().unwrap();
     let mut events = Vec::new();
-    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev))
+        .await
+        .unwrap();
 
     // Feed every event through App — same path the Iced subscription takes
     let mut observed_percents: Vec<u8> = Vec::new();
@@ -1346,8 +1399,11 @@ async fn push_progress_events_reach_transfer_status() {
     }
 
     // mock-adb emits exactly [ 25% 50% 75% 100% ]
-    assert_eq!(observed_percents, vec![25, 50, 75, 100],
-        "mock-adb must emit 25/50/75/100 progress ticks");
+    assert_eq!(
+        observed_percents,
+        vec![25, 50, 75, 100],
+        "mock-adb must emit 25/50/75/100 progress ticks"
+    );
     // After each Progress event the status bar percent must match
     // (verified end-state: must have reached 100 before Complete arrived)
     assert!(observed_percents.contains(&100));
@@ -1359,25 +1415,35 @@ async fn push_complete_event_clears_state_and_carries_speed() {
     let (mut app, _src) = app_for_push(&tmp);
 
     let _ = app.update(Message::CopyToAndroid);
-    let job    = app.active_transfer.clone().unwrap();
+    let job = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
 
     let mut events = Vec::new();
-    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev))
+        .await
+        .unwrap();
 
     let last = events.last().cloned().unwrap();
     // Verify the engine itself produced a Complete with speed
-    assert!(matches!(last, adb::TransferEvent::Complete { ref speed_display }
+    assert!(
+        matches!(last, adb::TransferEvent::Complete { ref speed_display }
         if speed_display == "1.2 MB/s"),
-        "mock-adb push must report 1.2 MB/s, got: {last:?}");
+        "mock-adb push must report 1.2 MB/s, got: {last:?}"
+    );
 
     for ev in events {
         apply_event(&mut app, ev);
     }
 
     // After TransferComplete the UI state must be fully cleared
-    assert!(app.active_transfer.is_none(), "active_transfer must clear after complete");
-    assert!(app.transfer_status.is_none(), "transfer_status must clear after complete");
+    assert!(
+        app.active_transfer.is_none(),
+        "active_transfer must clear after complete"
+    );
+    assert!(
+        app.transfer_status.is_none(),
+        "transfer_status must clear after complete"
+    );
     assert!(app.cancel_flag.is_none());
 }
 
@@ -1387,20 +1453,25 @@ async fn push_progress_updates_status_bar_percent_incrementally() {
     let (mut app, _src) = app_for_push(&tmp);
     let _ = app.update(Message::CopyToAndroid);
 
-    let job    = app.active_transfer.clone().unwrap();
+    let job = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
 
     // Collect and apply events one at a time, checking percent after each
     let mut events = Vec::new();
-    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev))
+        .await
+        .unwrap();
 
     let mut expected = vec![25u8, 50, 75, 100].into_iter();
     for ev in events {
         if matches!(ev, adb::TransferEvent::Progress { .. }) {
             apply_event(&mut app, ev);
             let pct = app.transfer_status.as_ref().unwrap().percent;
-            assert_eq!(pct, expected.next().unwrap(),
-                "status bar percent must match mock-adb progress tick");
+            assert_eq!(
+                pct,
+                expected.next().unwrap(),
+                "status bar percent must match mock-adb progress tick"
+            );
         } else {
             apply_event(&mut app, ev);
         }
@@ -1413,7 +1484,9 @@ async fn push_progress_updates_status_bar_percent_incrementally() {
 async fn pull_progress_events_reach_transfer_status() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = App {
-        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        adb_client: Some(adb::AdbClient {
+            adb_path: mock_adb_path(),
+        }),
         active_serial: Some("device1234".to_string()),
         ..Default::default()
     };
@@ -1434,15 +1507,24 @@ async fn pull_progress_events_reach_transfer_status() {
 
     let _ = app.update(Message::CopyToLocal);
     assert!(app.active_transfer.is_some());
-    let job    = app.active_transfer.clone().unwrap();
+    let job = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
 
     let mut events = Vec::new();
-    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev))
+        .await
+        .unwrap();
 
-    let percents: Vec<u8> = events.iter().filter_map(|e| {
-        if let adb::TransferEvent::Progress { percent } = e { Some(*percent) } else { None }
-    }).collect();
+    let percents: Vec<u8> = events
+        .iter()
+        .filter_map(|e| {
+            if let adb::TransferEvent::Progress { percent } = e {
+                Some(*percent)
+            } else {
+                None
+            }
+        })
+        .collect();
     assert_eq!(percents, vec![25, 50, 75, 100]);
 
     for ev in events {
@@ -1457,7 +1539,9 @@ async fn pull_progress_events_reach_transfer_status() {
 async fn pull_complete_carries_correct_speed() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = App {
-        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        adb_client: Some(adb::AdbClient {
+            adb_path: mock_adb_path(),
+        }),
         active_serial: Some("device1234".to_string()),
         ..Default::default()
     };
@@ -1475,17 +1559,21 @@ async fn pull_complete_carries_correct_speed() {
     app.local_pane.current_path = tmp.path().to_path_buf();
 
     let _ = app.update(Message::CopyToLocal);
-    let job    = app.active_transfer.clone().unwrap();
+    let job = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
 
     let mut events = Vec::new();
-    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev))
+        .await
+        .unwrap();
 
     let last = events.last().cloned().unwrap();
     // mock-adb pull summary: "1.0 MB/s"
-    assert!(matches!(last, adb::TransferEvent::Complete { ref speed_display }
+    assert!(
+        matches!(last, adb::TransferEvent::Complete { ref speed_display }
         if speed_display == "1.0 MB/s"),
-        "mock-adb pull must report 1.0 MB/s, got: {last:?}");
+        "mock-adb pull must report 1.0 MB/s, got: {last:?}"
+    );
 }
 
 // ─── Multi-file queue ─────────────────────────────────────────────────────────
@@ -1499,15 +1587,33 @@ async fn multi_file_push_queue_processes_all_jobs_in_order() {
     std::fs::write(&src_b, b"bbb").unwrap();
 
     let mut app = App {
-        adb_client: Some(adb::AdbClient { adb_path: mock_adb_path() }),
+        adb_client: Some(adb::AdbClient {
+            adb_path: mock_adb_path(),
+        }),
         active_serial: Some("device1234".to_string()),
         ..Default::default()
     };
     app.local_pane.entries = vec![
-        DirEntry { name: "a.jpg".into(), path: src_a, size: 3, modified_display: "2024-01-01".into(),
-            is_dir: false, is_symlink: false, is_hidden: false, child_count: None },
-        DirEntry { name: "b.jpg".into(), path: src_b, size: 3, modified_display: "2024-01-01".into(),
-            is_dir: false, is_symlink: false, is_hidden: false, child_count: None },
+        DirEntry {
+            name: "a.jpg".into(),
+            path: src_a,
+            size: 3,
+            modified_display: "2024-01-01".into(),
+            is_dir: false,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: None,
+        },
+        DirEntry {
+            name: "b.jpg".into(),
+            path: src_b,
+            size: 3,
+            modified_display: "2024-01-01".into(),
+            is_dir: false,
+            is_symlink: false,
+            is_hidden: false,
+            child_count: None,
+        },
     ];
     app.local_pane.selected = vec![0, 1];
 
@@ -1516,27 +1622,40 @@ async fn multi_file_push_queue_processes_all_jobs_in_order() {
     assert_eq!(app.transfer_status.as_ref().unwrap().job_index, 1);
 
     // ── Run job 1 ──
-    let job1   = app.active_transfer.clone().unwrap();
+    let job1 = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
     let mut events1 = Vec::new();
-    adb::run_transfer(&job1, cancel, |ev| events1.push(ev)).await.unwrap();
+    adb::run_transfer(&job1, cancel, |ev| events1.push(ev))
+        .await
+        .unwrap();
     for ev in events1 {
         apply_event(&mut app, ev);
     }
 
     // After first completes, second job must be active
-    assert!(app.active_transfer.is_some(), "second job must start after first completes");
-    assert_eq!(app.transfer_status.as_ref().unwrap().job_index, 2,
-        "job_index must advance to 2");
-    assert_eq!(app.transfer_status.as_ref().unwrap().percent, 0,
-        "percent resets to 0 for each new job");
+    assert!(
+        app.active_transfer.is_some(),
+        "second job must start after first completes"
+    );
+    assert_eq!(
+        app.transfer_status.as_ref().unwrap().job_index,
+        2,
+        "job_index must advance to 2"
+    );
+    assert_eq!(
+        app.transfer_status.as_ref().unwrap().percent,
+        0,
+        "percent resets to 0 for each new job"
+    );
     assert_eq!(app.transfer_queue.len(), 0);
 
     // ── Run job 2 ──
-    let job2   = app.active_transfer.clone().unwrap();
+    let job2 = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
     let mut events2 = Vec::new();
-    adb::run_transfer(&job2, cancel, |ev| events2.push(ev)).await.unwrap();
+    adb::run_transfer(&job2, cancel, |ev| events2.push(ev))
+        .await
+        .unwrap();
     for ev in events2 {
         apply_event(&mut app, ev);
     }
@@ -1558,16 +1677,26 @@ async fn cancel_flag_stops_transfer_and_clears_state() {
     // Request cancel before the subscription drives the transfer
     let _ = app.update(Message::CancelTransfer);
 
-    let job    = app.active_transfer.clone().unwrap();
+    let job = app.active_transfer.clone().unwrap();
     let cancel = app.cancel_flag.clone().unwrap();
     // cancel flag is now true — run_transfer will stop after first stderr line
     let mut events = Vec::new();
-    adb::run_transfer(&job, cancel, |ev| events.push(ev)).await.unwrap();
+    adb::run_transfer(&job, cancel, |ev| events.push(ev))
+        .await
+        .unwrap();
 
-    assert!(events.iter().any(|e| matches!(e, adb::TransferEvent::Cancelled)),
-        "cancel flag must produce a Cancelled event");
-    assert!(!events.iter().any(|e| matches!(e, adb::TransferEvent::Complete { .. })),
-        "must not Complete after cancel");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, adb::TransferEvent::Cancelled)),
+        "cancel flag must produce a Cancelled event"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, adb::TransferEvent::Complete { .. })),
+        "must not Complete after cancel"
+    );
 
     for ev in events {
         apply_event(&mut app, ev);

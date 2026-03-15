@@ -324,7 +324,10 @@ enum Message {
     /// A queued copy completed (fired by the copy engine)
     QueueItemComplete(u64),
     /// A queued copy failed (fired by the copy engine)
-    QueueItemFailed { id: u64, reason: String },
+    QueueItemFailed {
+        id: u64,
+        reason: String,
+    },
     /// Remove all Done/Failed items from the queue
     QueueClearDone,
 
@@ -334,7 +337,7 @@ enum Message {
     /// Close the device details modal
     CloseDeviceDetails,
     /// ADB property fetch completed — store and show the result
-    DeviceDetailsLoaded(crate::adb::DeviceDetails),
+    DeviceDetailsLoaded(Box<crate::adb::DeviceDetails>),
     /// ADB property fetch failed
     DeviceDetailsFailed(String),
     /// User clicked Refresh — re-fetch all properties

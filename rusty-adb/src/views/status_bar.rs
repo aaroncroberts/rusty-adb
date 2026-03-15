@@ -28,6 +28,7 @@ impl StatusBar {
     /// `on_open_logs` wires the far-right "Logs" link.
     /// `queue_summary` shows copy queue activity when non-empty.
     /// `on_open_queue` makes the queue summary text a clickable button.
+    #[allow(clippy::too_many_arguments)]
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         status: &AdbStatus,

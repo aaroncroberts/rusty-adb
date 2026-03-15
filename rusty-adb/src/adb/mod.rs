@@ -246,7 +246,9 @@ pub mod mock {
                 android_version: Some("14".to_string()),
                 api_level: Some("34".to_string()),
                 security_patch: Some("2024-01-01".to_string()),
-                build_fingerprint: Some("mockbrand/mockdevice/mockdevice:14/UP1A/mock:user/release-keys".to_string()),
+                build_fingerprint: Some(
+                    "mockbrand/mockdevice/mockdevice:14/UP1A/mock:user/release-keys".to_string(),
+                ),
                 kernel_version: Some("5.15.131-android13-8".to_string()),
                 uptime: Some("up 2 days, 3:45".to_string()),
                 soc_manufacturer: Some("Qualcomm".to_string()),
@@ -925,15 +927,15 @@ async fn shell_getprop(adb_path: &std::path::Path, serial: &str, key: &str) -> O
         .await
         .ok()?;
     let val = str::from_utf8(&out.stdout).ok()?.trim().to_string();
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 /// Run an arbitrary `adb shell <cmd>` and return trimmed stdout, or `None`.
-async fn shell_cmd(
-    adb_path: &std::path::Path,
-    serial: &str,
-    cmd: &str,
-) -> Option<String> {
+async fn shell_cmd(adb_path: &std::path::Path, serial: &str, cmd: &str) -> Option<String> {
     let out = Command::new(adb_path)
         .args(target_args(serial))
         .args(["shell", cmd])
@@ -941,7 +943,11 @@ async fn shell_cmd(
         .await
         .ok()?;
     let val = str::from_utf8(&out.stdout).ok()?.trim().to_string();
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 impl AdbClient {
@@ -1022,23 +1028,24 @@ impl AdbClient {
         let ip_address = ip_raw.as_deref().and_then(|raw| {
             raw.lines()
                 .find(|l| l.trim().starts_with("inet "))
-                .and_then(|l| l.trim().split_whitespace().nth(1))
+                .and_then(|l| l.split_whitespace().nth(1))
                 .and_then(|cidr| cidr.split('/').next())
                 .map(|ip| ip.to_string())
         });
 
         // Determine transport type from serial pattern or USB state
-        let transport = Some(if serial.contains(':') && serial.starts_with(|c: char| c.is_ascii_digit()) {
-            // "192.168.1.x:5555" pattern → TCP/IP
-            "TCP/IP".to_string()
-        } else if serial.starts_with("emulator-") {
-            "Emulator".to_string()
-        } else {
-            "USB".to_string()
-        });
+        let transport = Some(
+            if serial.contains(':') && serial.starts_with(|c: char| c.is_ascii_digit()) {
+                // "192.168.1.x:5555" pattern → TCP/IP
+                "TCP/IP".to_string()
+            } else if serial.starts_with("emulator-") {
+                "Emulator".to_string()
+            } else {
+                "USB".to_string()
+            },
+        );
 
-        let is_emulator = is_qemu.as_deref() == Some("1")
-            || serial.starts_with("emulator-");
+        let is_emulator = is_qemu.as_deref() == Some("1") || serial.starts_with("emulator-");
 
         // Parse battery level: "  level: 87" → "87%"
         let battery_level = battery_raw.as_deref().and_then(|raw| {
@@ -1172,7 +1179,10 @@ impl AdbClient {
                 if package_id.is_empty() {
                     return None;
                 }
-                Some(InstalledApp { package_id, apk_path })
+                Some(InstalledApp {
+                    package_id,
+                    apk_path,
+                })
             })
             .collect();
 
@@ -1362,7 +1372,9 @@ mod tests {
         // Verify the call was logged
         let calls = mock.calls();
         assert!(
-            calls.iter().any(|c| c.contains("fetch_device_details") && c.contains("R5CWA0TEST")),
+            calls
+                .iter()
+                .any(|c| c.contains("fetch_device_details") && c.contains("R5CWA0TEST")),
             "call log missing fetch_device_details: {calls:?}"
         );
     }
@@ -1394,8 +1406,13 @@ package:/data/app/com.path.with=equals-ZZ/base.apk=com.path.with\n";
                 let eq_pos = rest.rfind('=')?;
                 let apk_path = rest[..eq_pos].to_string();
                 let package_id = rest[eq_pos + 1..].to_string();
-                if package_id.is_empty() { return None; }
-                Some(InstalledApp { package_id, apk_path })
+                if package_id.is_empty() {
+                    return None;
+                }
+                Some(InstalledApp {
+                    package_id,
+                    apk_path,
+                })
             })
             .collect();
 
@@ -1418,8 +1435,13 @@ package:/data/app/com.path.with=equals-ZZ/base.apk=com.path.with\n";
                 let eq_pos = rest.rfind('=')?;
                 let package_id = rest[eq_pos + 1..].to_string();
                 let apk_path = rest[..eq_pos].to_string();
-                if package_id.is_empty() { return None; }
-                Some(InstalledApp { package_id, apk_path })
+                if package_id.is_empty() {
+                    return None;
+                }
+                Some(InstalledApp {
+                    package_id,
+                    apk_path,
+                })
             })
             .collect();
         assert!(apps.is_empty());
@@ -1430,8 +1452,14 @@ package:/data/app/com.path.with=equals-ZZ/base.apk=com.path.with\n";
         use crate::adb::mock::MockAdbClient;
         let mock = MockAdbClient::default();
         let details = mock.fetch_device_details("TEST123").await.unwrap();
-        assert!(details.battery_level.is_some(), "battery_level should be set");
-        assert!(details.kernel_version.is_some(), "kernel_version should be set");
+        assert!(
+            details.battery_level.is_some(),
+            "battery_level should be set"
+        );
+        assert!(
+            details.kernel_version.is_some(),
+            "kernel_version should be set"
+        );
         assert!(details.uptime.is_some(), "uptime should be set");
         assert!(details.storage_data.is_some(), "storage_data should be set");
         assert!(details.total_ram.is_some(), "total_ram should be set");

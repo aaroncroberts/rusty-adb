@@ -152,7 +152,11 @@ impl App {
         let panel_open = self.show_panel_open == Some(is_android);
 
         // Icon button — accent when panel is open, secondary when closed.
-        let panel_btn_color = if panel_open { t.accent } else { t.text_secondary };
+        let panel_btn_color = if panel_open {
+            t.accent
+        } else {
+            t.text_secondary
+        };
         let show_btn = self.delayed_tip(
             button(
                 text(icons::layout())
@@ -164,7 +168,11 @@ impl App {
             .padding([2, 4])
             .on_press(Message::ToggleShowPanel(is_android)),
             "Columns & visibility",
-            if is_android { "cols_android" } else { "cols_local" },
+            if is_android {
+                "cols_android"
+            } else {
+                "cols_local"
+            },
             TipPos::Bottom,
         );
 
@@ -173,20 +181,17 @@ impl App {
         if is_android {
             // "Install APK" — enabled when an .apk is selected in the local pane
             if has_device && local_sel_is_apk {
-                cmd_items.push(
-                    self.delayed_tip(
-                        cmd_btn(
-                            Some(icons::add_to_queue()),
-                            "Install APK",
-                            t.accent,
-                            Some(Message::InstallApk),
-                        ),
-                        "Install selected .apk to device",
-                        "install_apk",
-                        TipPos::Bottom,
-                    )
-                    .into(),
-                );
+                cmd_items.push(self.delayed_tip(
+                    cmd_btn(
+                        Some(icons::add_to_queue()),
+                        "Install APK",
+                        t.accent,
+                        Some(Message::InstallApk),
+                    ),
+                    "Install selected .apk to device",
+                    "install_apk",
+                    TipPos::Bottom,
+                ));
             }
             if has_device && no_transfer && android_sel_has_files {
                 cmd_items.push(
@@ -218,20 +223,17 @@ impl App {
         } else {
             // local pane — single "Copy to Device" button (files or folders)
             if has_device && no_transfer && local_sel_nonempty {
-                cmd_items.push(
-                    self.delayed_tip(
-                        cmd_btn(
-                            Some(icons::copy()),
-                            "Copy to Device",
-                            t.accent,
-                            Some(Message::ShowCopyConfirm),
-                        ),
-                        "Copy selected files/folders to device queue",
-                        "copy_to_device",
-                        TipPos::Bottom,
-                    )
-                    .into(),
-                );
+                cmd_items.push(self.delayed_tip(
+                    cmd_btn(
+                        Some(icons::copy()),
+                        "Copy to Device",
+                        t.accent,
+                        Some(Message::ShowCopyConfirm),
+                    ),
+                    "Copy selected files/folders to device queue",
+                    "copy_to_device",
+                    TipPos::Bottom,
+                ));
             } else if has_device {
                 // Dimmed placeholder when nothing is selected
                 cmd_items.push(
@@ -298,7 +300,11 @@ impl App {
                     let is_active = current.starts_with(root)
                         || (root.to_string_lossy().starts_with("/storage/emulated/")
                             && current.starts_with("/sdcard"));
-                    let color = if is_active { t.accent } else { t.text_secondary };
+                    let color = if is_active {
+                        t.accent
+                    } else {
+                        t.text_secondary
+                    };
                     let path = root.clone();
                     chip_items.push(
                         button(text(label).size(11).color(color))
@@ -321,7 +327,7 @@ impl App {
         }
         toolbar_items.push(cmd_row.into());
         toolbar_items.push(iced::widget::horizontal_space().into());
-        toolbar_items.push(show_btn.into());
+        toolbar_items.push(show_btn);
 
         let toolbar = iced::widget::Row::from_vec(toolbar_items)
             .width(Fill)
@@ -329,9 +335,7 @@ impl App {
             .padding([2, 8])
             .align_y(iced::Alignment::Center);
 
-        let mut bar = iced::widget::Column::new()
-            .width(Fill)
-            .push(toolbar);
+        let mut bar = iced::widget::Column::new().width(Fill).push(toolbar);
 
         if panel_open {
             let toggle_row = row![
@@ -345,17 +349,10 @@ impl App {
             .padding([2, 8])
             .align_y(iced::Alignment::Center);
 
-            bar = bar.push(
-                container(toggle_row)
-                    .width(Fill)
-                    .style(t.secondary_panel()),
-            );
+            bar = bar.push(container(toggle_row).width(Fill).style(t.secondary_panel()));
         }
 
-        container(bar)
-            .width(Fill)
-            .style(t.secondary_panel())
-            .into()
+        container(bar).width(Fill).style(t.secondary_panel()).into()
     }
 
     /// Title bar rendered above each file-browser pane.
@@ -456,7 +453,11 @@ impl App {
                 icons::expand(),
                 "Expand this pane",
                 Message::ExpandPane(is_android),
-                if is_android { "expand_title_android" } else { "expand_title_local" },
+                if is_android {
+                    "expand_title_android"
+                } else {
+                    "expand_title_local"
+                },
             );
             let btn = button(
                 text(icon)

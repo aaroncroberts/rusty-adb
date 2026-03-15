@@ -84,10 +84,13 @@ impl App {
         self.device_details_loading = true;
         Task::perform(
             async move {
-                client.fetch_device_details(&serial).await.map_err(|e| e.to_string())
+                client
+                    .fetch_device_details(&serial)
+                    .await
+                    .map_err(|e| e.to_string())
             },
             |result| match result {
-                Ok(details) => Message::DeviceDetailsLoaded(details),
+                Ok(details) => Message::DeviceDetailsLoaded(Box::new(details)),
                 Err(e) => Message::DeviceDetailsFailed(e),
             },
         )
