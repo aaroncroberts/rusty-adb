@@ -254,7 +254,7 @@ impl App {
         };
 
         // ── Storage root chips (android pane, when 2+ roots are present) ────
-        let mut toolbar_items: Vec<Element<'a, Message>> = Vec::new();
+        let mut chip_items: Vec<Element<'a, Message>> = Vec::new();
 
         if is_android {
             let has_emulated = self
@@ -278,7 +278,7 @@ impl App {
                             && current.starts_with("/sdcard"));
                     let color = if is_active { t.accent } else { t.text_secondary };
                     let path = root.clone();
-                    toolbar_items.push(
+                    chip_items.push(
                         button(text(label).size(11).color(color))
                             .style(t.transparent_button())
                             .padding([1, 6])
@@ -286,14 +286,17 @@ impl App {
                             .into(),
                     );
                 }
-                // Thin separator between chips and view picker
-                toolbar_items.push(iced::widget::Space::new(4, 1).into());
             }
         }
 
+        // Layout: [View label] [picker] [chips…] ──── [cmd buttons] [⊞]
+        let mut toolbar_items: Vec<Element<'a, Message>> = Vec::new();
         toolbar_items.push(text("View").size(11).color(t.text_secondary).into());
         toolbar_items.push(iced::widget::Space::new(4, 1).into());
         toolbar_items.push(view_picker.into());
+        for chip in chip_items {
+            toolbar_items.push(chip);
+        }
         toolbar_items.push(iced::widget::horizontal_space().into());
         toolbar_items.push(cmd_row.into());
         toolbar_items.push(iced::widget::Space::new(4, 1).into());
