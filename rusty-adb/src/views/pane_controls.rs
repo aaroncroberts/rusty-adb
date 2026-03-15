@@ -3,7 +3,7 @@
 use crate::icons;
 use crate::{App, Message, PaneLayout, ViewMode};
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, horizontal_space, pick_list, row, text, tooltip};
+use iced::widget::{button, container, horizontal_space, pick_list, row, text, tooltip};
 use iced::{Element, Fill, FillPortion};
 use std::path::{Path, PathBuf};
 
@@ -253,18 +253,56 @@ impl App {
             )
         };
 
-        let toolbar = row![
-            text("View").size(11).color(t.text_secondary),
-            iced::widget::Space::new(6, 1),
-            view_picker,
-            iced::widget::horizontal_space(),
-            cmd_row,
-            iced::widget::Space::new(4, 1),
-            show_btn,
-        ]
-        .spacing(2)
-        .padding([2, 8])
-        .align_y(iced::Alignment::Center);
+        // ── Storage root chips (android pane, when 2+ roots are present) ────
+        let mut toolbar_items: Vec<Element<'a, Message>> = Vec::new();
+
+        if is_android {
+            let has_emulated = self
+                .android_pane
+                .storage_roots
+                .iter()
+                .any(|r| r.to_string_lossy().starts_with("/storage/emulated/"));
+            let display_roots: Vec<&PathBuf> = self
+                .android_pane
+                .storage_roots
+                .iter()
+                .filter(|r| !(has_emulated && *r == Path::new("/sdcard")))
+                .collect();
+
+            if display_roots.len() >= 2 {
+                let current = &self.android_pane.current_path;
+                for root in display_roots {
+                    let label = storage_root_label(root);
+                    let is_active = current.starts_with(root)
+                        || (root.to_string_lossy().starts_with("/storage/emulated/")
+                            && current.starts_with("/sdcard"));
+                    let color = if is_active { t.accent } else { t.text_secondary };
+                    let path = root.clone();
+                    toolbar_items.push(
+                        button(text(label).size(11).color(color))
+                            .style(t.transparent_button())
+                            .padding([1, 6])
+                            .on_press(Message::AndroidNavigateTo(path))
+                            .into(),
+                    );
+                }
+                // Thin separator between chips and view picker
+                toolbar_items.push(iced::widget::Space::new(4, 1).into());
+            }
+        }
+
+        toolbar_items.push(text("View").size(11).color(t.text_secondary).into());
+        toolbar_items.push(iced::widget::Space::new(4, 1).into());
+        toolbar_items.push(view_picker.into());
+        toolbar_items.push(iced::widget::horizontal_space().into());
+        toolbar_items.push(cmd_row.into());
+        toolbar_items.push(iced::widget::Space::new(4, 1).into());
+        toolbar_items.push(show_btn.into());
+
+        let toolbar = iced::widget::Row::from_vec(toolbar_items)
+            .spacing(2)
+            .padding([2, 8])
+            .align_y(iced::Alignment::Center);
 
         let mut bar = iced::widget::Column::new()
             .width(Fill)
@@ -423,62 +461,6 @@ impl App {
                 .width(Fill)
                 .padding([6, 8])
                 .style(t.secondary_panel());
-
-        // ── Storage root chips (android only, when external media is present) ─
-        if is_android {
-            // Deduplicate: prefer the real /storage/emulated/N path over /sdcard
-            // (a symlink). Showing both would be redundant; the canonical path
-            // produces a consistent breadcrumb alongside /storage/external_sd.
-            let has_emulated = self
-                .android_pane
-                .storage_roots
-                .iter()
-                .any(|r| r.to_string_lossy().starts_with("/storage/emulated/"));
-            let display_roots: Vec<&PathBuf> = self
-                .android_pane
-                .storage_roots
-                .iter()
-                .filter(|r| {
-                    // Drop the /sdcard symlink when the real emulated path exists.
-                    if has_emulated && *r == Path::new("/sdcard") {
-                        return false;
-                    }
-                    true
-                })
-                .collect();
-
-            if display_roots.len() >= 2 {
-                let current = &self.android_pane.current_path;
-                let mut chips: Vec<Element<'a, Message>> = Vec::new();
-                for root in display_roots {
-                    let label = storage_root_label(root);
-                    // An emulated root is "active" both when the current path is
-                    // under it AND when it's under /sdcard (the symlink alias).
-                    let is_active = current.starts_with(root)
-                        || (root.to_string_lossy().starts_with("/storage/emulated/")
-                            && current.starts_with("/sdcard"));
-                    let color = if is_active { t.accent } else { t.text_secondary };
-                    let path = root.clone();
-                    chips.push(
-                        button(text(label).size(11).color(color))
-                            .style(t.transparent_button())
-                            .padding([1, 6])
-                            .on_press(Message::AndroidNavigateTo(path))
-                            .into(),
-                    );
-                }
-                let chips_row = container(
-                    iced::widget::Row::from_vec(chips)
-                        .spacing(2)
-                        .padding([0, 8])
-                        .align_y(iced::Alignment::Center),
-                )
-                .width(Fill)
-                .style(t.secondary_panel());
-
-                return column![title_row, chips_row].width(Fill).into();
-            }
-        }
 
         title_row.into()
     }

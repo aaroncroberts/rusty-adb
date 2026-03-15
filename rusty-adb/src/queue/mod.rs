@@ -96,6 +96,7 @@ pub struct QueueManager {
 
 impl QueueManager {
     /// Create an empty manager that persists to `path`.
+    #[allow(dead_code)] // used by queue unit tests
     pub fn new(persist_path: PathBuf) -> Self {
         Self {
             persist_path: Some(persist_path),
