@@ -136,7 +136,9 @@ impl App {
 
     pub(super) fn transfer_complete(&mut self, speed_display: String) -> Task<Message> {
         tracing::info!(speed = %speed_display, "transfer complete");
+        // Capture direction and destination BEFORE clearing active_transfer below
         let direction = self.active_transfer.as_ref().map(|j| j.direction.clone());
+        let completed_dest = self.active_transfer.as_ref().map(|j| j.destination.clone());
 
         self.transfer_queue_done += 1;
 
@@ -165,14 +167,20 @@ impl App {
         self.transfer_status = None;
         self.cancel_flag = None;
 
-        // Refresh the destination pane so the new file is visible
+        // Refresh the destination pane so the new file is visible.
+        // Use the job's destination path (captured before clear above), not the
+        // pane's current_path — the user may have navigated elsewhere mid-transfer.
         match direction {
             Some(TransferDirection::ToAndroid) => {
-                let path = self.android_pane.current_path.clone();
+                let path = completed_dest
+                    .unwrap_or_else(|| self.android_pane.current_path.clone());
+                tracing::debug!(path = %path.display(), "refreshing android pane after transfer");
                 return self.update(Message::AndroidNavigateTo(path));
             }
             Some(TransferDirection::ToLocal) => {
-                let path = self.local_pane.current_path.clone();
+                let path = completed_dest
+                    .unwrap_or_else(|| self.local_pane.current_path.clone());
+                tracing::debug!(path = %path.display(), "refreshing local pane after transfer");
                 return self.update(Message::LocalNavigateTo(path));
             }
             None => {}
