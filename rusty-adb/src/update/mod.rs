@@ -82,6 +82,9 @@ impl App {
                         self.android_pane.state = PaneState::NoDevice;
                         self.android_pane.entries.clear();
                         self.android_pane.selected.clear();
+                        // Clear cached app list so it reloads fresh on next connect
+                        self.installed_apps = None;
+                        self.apps_selected = None;
                         Task::none()
                     }
                     DeviceTransition::NoChange => Task::none(),
@@ -280,8 +283,6 @@ impl App {
             Message::ClosePreview => self.close_preview(),
 
             // ── App Management ────────────────────────────────────────────────
-            Message::OpenAppsModal => self.open_apps_modal(),
-            Message::CloseAppsModal => self.close_apps_modal(),
             Message::AppsLoaded(apps) => self.apps_loaded(apps),
             Message::AppsFailed(msg) => self.apps_failed(msg),
             Message::AppsSelectPackage(pkg) => self.apps_select_package(pkg),

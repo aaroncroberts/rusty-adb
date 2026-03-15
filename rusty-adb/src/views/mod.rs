@@ -89,8 +89,6 @@ impl App {
             stack![base, self.view_queue_dialog()].into()
         } else if self.copy_confirm_open {
             stack![base, self.view_copy_confirm()].into()
-        } else if self.apps_modal_open {
-            stack![base, self.view_apps_modal()].into()
         } else {
             base
         }

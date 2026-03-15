@@ -5,18 +5,6 @@ use iced::Task;
 impl App {
     // ── Open / Close ──────────────────────────────────────────────────────────
 
-    pub(super) fn open_apps_modal(&mut self) -> Task<Message> {
-        self.apps_modal_open = true;
-        self.apps_selected = None;
-        // Kick off a fresh package list fetch every time the modal opens
-        self.load_packages()
-    }
-
-    pub(super) fn close_apps_modal(&mut self) -> Task<Message> {
-        self.apps_modal_open = false;
-        Task::none()
-    }
-
     // ── Package list ──────────────────────────────────────────────────────────
 
     /// Spawn `pm list packages -3 -f` and dispatch the result.

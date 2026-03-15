@@ -62,8 +62,14 @@ impl App {
         &mut self,
         tab: super::super::DeviceTab,
     ) -> Task<Message> {
+        let switching_to_apps = matches!(tab, super::super::DeviceTab::Apps);
         self.device_details_tab = tab;
-        Task::none()
+        // Lazy-load packages the first time the Apps tab is opened
+        if switching_to_apps && self.installed_apps.is_none() && !self.apps_loading {
+            self.load_packages()
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn refresh_device_details(&mut self) -> Task<Message> {
@@ -319,9 +325,6 @@ impl App {
         }
         if self.preview_modal.is_some() {
             return self.update(Message::ClosePreview);
-        }
-        if self.apps_modal_open {
-            return self.update(Message::CloseAppsModal);
         }
         if self.queue_open {
             return self.update(Message::CloseQueueDialog);

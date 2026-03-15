@@ -186,17 +186,6 @@ impl App {
                     .into(),
                 );
             }
-            // "Apps" — open installed-apps manager
-            if has_device {
-                cmd_items.push(
-                    tooltip(
-                        cmd_btn(None, "Apps", t.accent, Some(Message::OpenAppsModal)),
-                        text("View and uninstall installed apps").size(11),
-                        TipPos::Bottom,
-                    )
-                    .into(),
-                );
-            }
             if has_device && no_transfer && android_sel_has_files {
                 cmd_items.push(
                     cmd_btn(

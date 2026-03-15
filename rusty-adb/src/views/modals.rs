@@ -1,6 +1,7 @@
 //! Modal overlay views: preview, log viewer, about, and settings.
 
 use crate::adb::AdbStatus;
+use crate::icons;
 use crate::queue::QueueStatus;
 use crate::{App, DeviceTab, LogLevel, Message, PreviewContent};
 use iced::widget::{
@@ -18,7 +19,14 @@ impl App {
     ) -> Element<'a, Message> {
         let t = self.theme;
 
-        let close_btn = button(text("X  Close").size(12).color(t.text))
+        let close_btn = button(
+                row![
+                    text(icons::close()).font(icons::font()).size(12).color(t.text),
+                    text("Close").size(12).color(t.text),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
             .style(t.secondary_button())
             .padding([4, 12])
             .on_press(Message::ClosePreview);
@@ -220,7 +228,14 @@ impl App {
         let t = self.theme;
         let version = env!("CARGO_PKG_VERSION");
 
-        let close_btn = button(text("X  Close").size(12).color(t.text))
+        let close_btn = button(
+                row![
+                    text(icons::close()).font(icons::font()).size(12).color(t.text),
+                    text("Close").size(12).color(t.text),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
             .style(t.secondary_button())
             .padding([4, 12])
             .on_press(Message::CloseAbout);
@@ -761,12 +776,26 @@ impl App {
             "Device Details".to_string()
         };
 
-        let close_btn = button(text("X  Close").size(12).color(t.text))
+        let close_btn = button(
+                row![
+                    text(icons::close()).font(icons::font()).size(12).color(t.text),
+                    text("Close").size(12).color(t.text),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
             .style(t.secondary_button())
             .padding([4, 12])
             .on_press(Message::CloseDeviceDetails);
 
-        let refresh_btn = button(text("Refresh").size(12).color(t.accent))
+        let refresh_btn = button(
+            row![
+                text(icons::refresh()).font(icons::font()).size(12).color(t.accent),
+                text("Refresh").size(12).color(t.accent),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
             .style(t.transparent_button())
             .padding([4, 10])
             .on_press(Message::RefreshDeviceDetails);
@@ -785,11 +814,12 @@ impl App {
         .style(t.secondary_panel());
 
         // ── Tab bar ───────────────────────────────────────────────────────────
-        const TABS: [DeviceTab; 4] = [
+        const TABS: [DeviceTab; 5] = [
             DeviceTab::Device,
             DeviceTab::OsBuild,
             DeviceTab::Connection,
             DeviceTab::Display,
+            DeviceTab::Apps,
         ];
 
         let tab_bar = {
@@ -926,6 +956,112 @@ impl App {
                 ]
                 .spacing(6)
                 .into(),
+
+                // ── Apps ──────────────────────────────────────────────────────
+                DeviceTab::Apps => {
+                    if self.apps_loading {
+                        container(text("Loading apps…").size(12).color(t.text_secondary))
+                            .width(Fill)
+                            .height(iced::Length::Fixed(200.0))
+                            .align_x(iced::Alignment::Center)
+                            .align_y(iced::Alignment::Center)
+                            .into()
+                    } else if let Some(ref apps) = self.installed_apps {
+                        if apps.is_empty() {
+                            container(
+                                text("No user-installed apps found.")
+                                    .size(12)
+                                    .color(t.text_secondary),
+                            )
+                            .width(Fill)
+                            .height(iced::Length::Fixed(200.0))
+                            .align_x(iced::Alignment::Center)
+                            .align_y(iced::Alignment::Center)
+                            .into()
+                        } else {
+                            // Uninstall footer
+                            let uninstall_color =
+                                if self.apps_selected.is_some() && !self.apps_uninstalling {
+                                    t.error
+                                } else {
+                                    t.error.scale_alpha(0.3)
+                                };
+                            let uninstall_label =
+                                if self.apps_uninstalling { "Uninstalling…" } else { "Uninstall" };
+                            let uninstall_btn = {
+                                let b = button(
+                                    text(uninstall_label).size(11).color(uninstall_color),
+                                )
+                                .style(t.transparent_button())
+                                .padding([2, 8]);
+                                if self.apps_selected.is_some() && !self.apps_uninstalling {
+                                    b.on_press(Message::UninstallApp)
+                                } else {
+                                    b
+                                }
+                            };
+
+                            let rows: Vec<Element<Message>> = apps
+                                .iter()
+                                .map(|app| {
+                                    let is_sel =
+                                        self.apps_selected.as_deref() == Some(&app.package_id);
+                                    let bg = if is_sel {
+                                        Some(t.background_secondary)
+                                    } else {
+                                        None
+                                    };
+                                    let pkg = app.package_id.clone();
+                                    container(
+                                        button(
+                                            text(&app.package_id)
+                                                .size(11)
+                                                .color(if is_sel { t.accent } else { t.text }),
+                                        )
+                                        .style(t.transparent_button())
+                                        .padding([3, 0])
+                                        .width(Fill)
+                                        .on_press(Message::AppsSelectPackage(pkg)),
+                                    )
+                                    .style(move |_| container::Style {
+                                        background: bg.map(|c| c.into()),
+                                        ..Default::default()
+                                    })
+                                    .width(Fill)
+                                    .into()
+                                })
+                                .collect();
+
+                            column![
+                                scrollable(column(rows).width(Fill).spacing(1))
+                                    .height(iced::Length::Fixed(186.0)),
+                                container(
+                                    row![
+                                        iced::widget::horizontal_space(),
+                                        uninstall_btn,
+                                    ]
+                                    .align_y(iced::Alignment::Center),
+                                )
+                                .width(Fill)
+                                .padding([6, 0]),
+                            ]
+                            .spacing(4)
+                            .into()
+                        }
+                    } else {
+                        // Not yet loaded — show a hint
+                        container(
+                            text("Select this tab to load the app list.")
+                                .size(12)
+                                .color(t.text_secondary),
+                        )
+                        .width(Fill)
+                        .height(iced::Length::Fixed(200.0))
+                        .align_x(iced::Alignment::Center)
+                        .align_y(iced::Alignment::Center)
+                        .into()
+                    }
+                }
             };
 
             scrollable(
@@ -953,151 +1089,4 @@ impl App {
         super::modal_backdrop(card)
     }
 
-    // ── Apps Modal ────────────────────────────────────────────────────────────
-
-    pub(super) fn view_apps_modal(&self) -> Element<Message> {
-        let t = self.theme;
-
-        // ── Header ───────────────────────────────────────────────────────────
-        let header = container(
-            row![
-                text("Installed Apps").size(14).color(t.text),
-                iced::widget::horizontal_space(),
-                button(text("Refresh").size(11).color(t.accent))
-                    .style(t.transparent_button())
-                    .padding([2, 8])
-                    .on_press(Message::OpenAppsModal),
-                button(text("✕").size(11).color(t.text_secondary))
-                    .style(t.transparent_button())
-                    .padding([2, 8])
-                    .on_press(Message::CloseAppsModal),
-            ]
-            .align_y(iced::Alignment::Center)
-            .spacing(8),
-        )
-        .padding([10, 16])
-        .width(Fill)
-        .style(move |_| container::Style {
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
-
-        // ── Package list body ─────────────────────────────────────────────
-        let body: Element<Message> = if self.apps_loading {
-            container(
-                text("Loading apps…").size(12).color(t.text_secondary),
-            )
-            .width(Fill)
-            .height(iced::Length::Fixed(300.0))
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center)
-            .into()
-        } else if let Some(ref apps) = self.installed_apps {
-            if apps.is_empty() {
-                container(
-                    text("No user-installed apps found.").size(12).color(t.text_secondary),
-                )
-                .width(Fill)
-                .height(iced::Length::Fixed(300.0))
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
-                .into()
-            } else {
-                let rows: Vec<Element<Message>> = apps
-                    .iter()
-                    .map(|app| {
-                        let is_sel = self.apps_selected.as_deref() == Some(&app.package_id);
-                        let bg = if is_sel { Some(t.background_secondary) } else { None };
-                        let pkg = app.package_id.clone();
-                        container(
-                            button(
-                                text(&app.package_id)
-                                    .size(11)
-                                    .color(if is_sel { t.accent } else { t.text }),
-                            )
-                            .style(t.transparent_button())
-                            .padding([4, 8])
-                            .width(Fill)
-                            .on_press(Message::AppsSelectPackage(pkg)),
-                        )
-                        .style(move |_| container::Style {
-                            background: bg.map(|c| c.into()),
-                            ..Default::default()
-                        })
-                        .width(Fill)
-                        .into()
-                    })
-                    .collect();
-
-                scrollable(
-                    column(rows).width(Fill).spacing(1),
-                )
-                .height(iced::Length::Fixed(300.0))
-                .into()
-            }
-        } else {
-            container(
-                text("Open this dialog to load apps.").size(12).color(t.text_secondary),
-            )
-            .width(Fill)
-            .height(iced::Length::Fixed(300.0))
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center)
-            .into()
-        };
-
-        // ── Footer: Uninstall button ──────────────────────────────────────
-        let uninstall_color = if self.apps_selected.is_some() && !self.apps_uninstalling {
-            t.error
-        } else {
-            t.error.scale_alpha(0.3)
-        };
-        let uninstall_label = if self.apps_uninstalling {
-            "Uninstalling…"
-        } else {
-            "Uninstall"
-        };
-        let uninstall_btn = {
-            let b = button(
-                text(uninstall_label).size(11).color(uninstall_color),
-            )
-            .style(t.transparent_button())
-            .padding([4, 12]);
-            if self.apps_selected.is_some() && !self.apps_uninstalling {
-                b.on_press(Message::UninstallApp)
-            } else {
-                b
-            }
-        };
-
-        let footer = container(
-            row![
-                iced::widget::horizontal_space(),
-                uninstall_btn,
-            ]
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([8, 16])
-        .width(Fill)
-        .style(move |_| container::Style {
-            border: Border {
-                color: t.border,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
-
-        let card = container(
-            column![header, body, footer].width(Fill),
-        )
-        .width(480)
-        .style(t.primary_panel());
-
-        super::modal_backdrop(card)
-    }
 }

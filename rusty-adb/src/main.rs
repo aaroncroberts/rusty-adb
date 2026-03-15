@@ -162,6 +162,7 @@ pub(crate) enum DeviceTab {
     OsBuild,
     Connection,
     Display,
+    Apps,
 }
 
 impl std::fmt::Display for DeviceTab {
@@ -171,6 +172,7 @@ impl std::fmt::Display for DeviceTab {
             DeviceTab::OsBuild => f.write_str("OS / Build"),
             DeviceTab::Connection => f.write_str("Connection"),
             DeviceTab::Display => f.write_str("Display"),
+            DeviceTab::Apps => f.write_str("Apps"),
         }
     }
 }
@@ -413,10 +415,6 @@ enum Message {
     AndroidDeleteFailed(String),
 
     // ── App Management ────────────────────────────────────────────────────────
-    /// Open the installed apps modal and begin loading the package list
-    OpenAppsModal,
-    /// Close the installed apps modal
-    CloseAppsModal,
     /// Package list loaded from the device
     AppsLoaded(Vec<crate::adb::InstalledApp>),
     /// Package list fetch failed
@@ -573,8 +571,6 @@ struct App {
     queue_editing: Option<(u64, String)>,
 
     // ── App Management ────────────────────────────────────────────────────────
-    /// Whether the installed apps modal is open
-    apps_modal_open: bool,
     /// User-installed packages loaded from the device (None = not yet loaded)
     installed_apps: Option<Vec<crate::adb::InstalledApp>>,
     /// True while `pm list packages` is in flight
@@ -635,7 +631,6 @@ impl Default for App {
             delete_confirm_paths: None,
             preview_modal: None,
             android_last_click: None,
-            apps_modal_open: false,
             installed_apps: None,
             apps_loading: false,
             apps_selected: None,
