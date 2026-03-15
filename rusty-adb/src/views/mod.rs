@@ -499,10 +499,11 @@ impl App {
 
 /// Build a tooltip that only becomes visible after 500 ms of continuous hover.
 ///
-/// Each call site must provide a unique `key` (`&'static str`).  On mouse
-/// enter a `TooltipHover(key)` message starts a 500 ms timer; on exit
-/// `TooltipLeft` immediately clears it.  The tooltip widget is only inserted
-/// into the element tree once `self.tooltip_show == Some(key)`.
+/// The `tooltip` wrapper is **always** present in the widget tree so that iced's
+/// virtual-DOM diff never sees a structural change.  Only the tip content and
+/// its container style change between the hidden and visible states.  Keeping
+/// the structure stable prevents the mouse-area from firing spurious exit events
+/// when the reveal timer fires, which would otherwise cause the tooltip to flash.
 impl App {
     pub(super) fn delayed_tip<'a>(
         &self,
@@ -511,15 +512,42 @@ impl App {
         key: &'static str,
         pos: TipPos,
     ) -> Element<'a, Message> {
-        let show = self.tooltip_show;
+        let visible = self.tooltip_show == Some(key);
         let area = mouse_area(content.into())
             .on_enter(Message::TooltipHover(key))
             .on_exit(Message::TooltipLeft);
-        if show == Some(key) {
-            tooltip(area, text(tip_text).size(11), pos).into()
+
+        // Always wrap in tooltip to keep the tree structure stable.
+        // When not yet visible: use 0×0 transparent content so nothing shows.
+        let tip_el: Element<Message> = if visible {
+            text(tip_text).size(11).into()
         } else {
-            area.into()
-        }
+            iced::widget::Space::new(
+                iced::Length::Fixed(0.0),
+                iced::Length::Fixed(0.0),
+            )
+            .into()
+        };
+
+        tooltip(area, tip_el, pos)
+            .style(move |theme: &iced::Theme| {
+                if visible {
+                    let p = theme.extended_palette();
+                    iced::widget::container::Style {
+                        background: Some(p.background.weak.color.into()),
+                        border: iced::Border {
+                            color: p.background.strong.color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        text_color: Some(p.background.base.text),
+                        ..Default::default()
+                    }
+                } else {
+                    iced::widget::container::Style::default()
+                }
+            })
+            .into()
     }
 }
 
