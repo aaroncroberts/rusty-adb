@@ -219,7 +219,7 @@ impl App {
                 cmd_items.push(
                     tooltip(
                         cmd_btn(
-                            Some(icons::add_to_queue()),
+                            Some(icons::copy()),
                             "Copy to Device",
                             t.accent,
                             Some(Message::ConfirmCopyToDevice),
@@ -233,7 +233,7 @@ impl App {
                 // Dimmed placeholder when nothing is selected
                 cmd_items.push(
                     cmd_btn(
-                        Some(icons::add_to_queue()),
+                        Some(icons::copy()),
                         "Copy to Device",
                         t.text_secondary.scale_alpha(0.4),
                         None,

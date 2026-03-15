@@ -58,6 +58,9 @@ impl App {
         if let Some(paths) = &self.delete_confirm_paths {
             items.push(self.view_delete_confirm(paths));
         }
+        if self.install_apk_confirm.is_some() {
+            items.push(self.view_install_apk_confirm());
+        }
         items.push(self.view_panes());
         items.push(
             self.status_bar.view(
@@ -414,6 +417,42 @@ impl App {
         } else {
             styled.into()
         }
+    }
+
+    /// Install APK confirmation banner — shown when the user pressed "Install APK" in the toolbar.
+    fn view_install_apk_confirm(&self) -> Element<Message> {
+        let t = self.theme;
+        let name = self
+            .install_apk_confirm
+            .as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "selected file".to_string());
+        let label = format!("Install \"{name}\" on connected device?");
+
+        let confirm_btn = button(text("Install").size(12).color(iced::Color::WHITE))
+            .style(t.accent_button())
+            .padding([4, 12])
+            .on_press(Message::InstallApkConfirmed);
+
+        let cancel_btn = button(text("Cancel").size(12).color(t.text))
+            .style(t.transparent_button())
+            .padding([4, 8])
+            .on_press(Message::InstallApkCancel);
+
+        let content = row![
+            text(label).size(12).color(t.text).width(Fill),
+            confirm_btn,
+            cancel_btn,
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(8)
+        .padding([4, 12]);
+
+        container(content)
+            .width(Fill)
+            .style(t.warning_banner())
+            .into()
     }
 
     /// Delete confirmation banner — shown above the panes when paths are pending deletion.

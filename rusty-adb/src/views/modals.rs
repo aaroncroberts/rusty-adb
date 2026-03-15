@@ -5,8 +5,8 @@ use crate::icons;
 use crate::queue::QueueStatus;
 use crate::{App, DeviceTab, LogLevel, Message, PreviewContent};
 use iced::widget::{
-    button, column, container, image, pick_list, progress_bar, row, scrollable, text, text_input,
-    toggler, Row,
+    button, column, container, image, pick_list, progress_bar, rich_text, row, scrollable, text,
+    text_input, toggler, Row,
 };
 use iced::{Border, Element, Fill};
 
@@ -98,9 +98,30 @@ impl App {
 
     /// Log viewer modal overlay.
     ///
-    /// Shows a file picker (drop-down), a level filter, and the log content.
+    /// Shows a file picker (drop-down), a level filter, and color-coded log content.
     pub(super) fn view_log_viewer(&self) -> Element<Message> {
         let t = self.theme;
+
+        // Retro terminal background — near-black with a faint green tint
+        const TERM_BG: iced::Color = iced::Color::from_rgb(0.04, 0.06, 0.05);
+
+        // Return the color for a log line based on its level keyword
+        let line_color = |line: &str| -> iced::Color {
+            let u = line.to_uppercase();
+            if u.contains(" ERROR") || u.contains("[ERROR]") {
+                iced::Color::from_rgb8(0xff, 0x55, 0x55) // bright red
+            } else if u.contains(" WARN") || u.contains("[WARN]") {
+                iced::Color::from_rgb8(0xff, 0xaa, 0x00) // amber
+            } else if u.contains(" INFO") || u.contains("[INFO]") {
+                t.accent // teal
+            } else if u.contains(" DEBUG") || u.contains("[DEBUG]") {
+                t.text_secondary
+            } else if u.contains(" TRACE") || u.contains("[TRACE]") {
+                t.text_secondary.scale_alpha(0.45)
+            } else {
+                t.text.scale_alpha(0.65) // continuation / unknown
+            }
+        };
 
         // ── File picker ────────────────────────────────────────────────────
         let file_names: Vec<String> = self
@@ -120,7 +141,6 @@ impl App {
                 .map(|s| s.to_string())
         });
 
-        // Build the file pick_list — map chosen name back to path on selection
         let files_for_closure = self.log_viewer_files.clone();
         let file_picker = pick_list(file_names, selected_name, move |chosen: String| {
             let path = files_for_closure
@@ -147,29 +167,56 @@ impl App {
         .text_size(11)
         .padding([2, 8]);
 
-        let log_scroll = scrollable(
-            container(
-                text(self.log_viewer_display.clone())
+        // ── Color-coded log content via rich_text ──────────────────────────
+        // One span per line — much more efficient than one Text widget per line.
+        // Annotate spans with Link=Message so the resulting element is Element<Message>.
+        let log_content = if self.log_viewer_display.is_empty() {
+            rich_text([
+                iced::widget::text::Span::<'_, Message>::new("(no log content)")
                     .size(11)
-                    .font(iced::Font::MONOSPACE)
-                    .color(t.text),
-            )
-            .padding(8)
-            .width(Fill),
+                    .color(t.text_secondary)
+                    .font(iced::Font::MONOSPACE),
+            ])
+        } else {
+            let spans: Vec<iced::widget::text::Span<'_, Message>> = self
+                .log_viewer_display
+                .lines()
+                .map(|line| {
+                    iced::widget::text::Span::new(format!("{line}\n"))
+                        .size(11)
+                        .color(line_color(line))
+                        .font(iced::Font::MONOSPACE)
+                })
+                .collect();
+            rich_text(spans)
+        };
+
+        let log_scroll = scrollable(
+            container(log_content)
+                .padding([8, 12])
+                .width(Fill),
         )
         .height(Fill);
 
-        // ── Toolbar row ───────────────────────────────────────────────────
+        // ── Toolbar ────────────────────────────────────────────────────────
         let toolbar = row![
+            text(icons::filter()).font(icons::font()).size(13).color(t.accent),
             text("File:").size(11).color(t.text_secondary),
             file_picker,
             iced::widget::horizontal_space(),
             text("Level:").size(11).color(t.text_secondary),
             level_picker,
-            button(text("Close").size(11).color(t.text))
-                .style(t.secondary_button())
-                .padding([2, 10])
-                .on_press(Message::CloseLogViewer),
+            button(
+                row![
+                    text(icons::close()).font(icons::font()).size(11).color(t.text),
+                    text("Close").size(11).color(t.text),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .style(t.secondary_button())
+            .padding([2, 10])
+            .on_press(Message::CloseLogViewer),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center)
@@ -177,50 +224,103 @@ impl App {
 
         let card = container(
             column![
-                // Header
+                // ── Header bar (retro terminal style) ────────────────────
                 container(
-                    row![text("Log Viewer").size(14).color(t.text).width(Fill),].padding([6, 10]),
+                    row![
+                        text(icons::eye())
+                            .font(icons::font())
+                            .size(14)
+                            .color(t.accent),
+                        text("  SYSTEM LOG")
+                            .size(13)
+                            .color(t.accent)
+                            .font(iced::Font::MONOSPACE),
+                        iced::widget::horizontal_space(),
+                        text(
+                            self.log_viewer_selected
+                                .as_ref()
+                                .and_then(|p| p.file_name())
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("—"),
+                        )
+                        .size(11)
+                        .color(t.text_secondary)
+                        .font(iced::Font::MONOSPACE),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center)
+                    .padding([6, 10]),
                 )
                 .width(Fill)
-                .style(t.secondary_panel()),
-                // Toolbar
+                .style(move |_th| container::Style {
+                    background: Some(t.accent.scale_alpha(0.08).into()),
+                    border: Border {
+                        color: t.accent.scale_alpha(0.3),
+                        width: 0.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+                // ── Toolbar row ──────────────────────────────────────────
                 container(toolbar)
                     .width(Fill)
                     .style(move |_th| container::Style {
-                        background: Some(t.background_secondary.scale_alpha(0.5).into()),
+                        background: Some(t.background_secondary.scale_alpha(0.4).into()),
                         border: Border {
                             color: t.border,
-                            width: 1.0,
+                            width: 0.0,
                             ..Default::default()
                         },
                         ..Default::default()
                     }),
-                // Log content
-                log_scroll,
+                // ── Log content (retro terminal background) ───────────────
+                container(log_scroll)
+                    .width(Fill)
+                    .height(Fill)
+                    .style(move |_th| container::Style {
+                        background: Some(TERM_BG.into()),
+                        ..Default::default()
+                    }),
             ]
             .width(Fill)
             .height(Fill),
         )
-        .width(iced::Length::FillPortion(9))
-        .height(iced::Length::FillPortion(8))
-        .max_width(1100.0)
-        .max_height(700.0)
+        .width(Fill)
+        .height(Fill)
         .style(move |_th| container::Style {
-            background: Some(t.background.into()),
+            background: Some(TERM_BG.into()),
             border: Border {
-                color: t.border,
+                color: t.accent.scale_alpha(0.4),
                 width: 1.0,
                 radius: 0.0.into(),
             },
             shadow: iced::Shadow {
-                color: iced::Color::BLACK.scale_alpha(0.5),
+                color: iced::Color::BLACK.scale_alpha(0.6),
                 offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 24.0,
+                blur_radius: 32.0,
             },
             ..Default::default()
         });
 
-        super::modal_backdrop(card)
+        // Wrap in a padded container so the viewer has margins from the window edges.
+        // This replaces the fixed max_width/max_height that caused overflow on small windows.
+        let padded = container(card)
+            .width(Fill)
+            .height(Fill)
+            .padding(36);
+
+        // Use a custom backdrop that doesn't re-center (card is already Fill)
+        let backdrop = container(padded)
+            .width(Fill)
+            .height(Fill)
+            .style(|_th| container::Style {
+                background: Some(iced::Color::from_rgba(0.02, 0.07, 0.06, 0.85).into()),
+                ..Default::default()
+            });
+
+        iced::widget::mouse_area(backdrop)
+            .on_press(Message::CloseLogViewer)
+            .into()
     }
 
     /// About modal overlay — app info, version, GitHub link, license.
@@ -979,28 +1079,7 @@ impl App {
                             .align_y(iced::Alignment::Center)
                             .into()
                         } else {
-                            // Uninstall footer
-                            let uninstall_color =
-                                if self.apps_selected.is_some() && !self.apps_uninstalling {
-                                    t.error
-                                } else {
-                                    t.error.scale_alpha(0.3)
-                                };
-                            let uninstall_label =
-                                if self.apps_uninstalling { "Uninstalling…" } else { "Uninstall" };
-                            let uninstall_btn = {
-                                let b = button(
-                                    text(uninstall_label).size(11).color(uninstall_color),
-                                )
-                                .style(t.transparent_button())
-                                .padding([2, 8]);
-                                if self.apps_selected.is_some() && !self.apps_uninstalling {
-                                    b.on_press(Message::UninstallApp)
-                                } else {
-                                    b
-                                }
-                            };
-
+                            // Package list rows
                             let rows: Vec<Element<Message>> = apps
                                 .iter()
                                 .map(|app| {
@@ -1032,18 +1111,78 @@ impl App {
                                 })
                                 .collect();
 
+                            // Footer: confirm row when pending, otherwise uninstall button
+                            let footer: Element<Message> = if self.uninstall_confirm {
+                                let pkg_label = self
+                                    .apps_selected
+                                    .as_deref()
+                                    .unwrap_or("this app");
+                                let confirm_btn = button(
+                                    text("Yes, Uninstall")
+                                        .size(11)
+                                        .color(iced::Color::WHITE),
+                                )
+                                .style(t.error_button())
+                                .padding([3, 10])
+                                .on_press(Message::UninstallConfirmed);
+                                let cancel_btn = button(
+                                    text("Cancel").size(11).color(t.text),
+                                )
+                                .style(t.transparent_button())
+                                .padding([3, 8])
+                                .on_press(Message::UninstallCancel);
+                                container(
+                                    row![
+                                        text(format!(
+                                            "Uninstall \"{}\"? This cannot be undone.",
+                                            pkg_label
+                                        ))
+                                        .size(11)
+                                        .color(t.text)
+                                        .width(Fill),
+                                        confirm_btn,
+                                        cancel_btn,
+                                    ]
+                                    .spacing(6)
+                                    .align_y(iced::Alignment::Center)
+                                    .padding([4, 6]),
+                                )
+                                .width(Fill)
+                                .style(t.warning_banner())
+                                .into()
+                            } else {
+                                let uninstall_color =
+                                    if self.apps_selected.is_some() && !self.apps_uninstalling {
+                                        t.error
+                                    } else {
+                                        t.error.scale_alpha(0.3)
+                                    };
+                                let uninstall_label =
+                                    if self.apps_uninstalling { "Uninstalling…" } else { "Uninstall" };
+                                let b = button(
+                                    text(uninstall_label).size(11).color(uninstall_color),
+                                )
+                                .style(t.transparent_button())
+                                .padding([2, 8]);
+                                let uninstall_btn: Element<Message> =
+                                    if self.apps_selected.is_some() && !self.apps_uninstalling {
+                                        b.on_press(Message::UninstallApp).into()
+                                    } else {
+                                        b.into()
+                                    };
+                                container(
+                                    row![iced::widget::horizontal_space(), uninstall_btn]
+                                        .align_y(iced::Alignment::Center),
+                                )
+                                .width(Fill)
+                                .padding([6, 0])
+                                .into()
+                            };
+
                             column![
                                 scrollable(column(rows).width(Fill).spacing(1))
                                     .height(iced::Length::Fixed(186.0)),
-                                container(
-                                    row![
-                                        iced::widget::horizontal_space(),
-                                        uninstall_btn,
-                                    ]
-                                    .align_y(iced::Alignment::Center),
-                                )
-                                .width(Fill)
-                                .padding([6, 0]),
+                                footer,
                             ]
                             .spacing(4)
                             .into()

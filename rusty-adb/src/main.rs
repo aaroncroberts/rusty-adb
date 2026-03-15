@@ -421,15 +421,23 @@ enum Message {
     AppsFailed(String),
     /// User selected a package in the apps list
     AppsSelectPackage(String),
-    /// User pressed Uninstall — runs `adb uninstall <package_id>`
+    /// User pressed Uninstall — sets confirm flag (does NOT yet run ADB)
     UninstallApp,
+    /// User confirmed the uninstall dialog — runs `adb uninstall <package_id>`
+    UninstallConfirmed,
+    /// User cancelled the uninstall confirmation
+    UninstallCancel,
     /// `adb uninstall` succeeded
     UninstallComplete,
     /// `adb uninstall` failed
     UninstallFailed(String),
-    /// User pressed "Install APK" — runs `adb install -r <path>`
+    /// User pressed "Install APK" toolbar button — captures path for confirm banner
     InstallApk,
-    /// `adb install` succeeded — carries the package name from stdout
+    /// User confirmed the install APK banner — runs `adb install -r <path>`
+    InstallApkConfirmed,
+    /// User cancelled the install APK confirmation banner
+    InstallApkCancel,
+    /// `adb install` succeeded — carries the APK filename
     InstallApkComplete(String),
     /// `adb install` failed
     InstallApkFailed(String),
@@ -577,8 +585,12 @@ struct App {
     apps_loading: bool,
     /// Package ID of the currently selected app in the list
     apps_selected: Option<String>,
+    /// True when Uninstall was clicked — waits for user confirmation
+    uninstall_confirm: bool,
     /// True while `adb uninstall` is in flight
     apps_uninstalling: bool,
+    /// APK path pending install confirmation — Some(path) shows the confirm banner
+    install_apk_confirm: Option<PathBuf>,
     /// True while `adb install` is in flight
     apps_installing: bool,
 
@@ -634,7 +646,9 @@ impl Default for App {
             installed_apps: None,
             apps_loading: false,
             apps_selected: None,
+            uninstall_confirm: false,
             apps_uninstalling: false,
+            install_apk_confirm: None,
             apps_installing: false,
             log_viewer_open: false,
             log_viewer_files: Vec::new(),

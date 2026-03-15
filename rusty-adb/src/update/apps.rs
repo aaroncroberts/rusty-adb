@@ -3,8 +3,6 @@ use crate::{App, Message};
 use iced::Task;
 
 impl App {
-    // ── Open / Close ──────────────────────────────────────────────────────────
-
     // ── Package list ──────────────────────────────────────────────────────────
 
     /// Spawn `pm list packages -3 -f` and dispatch the result.
@@ -15,6 +13,7 @@ impl App {
         let Some(serial) = self.active_serial.clone() else {
             return Task::none();
         };
+        tracing::info!(serial = %serial, "loading installed packages");
         self.apps_loading = true;
         Task::perform(
             async move {
@@ -34,6 +33,7 @@ impl App {
         &mut self,
         apps: Vec<crate::adb::InstalledApp>,
     ) -> Task<Message> {
+        tracing::info!(count = apps.len(), "installed packages loaded");
         self.apps_loading = false;
         self.installed_apps = Some(apps);
         Task::none()
@@ -46,23 +46,42 @@ impl App {
     }
 
     pub(super) fn apps_select_package(&mut self, pkg: String) -> Task<Message> {
+        tracing::debug!(package = %pkg, "app selected for action");
+        // Selecting a new package clears any pending confirmation
+        self.uninstall_confirm = false;
         self.apps_selected = Some(pkg);
         Task::none()
     }
 
     // ── Uninstall ─────────────────────────────────────────────────────────────
 
+    /// First click: set the confirmation flag so the UI shows a confirm row.
     pub(super) fn uninstall_app(&mut self) -> Task<Message> {
+        let Some(ref pkg) = self.apps_selected else {
+            return Task::none();
+        };
+        tracing::info!(package = %pkg, "uninstall requested — awaiting confirmation");
+        self.uninstall_confirm = true;
+        Task::none()
+    }
+
+    /// Second step: user confirmed — execute `adb uninstall`.
+    pub(super) fn uninstall_confirmed(&mut self) -> Task<Message> {
         let Some(ref pkg) = self.apps_selected.clone() else {
+            self.uninstall_confirm = false;
             return Task::none();
         };
         let Some(client) = self.adb_client.clone() else {
+            self.uninstall_confirm = false;
             return Task::none();
         };
         let Some(serial) = self.active_serial.clone() else {
+            self.uninstall_confirm = false;
             return Task::none();
         };
         let pkg = pkg.clone();
+        tracing::info!(package = %pkg, serial = %serial, "executing adb uninstall");
+        self.uninstall_confirm = false;
         self.apps_uninstalling = true;
         Task::perform(
             async move {
@@ -78,11 +97,20 @@ impl App {
         )
     }
 
+    /// User cancelled — dismiss the confirmation row.
+    pub(super) fn uninstall_cancel(&mut self) -> Task<Message> {
+        tracing::debug!("uninstall cancelled by user");
+        self.uninstall_confirm = false;
+        Task::none()
+    }
+
     pub(super) fn uninstall_complete(&mut self) -> Task<Message> {
+        let pkg = self.apps_selected.clone().unwrap_or_default();
+        tracing::info!(package = %pkg, "package uninstalled successfully");
         self.apps_uninstalling = false;
         self.apps_selected = None;
+        self.uninstall_confirm = false;
         // Refresh the list so the uninstalled app disappears, then show a toast.
-        // Use Task::done to inject a follow-up message rather than calling update() twice.
         self.load_packages().chain(Task::done(Message::ShowToast(
             "App uninstalled".to_string(),
         )))
@@ -90,14 +118,15 @@ impl App {
 
     pub(super) fn uninstall_failed(&mut self, msg: String) -> Task<Message> {
         self.apps_uninstalling = false;
+        self.uninstall_confirm = false;
         tracing::warn!(error = %msg, "uninstall failed");
         self.update(Message::ShowError(format!("Uninstall failed: {msg}")))
     }
 
     // ── Install APK ───────────────────────────────────────────────────────────
 
+    /// First click: resolve the APK path and store it for the confirm banner.
     pub(super) fn install_apk(&mut self) -> Task<Message> {
-        // Resolve the first selected entry's path from the local pane
         let local_path = self
             .local_pane
             .selected
@@ -107,12 +136,30 @@ impl App {
         let Some(local_path) = local_path else {
             return Task::none();
         };
+        tracing::info!(
+            path = %local_path.display(),
+            "install APK requested — awaiting confirmation"
+        );
+        self.install_apk_confirm = Some(local_path);
+        Task::none()
+    }
+
+    /// Second step: user confirmed — execute `adb install -r`.
+    pub(super) fn install_apk_confirmed(&mut self) -> Task<Message> {
+        let Some(local_path) = self.install_apk_confirm.take() else {
+            return Task::none();
+        };
         let Some(client) = self.adb_client.clone() else {
             return Task::none();
         };
         let Some(serial) = self.active_serial.clone() else {
             return Task::none();
         };
+        tracing::info!(
+            path = %local_path.display(),
+            serial = %serial,
+            "executing adb install"
+        );
         self.apps_installing = true;
         Task::perform(
             async move {
@@ -134,9 +181,16 @@ impl App {
         )
     }
 
+    /// User cancelled the install APK confirmation banner.
+    pub(super) fn install_apk_cancel(&mut self) -> Task<Message> {
+        tracing::debug!("APK install cancelled by user");
+        self.install_apk_confirm = None;
+        Task::none()
+    }
+
     pub(super) fn install_apk_complete(&mut self, name: String) -> Task<Message> {
         self.apps_installing = false;
-        tracing::info!(apk = %name, "APK installed");
+        tracing::info!(apk = %name, "APK installed successfully");
         self.update(Message::ShowToast(format!("Installed: {name}")))
     }
 

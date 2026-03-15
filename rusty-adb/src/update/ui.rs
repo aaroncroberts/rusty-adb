@@ -332,6 +332,12 @@ impl App {
         if self.copy_confirm_open {
             return self.update(Message::CloseCopyConfirm);
         }
+        if self.uninstall_confirm {
+            return self.update(Message::UninstallCancel);
+        }
+        if self.install_apk_confirm.is_some() {
+            return self.update(Message::InstallApkCancel);
+        }
         self.update(Message::AndroidRenameCancel)
     }
 }

@@ -85,6 +85,8 @@ impl App {
                         // Clear cached app list so it reloads fresh on next connect
                         self.installed_apps = None;
                         self.apps_selected = None;
+                        self.uninstall_confirm = false;
+                        self.install_apk_confirm = None;
                         Task::none()
                     }
                     DeviceTransition::NoChange => Task::none(),
@@ -287,9 +289,13 @@ impl App {
             Message::AppsFailed(msg) => self.apps_failed(msg),
             Message::AppsSelectPackage(pkg) => self.apps_select_package(pkg),
             Message::UninstallApp => self.uninstall_app(),
+            Message::UninstallConfirmed => self.uninstall_confirmed(),
+            Message::UninstallCancel => self.uninstall_cancel(),
             Message::UninstallComplete => self.uninstall_complete(),
             Message::UninstallFailed(msg) => self.uninstall_failed(msg),
             Message::InstallApk => self.install_apk(),
+            Message::InstallApkConfirmed => self.install_apk_confirmed(),
+            Message::InstallApkCancel => self.install_apk_cancel(),
             Message::InstallApkComplete(msg) => self.install_apk_complete(msg),
             Message::InstallApkFailed(msg) => self.install_apk_failed(msg),
         }

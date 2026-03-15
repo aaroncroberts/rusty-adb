@@ -122,7 +122,17 @@ pub fn close() -> String {
     Cod::Close.to_string()
 }
 
-/// Add-to-queue / enqueue glyph — used for the "Copy to Device" queue button.
+/// Copy / duplicate glyph — used for the "Copy to Device" button.
+pub fn copy() -> String {
+    Cod::Copy.to_string()
+}
+
+/// Files icon — two overlapping pages, used for multi-file operations.
+pub fn files() -> String {
+    Cod::Files.to_string()
+}
+
+/// Add-to-queue / enqueue glyph — kept for install APK button.
 pub fn add_to_queue() -> String {
     Cod::Add.to_string()
 }
@@ -173,5 +183,7 @@ mod tests {
         assert!(!download().is_empty());
         assert!(!new_folder().is_empty());
         assert!(!close().is_empty());
+        assert!(!copy().is_empty());
+        assert!(!files().is_empty());
     }
 }
