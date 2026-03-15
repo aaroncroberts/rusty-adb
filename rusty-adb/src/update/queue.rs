@@ -176,10 +176,28 @@ impl App {
 
         Task::perform(
             async move {
-                crate::adb::run_transfer(&job, cancel, |_event| {})
+                // Capture adb-level failures (exit 1, "Permission denied", etc.)
+                // run_transfer always returns Ok(()); failures come via the callback.
+                let failure: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
+                let failure_capture = std::sync::Arc::clone(&failure);
+
+                crate::adb::run_transfer(&job, cancel, move |event| {
+                    if let crate::adb::TransferEvent::Failed(reason) = &event {
+                        if let Ok(mut g) = failure_capture.lock() {
+                            *g = Some(reason.clone());
+                        }
+                    }
+                })
                 .await
-                .map(|_| id)
-                .map_err(|e| (id, e.to_string()))
+                .map_err(|e| (id, e.to_string()))?;
+
+                // If the callback recorded a failure, surface it as Err
+                if let Some(reason) = failure.lock().ok().and_then(|mut g| g.take()) {
+                    tracing::warn!(id, error = %reason, "queue: adb push failed");
+                    return Err((id, reason));
+                }
+                Ok(id)
             },
             |result| match result {
                 Ok(id) => Message::QueueItemComplete(id),
@@ -213,10 +231,22 @@ impl App {
 
     pub(super) fn queue_item_failed(&mut self, id: u64, reason: String) -> Task<Message> {
         tracing::warn!(id, error = %reason, "queue: item copy failed");
+        // Get the filename for a useful error message before updating status
+        let filename = self
+            .copy_queue
+            .items
+            .iter()
+            .find(|i| i.id == id)
+            .and_then(|i| i.local_path.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("item {id}"));
         self.copy_queue
-            .update_status(id, QueueStatus::Failed { reason });
-        // Continue with the next item even after a failure
-        self.try_start_next_queue_copy()
+            .update_status(id, QueueStatus::Failed { reason: reason.clone() });
+        // Show a visible error banner so the user knows the copy failed
+        let next = self.try_start_next_queue_copy();
+        next.chain(self.update(Message::ShowError(format!(
+            "Copy failed for \"{filename}\": {reason}"
+        ))))
     }
 
 }
