@@ -389,6 +389,9 @@ enum Message {
     // ── Escape key ────────────────────────────────────────────────────────────
     /// Escape pressed — routes to ClosePreview or AndroidRenameCancel
     EscapePressed,
+    /// Absorbs a pointer event without side effects — used by modal overlays to
+    /// prevent clicks on non-interactive content from leaking to the pane behind.
+    NoOp,
 
     // ── File operations (rename / delete on Android device) ───────────────────
     /// F2: begin inline rename for the first selected android entry

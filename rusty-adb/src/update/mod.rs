@@ -277,6 +277,7 @@ impl App {
 
             // ── Escape routing ────────────────────────────────────────────────
             Message::EscapePressed => self.escape_pressed(),
+            Message::NoOp => Task::none(),
 
             // ── File preview ──────────────────────────────────────────────────
             Message::PreviewFile(entry) => self.preview_file(entry),

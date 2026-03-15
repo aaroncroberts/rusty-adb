@@ -218,12 +218,34 @@ impl App {
         .height(Fill);
 
         // ── Toolbar ────────────────────────────────────────────────────────
+        // Total filtered lines — shown in toolbar so users know when a level
+        // produces no new results (e.g. DEBUG selected but file written at INFO)
+        let total_filtered = self.log_viewer_display.lines().count();
+        // Special-case: filter_log emits a single sentinel string when empty
+        let filter_has_no_results = self.log_viewer_display.starts_with("(No lines match");
+
+        let line_count_label = if filter_has_no_results {
+            text(format!(
+                "No {} lines in file — written at a higher level",
+                self.log_viewer_level
+            ))
+            .size(10)
+            .color(t.warning)
+            .font(iced::Font::MONOSPACE)
+        } else {
+            text(format!("{total_filtered} lines"))
+                .size(10)
+                .color(t.text_secondary.scale_alpha(0.6))
+                .font(iced::Font::MONOSPACE)
+        };
+
         let toolbar = row![
             text(icons::filter()).font(icons::font()).size(13).color(t.accent),
             text("File:").size(11).color(t.text_secondary),
             file_picker,
             iced::widget::horizontal_space(),
-            text("Level:").size(11).color(t.text_secondary),
+            line_count_label,
+            text("  Level:").size(11).color(t.text_secondary),
             level_picker,
             button(
                 row![
@@ -321,25 +343,20 @@ impl App {
             ..Default::default()
         });
 
-        // Wrap in a padded container so the viewer has margins from the window edges.
-        // This replaces the fixed max_width/max_height that caused overflow on small windows.
-        let padded = container(card)
+        // Wrap card in mouse_area BEFORE adding padding.
+        // Clicks anywhere on the card (text, empty scroll area) return Captured,
+        // preventing them from bubbling to the backdrop and closing the viewer.
+        let card_with_absorb = iced::widget::mouse_area(card).on_press(Message::NoOp);
+
+        let padded = container(card_with_absorb)
             .width(Fill)
             .height(Fill)
             .padding(36);
 
-        // Use a custom backdrop that doesn't re-center (card is already Fill)
-        let backdrop = container(padded)
-            .width(Fill)
-            .height(Fill)
-            .style(|_th| container::Style {
-                background: Some(iced::Color::from_rgba(0.02, 0.07, 0.06, 0.85).into()),
-                ..Default::default()
-            });
-
-        iced::widget::mouse_area(backdrop)
-            .on_press(Message::CloseLogViewer)
-            .into()
+        // modal_backdrop provides the dark overlay; clicks in the 36-px dark margins
+        // trigger EscapePressed (not CloseLogViewer directly), which routes through
+        // escape_pressed() and handles any in-progress confirm dialogs first.
+        super::modal_backdrop(padded)
     }
 
     /// About modal overlay — app info, version, GitHub link, license.
