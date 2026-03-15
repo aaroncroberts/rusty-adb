@@ -805,10 +805,12 @@ fn android_entries_loaded_transitions_pane_to_ready() {
 fn local_entries_loaded_transitions_pane_to_ready() {
     let mut app = App::default();
     app.local_pane.state = PaneState::Loading;
+    let test_path = PathBuf::from("/test/home");
+    app.local_pane.current_path = test_path.clone();
 
     let entries = vec![DirEntry {
         name: "Documents".to_string(),
-        path: PathBuf::from("/Users/aaron/Documents"),
+        path: test_path.join("Documents"),
         size: 0,
         modified_display: "2024-01-01".to_string(),
         is_dir: true,
@@ -818,7 +820,7 @@ fn local_entries_loaded_transitions_pane_to_ready() {
     }];
 
     let _ = app.update(Message::LocalEntriesLoaded {
-        path: PathBuf::from("/Users/aaron"),
+        path: test_path,
         entries,
     });
 
