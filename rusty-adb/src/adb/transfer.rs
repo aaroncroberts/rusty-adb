@@ -166,8 +166,12 @@ where
         ("-s", job.serial.as_str())
     };
 
+    // Note: older adb (≤1.0.40) used `--progress` to emit [XX%] lines.
+    // adb 36+ (platform-tools 35+) removed the flag — progress is always emitted
+    // when stderr is a tty, but suppressed when piped (which is our case). The
+    // summary line ("1 file pushed … X MB/s") still appears in both versions.
     let mut child = tokio::process::Command::new(&job.adb_path)
-        .args([flag, id, adb_verb, "--progress", &source_str, &dest_str])
+        .args([flag, id, adb_verb, &source_str, &dest_str])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
