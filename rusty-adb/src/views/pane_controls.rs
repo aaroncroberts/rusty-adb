@@ -289,7 +289,7 @@ impl App {
             }
         }
 
-        // Layout: [View label] [picker] [chips…] ──── [cmd buttons] [⊞]
+        // Layout: [View label] [picker] [chips…] [cmd buttons] ──── [⊞]
         let mut toolbar_items: Vec<Element<'a, Message>> = Vec::new();
         toolbar_items.push(text("View").size(11).color(t.text_secondary).into());
         toolbar_items.push(iced::widget::Space::new(4, 1).into());
@@ -297,9 +297,8 @@ impl App {
         for chip in chip_items {
             toolbar_items.push(chip);
         }
-        toolbar_items.push(iced::widget::horizontal_space().into());
         toolbar_items.push(cmd_row.into());
-        toolbar_items.push(iced::widget::Space::new(4, 1).into());
+        toolbar_items.push(iced::widget::horizontal_space().into());
         toolbar_items.push(show_btn.into());
 
         let toolbar = iced::widget::Row::from_vec(toolbar_items)
