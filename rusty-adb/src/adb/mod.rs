@@ -242,9 +242,20 @@ pub mod mock {
                 serial: serial.to_string(),
                 model: Some("Mock Device".to_string()),
                 manufacturer: Some("MockCorp".to_string()),
+                brand: Some("MockBrand".to_string()),
                 android_version: Some("14".to_string()),
                 api_level: Some("34".to_string()),
+                security_patch: Some("2024-01-01".to_string()),
+                build_fingerprint: Some("mockbrand/mockdevice/mockdevice:14/UP1A/mock:user/release-keys".to_string()),
+                kernel_version: Some("5.15.131-android13-8".to_string()),
+                uptime: Some("up 2 days, 3:45".to_string()),
+                cpu_abi: Some("arm64-v8a".to_string()),
+                total_ram: Some("7.4 GB".to_string()),
+                screen_resolution: Some("1080x2400".to_string()),
+                screen_density: Some("420 dpi".to_string()),
                 transport: Some("USB".to_string()),
+                battery_level: Some("87%".to_string()),
+                storage_data: Some("42 GB free / 128 GB total".to_string()),
                 ..Default::default()
             })
         }
@@ -867,16 +878,30 @@ pub struct DeviceDetails {
     pub security_patch: Option<String>,
     pub build_fingerprint: Option<String>,
 
+    // ── OS / Build (extended) ────────────────────────────────────────────────
+    /// Kernel version from `uname -r`, e.g. "5.15.131-android13"
+    pub kernel_version: Option<String>,
+    /// System uptime from `uptime`, first line trimmed
+    pub uptime: Option<String>,
+
     // ── Hardware ─────────────────────────────────────────────────────────────
     pub cpu_abi: Option<String>,
     pub screen_resolution: Option<String>,
     pub screen_density: Option<String>,
+    /// Total RAM from `/proc/meminfo`, e.g. "7.4 GB"
+    pub total_ram: Option<String>,
 
     // ── Connection ───────────────────────────────────────────────────────────
     /// "USB", "TCP/IP", or derived from sys.usb.state / serial format
     pub transport: Option<String>,
     pub ip_address: Option<String>,
     pub usb_state: Option<String>,
+    /// Battery level from `dumpsys battery`, e.g. "87%"
+    pub battery_level: Option<String>,
+
+    // ── Storage ──────────────────────────────────────────────────────────────
+    /// Available/total for /data from `df -h /data`, e.g. "42 GB / 128 GB"
+    pub storage_data: Option<String>,
 
     // ── Misc ─────────────────────────────────────────────────────────────────
     pub is_emulator: bool,
@@ -939,6 +964,11 @@ impl AdbClient {
             wm_size,
             wm_density,
             ip_raw,
+            battery_raw,
+            kernel_raw,
+            uptime_raw,
+            df_raw,
+            meminfo_raw,
         ) = tokio::join!(
             shell_getprop(p, s, "ro.product.model"),
             shell_getprop(p, s, "ro.product.manufacturer"),
@@ -955,6 +985,11 @@ impl AdbClient {
             shell_cmd(p, s, "wm size"),
             shell_cmd(p, s, "wm density"),
             shell_cmd(p, s, "ip addr show wlan0 2>/dev/null"),
+            shell_cmd(p, s, "dumpsys battery | grep -m1 'level'"),
+            shell_cmd(p, s, "uname -r"),
+            shell_cmd(p, s, "uptime"),
+            shell_cmd(p, s, "df -h /data 2>/dev/null | tail -1"),
+            shell_cmd(p, s, "grep -m1 MemTotal /proc/meminfo"),
         );
 
         // Parse wm size: "Physical size: 1080x2400" → "1080x2400"
@@ -995,6 +1030,46 @@ impl AdbClient {
         let is_emulator = is_qemu.as_deref() == Some("1")
             || serial.starts_with("emulator-");
 
+        // Parse battery level: "  level: 87" → "87%"
+        let battery_level = battery_raw.as_deref().and_then(|raw| {
+            raw.lines()
+                .find(|l| l.contains("level"))
+                .and_then(|l| l.split(':').nth(1))
+                .map(|v| format!("{}%", v.trim()))
+        });
+
+        // Kernel version: already a single trimmed string from `uname -r`
+        let kernel_version = kernel_raw;
+
+        // Uptime: first line of `uptime` output, trimmed
+        let uptime = uptime_raw
+            .as_deref()
+            .and_then(|raw| raw.lines().next())
+            .map(|l| l.trim().to_string());
+
+        // Parse df output: last line e.g. "/data  128G  85G  42G  67% /data"
+        // We want "42 GB free / 128 GB"
+        let storage_data = df_raw.as_deref().and_then(|raw| {
+            let parts: Vec<&str> = raw.split_whitespace().collect();
+            // typical df -h columns: Filesystem Size Used Avail Use% Mountpoint
+            if parts.len() >= 4 {
+                Some(format!("{} free / {} total", parts[3], parts[1]))
+            } else {
+                None
+            }
+        });
+
+        // Parse MemTotal: "MemTotal:       7812448 kB" → "7.4 GB"
+        let total_ram = meminfo_raw.as_deref().and_then(|raw| {
+            raw.split_whitespace()
+                .nth(1)
+                .and_then(|kb| kb.parse::<u64>().ok())
+                .map(|kb| {
+                    let gb = kb as f64 / 1_048_576.0;
+                    format!("{:.1} GB", gb)
+                })
+        });
+
         Ok(DeviceDetails {
             serial: serial.to_string(),
             model,
@@ -1005,12 +1080,17 @@ impl AdbClient {
             api_level,
             security_patch,
             build_fingerprint,
+            kernel_version,
+            uptime,
             cpu_abi,
             screen_resolution,
             screen_density,
+            total_ram,
             transport,
             ip_address,
             usb_state,
+            battery_level,
+            storage_data,
             is_emulator,
             build_characteristics,
         })
@@ -1186,5 +1266,23 @@ mod tests {
         let mock = MockAdbClient::default();
         let details = mock.fetch_device_details("R5CWA0TEST").await.unwrap();
         assert_eq!(details.transport.as_deref(), Some("USB"));
+    }
+
+    #[tokio::test]
+    async fn mock_device_details_new_fields_populated() {
+        use crate::adb::mock::MockAdbClient;
+        let mock = MockAdbClient::default();
+        let details = mock.fetch_device_details("TEST123").await.unwrap();
+        assert!(details.battery_level.is_some(), "battery_level should be set");
+        assert!(details.kernel_version.is_some(), "kernel_version should be set");
+        assert!(details.uptime.is_some(), "uptime should be set");
+        assert!(details.storage_data.is_some(), "storage_data should be set");
+        assert!(details.total_ram.is_some(), "total_ram should be set");
+        // Spot-check format
+        assert!(
+            details.battery_level.as_deref().unwrap().ends_with('%'),
+            "battery_level should end with %: {:?}",
+            details.battery_level
+        );
     }
 }
