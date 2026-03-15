@@ -1,0 +1,10 @@
+Task Execute Simulation
+Timestamp: 20260120T012629Z
+Root: todd-bishop-xf4z
+Mode: preview
+
+Planned bd commands (dry-run):
+# Example commands that would be run in apply mode:
+# bd create --title="Feature: Example under $ROOT" --type=feature --parent=$ROOT --silent
+# bd create --title="Task: Implement part A" --type=task --parent=beads-xxx --silent
+# bd dep add beads-xxx beads-yyy

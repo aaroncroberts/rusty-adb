@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# mock-adb — canned adb responses for rusty-adb integration tests
+#
+# Supported command shapes:
+#   adb devices -l
+#   adb start-server / kill-server
+#   adb -s SERIAL shell ls -la PATH
+#   adb -s SERIAL shell mv FROM TO
+#   adb -s SERIAL shell rm -rf PATH
+#   adb -s SERIAL [--progress] push SRC DST
+#   adb -s SERIAL [--progress] pull SRC DST
+
+set -euo pipefail
+
+# ── Canned responses ─────────────────────────────────────────────────────────
+
+CANNED_DEVICES="List of devices attached
+device1234	device product:panther model:Pixel_7 device:panther transport_id:1
+unauth5678	unauthorized transport_id:2"
+
+# Toybox ls -la format used by Android.
+# Columns: permissions nlink owner group size date time name
+CANNED_LS_SDCARD="total 32
+drwxrwx--x  5 root sdcard_rw     4096 2024-01-15 10:00 .
+drwxr-xr-x 25 root root             0 2024-01-15 10:00 ..
+drwxrwx--x  2 root sdcard_rw     4096 2024-01-15 10:00 DCIM
+drwxrwx--x  2 root sdcard_rw     4096 2024-01-15 10:00 Download
+-rw-rw----  1 root sdcard_rw   102400 2024-01-15 10:00 readme.txt"
+
+CANNED_LS_DCIM="total 8
+drwxrwx--x  2 root sdcard_rw     4096 2024-01-15 10:00 .
+drwxrwx--x  5 root sdcard_rw     4096 2024-01-15 10:00 ..
+-rw-rw----  1 root sdcard_rw  3145728 2024-01-15 09:00 photo.jpg
+-rw-rw----  1 root sdcard_rw  2097152 2024-01-15 09:30 photo2.jpg"
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+SERIAL=""
+CMD=""
+ARGS=()
+
+i=1
+while [ "$i" -le "$#" ]; do
+    arg="${!i}"
+    case "$arg" in
+        -s)
+            i=$((i+1))
+            SERIAL="${!i}"
+            ;;
+        --progress)
+            # Consumed and ignored — present when run_transfer adds it
+            ;;
+        *)
+            if [ -z "$CMD" ]; then
+                CMD="$arg"
+            else
+                ARGS+=("$arg")
+            fi
+            ;;
+    esac
+    i=$((i+1))
+done
+
+# ── Command dispatch ──────────────────────────────────────────────────────────
+
+case "$CMD" in
+
+    devices)
+        echo "$CANNED_DEVICES"
+        ;;
+
+    start-server|kill-server)
+        exit 0
+        ;;
+
+    disconnect)
+        # Real adb prints "disconnected <serial>" or "error: ..." — just succeed
+        SERIAL_ARG="${ARGS[0]:-}"
+        if [ -n "$SERIAL_ARG" ]; then
+            echo "disconnected $SERIAL_ARG"
+        fi
+        exit 0
+        ;;
+
+    shell)
+        # Commands are passed as a single pre-quoted shell string:
+        #   shell "ls -la '/sdcard/'"
+        #   shell "mv '/from' '/to'"
+        #   shell "rm -rf '/path'"
+        SHELL_CMD="${ARGS[0]:-}"
+        case "$SHELL_CMD" in
+            ls\ *)
+                # Strip "ls -la " prefix and remove single quotes to get the path.
+                PATH_ARG="${SHELL_CMD#ls -la }"
+                PATH_ARG="${PATH_ARG//\'/}"
+                case "$PATH_ARG" in
+                    */DCIM|*/DCIM/)
+                        echo "$CANNED_LS_DCIM"
+                        ;;
+                    *)
+                        echo "$CANNED_LS_SDCARD"
+                        ;;
+                esac
+                ;;
+            mv\ *|rm\ *)
+                exit 0
+                ;;
+            *)
+                echo "mock-adb: unrecognised shell command: $SHELL_CMD" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+
+    push)
+        # Emit progress on stderr (newline-terminated so BufReader::lines() splits correctly).
+        # Summary goes to both stderr and stdout to match real adb behaviour.
+        SRC="${ARGS[0]:-file}"
+        printf '[ 25%%] %s\n' "$SRC" >&2
+        printf '[ 50%%] %s\n' "$SRC" >&2
+        printf '[ 75%%] %s\n' "$SRC" >&2
+        printf '[100%%] %s\n' "$SRC" >&2
+        SUMMARY="${SRC}: 1 file pushed, 0 skipped. 1.2 MB/s (1024 bytes in 0.001s)"
+        echo "$SUMMARY" >&2
+        echo "$SUMMARY"
+        ;;
+
+    pull)
+        SRC="${ARGS[0]:-/sdcard/file}"
+        DST="${ARGS[1]:-/tmp/file}"
+        # Create a small placeholder file so callers can verify the destination.
+        mkdir -p "$(dirname "$DST")" 2>/dev/null || true
+        printf 'mock file content from %s\n' "$SRC" > "$DST" 2>/dev/null || true
+        printf '[ 25%%] %s\n' "$SRC" >&2
+        printf '[ 50%%] %s\n' "$SRC" >&2
+        printf '[ 75%%] %s\n' "$SRC" >&2
+        printf '[100%%] %s\n' "$SRC" >&2
+        SUMMARY="${SRC}: 1 file pulled, 0 skipped. 1.0 MB/s (35 bytes in 0.001s)"
+        echo "$SUMMARY" >&2
+        echo "$SUMMARY"
+        ;;
+
+    *)
+        echo "mock-adb: unrecognised command: $CMD" >&2
+        exit 1
+        ;;
+esac

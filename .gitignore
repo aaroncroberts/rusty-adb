@@ -23,3 +23,5 @@ target
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+.claude/.DS_Store
+.DS_Store

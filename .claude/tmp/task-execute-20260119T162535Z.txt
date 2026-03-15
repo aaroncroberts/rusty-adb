@@ -1,0 +1,10 @@
+Task Execute Simulation
+Timestamp: 20260119T162535Z
+Root: todd-lab-9bfm.1.3
+Mode: preview
+
+Planned bd commands (dry-run):
+# Example commands that would be run in apply mode:
+# bd create --title="Feature: Example under $ROOT" --type=feature --parent=$ROOT --silent
+# bd create --title="Task: Implement part A" --type=task --parent=beads-xxx --silent
+# bd dep add beads-xxx beads-yyy
