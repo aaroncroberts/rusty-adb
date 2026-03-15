@@ -5,8 +5,8 @@ use crate::icons;
 use crate::queue::QueueStatus;
 use crate::{App, DeviceTab, LogLevel, Message, PreviewContent};
 use iced::widget::{
-    button, column, container, image, pick_list, progress_bar, rich_text, row, scrollable, text,
-    text_input, toggler, Row,
+    button, column, container, image, pick_list, progress_bar, row, scrollable, text, text_input,
+    toggler, Row,
 };
 use iced::{Border, Element, Fill};
 
@@ -167,34 +167,53 @@ impl App {
         .text_size(11)
         .padding([2, 8]);
 
-        // ── Color-coded log content via rich_text ──────────────────────────
-        // One span per line — much more efficient than one Text widget per line.
-        // Annotate spans with Link=Message so the resulting element is Element<Message>.
-        let log_content = if self.log_viewer_display.is_empty() {
-            rich_text([
-                iced::widget::text::Span::<'_, Message>::new("(no log content)")
+        // ── Color-coded log content ────────────────────────────────────────
+        // Iced's scrollable measures every child for layout — it has no virtual
+        // rendering. We cap the rendered view at the last RENDER_LIMIT lines so
+        // the layout pass stays fast regardless of file size. The display buffer
+        // still holds up to 5 000 filtered lines; we just don't hand them all to
+        // the renderer at once.
+        const RENDER_LIMIT: usize = 300;
+
+        let lines: Vec<&str> = self.log_viewer_display.lines().collect();
+        let total = lines.len();
+        let render_from = total.saturating_sub(RENDER_LIMIT);
+
+        let mut rows: Vec<Element<Message>> = Vec::with_capacity(lines.len().min(RENDER_LIMIT) + 1);
+
+        if render_from > 0 {
+            rows.push(
+                text(format!(
+                    "  ┄ {} lines above not shown — adjust level filter or open a newer file ┄",
+                    render_from
+                ))
+                .size(10)
+                .color(t.text_secondary.scale_alpha(0.5))
+                .font(iced::Font::MONOSPACE)
+                .into(),
+            );
+        } else if total == 0 {
+            rows.push(
+                text("(no log content)")
                     .size(11)
                     .color(t.text_secondary)
-                    .font(iced::Font::MONOSPACE),
-            ])
-        } else {
-            let spans: Vec<iced::widget::text::Span<'_, Message>> = self
-                .log_viewer_display
-                .lines()
-                .map(|line| {
-                    iced::widget::text::Span::new(format!("{line}\n"))
-                        .size(11)
-                        .color(line_color(line))
-                        .font(iced::Font::MONOSPACE)
-                })
-                .collect();
-            rich_text(spans)
-        };
+                    .font(iced::Font::MONOSPACE)
+                    .into(),
+            );
+        }
+
+        for &line in &lines[render_from..] {
+            rows.push(
+                text(line.to_string())
+                    .size(11)
+                    .color(line_color(line))
+                    .font(iced::Font::MONOSPACE)
+                    .into(),
+            );
+        }
 
         let log_scroll = scrollable(
-            container(log_content)
-                .padding([8, 12])
-                .width(Fill),
+            column(rows).spacing(0).padding([8, 12]).width(Fill),
         )
         .height(Fill);
 
