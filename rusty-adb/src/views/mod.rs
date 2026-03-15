@@ -100,13 +100,7 @@ impl App {
         let no_transfer = self.active_transfer.is_none();
 
         // ── Precompute selection flags ────────────────────────────────────────
-        let local_sel_has_files = self.local_pane.selected.iter().any(|&i| {
-            self.local_pane
-                .entries
-                .get(i)
-                .map(|e| !e.is_dir)
-                .unwrap_or(false)
-        });
+        let local_sel_nonempty = !self.local_pane.selected.is_empty();
         let android_sel_has_files = self.android_pane.selected.iter().any(|&i| {
             self.android_pane
                 .entries
@@ -198,7 +192,7 @@ impl App {
                     self.local_view_mode,
                     self.local_pane.show_hidden,
                     PaneMenuState {
-                        local_sel_has_files,
+                        local_sel_nonempty,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,
@@ -225,7 +219,7 @@ impl App {
                     self.android_view_mode,
                     self.android_pane.show_hidden,
                     PaneMenuState {
-                        local_sel_has_files,
+                        local_sel_nonempty,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,
@@ -257,7 +251,7 @@ impl App {
                     self.local_view_mode,
                     self.local_pane.show_hidden,
                     PaneMenuState {
-                        local_sel_has_files,
+                        local_sel_nonempty,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,
@@ -292,7 +286,7 @@ impl App {
                     self.android_view_mode,
                     self.android_pane.show_hidden,
                     PaneMenuState {
-                        local_sel_has_files,
+                        local_sel_nonempty,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,

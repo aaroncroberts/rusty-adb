@@ -32,11 +32,6 @@ pub enum QueueStatus {
 }
 
 impl QueueStatus {
-    /// `true` when the item is in a terminal state (done or failed).
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, QueueStatus::Done | QueueStatus::Failed { .. })
-    }
-
     /// Short display label for the queue UI.
     pub fn label(&self) -> &str {
         match self {
@@ -75,13 +70,6 @@ impl QueueItem {
             .unwrap_or_else(|| self.local_path.display().to_string())
     }
 
-    /// Progress 0–100 if actively copying, else 0.
-    pub fn progress_percent(&self) -> u8 {
-        match &self.status {
-            QueueStatus::Copying { percent } => *percent,
-            _ => 0,
-        }
-    }
 }
 
 // ─── Queue Manager ────────────────────────────────────────────────────────────

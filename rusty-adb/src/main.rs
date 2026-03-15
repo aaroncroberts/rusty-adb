@@ -219,7 +219,8 @@ enum Message {
     DisconnectDevice,
 
     // ── Transfer ──────────────────────────────────────────────────────────────
-    /// User pressed "Copy →" (local → android)
+    /// User pressed "Copy →" (local → android) — still used by transfer tests
+    #[allow(dead_code)]
     CopyToAndroid,
     /// User pressed "Copy ←" (android → local)
     CopyToLocal,
@@ -275,8 +276,6 @@ enum Message {
     DragCancelled,
 
     // ── Copy Queue ────────────────────────────────────────────────────────────
-    /// User clicked "Copy to Device" in local pane toolbar → show confirm dialog
-    OpenCopyConfirm,
     /// User clicked "Cancel" or Escape in the copy confirm dialog
     CloseCopyConfirm,
     /// User clicked "Confirm" in the copy confirm dialog → enqueue items
@@ -299,8 +298,6 @@ enum Message {
     QueueItemComplete(u64),
     /// A queued copy failed (fired by the copy engine)
     QueueItemFailed { id: u64, reason: String },
-    /// Progress update for an active queue copy
-    QueueItemProgress { id: u64, percent: u8 },
 
     // ── Device Details dialog ─────────────────────────────────────────────────
     /// Open the device details modal and start fetching properties

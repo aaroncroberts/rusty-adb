@@ -41,7 +41,8 @@ pub(crate) fn path_breadcrumb_segments(path: &Path) -> Vec<(String, PathBuf)> {
 
 /// Selection and device state passed to the pane menu bar.
 pub(crate) struct PaneMenuState {
-    pub local_sel_has_files: bool,
+    /// Any local entry is selected (files or directories)
+    pub local_sel_nonempty: bool,
     pub android_sel_has_files: bool,
     pub android_sel_single: bool,
     pub android_sel_nonempty: bool,
@@ -83,7 +84,7 @@ impl App {
         state: PaneMenuState,
     ) -> Element<'a, Message> {
         let PaneMenuState {
-            local_sel_has_files,
+            local_sel_nonempty,
             android_sel_has_files,
             android_sel_single,
             android_sel_nonempty,
@@ -194,39 +195,29 @@ impl App {
                 );
             }
         } else {
-            // local pane
-            if has_device && no_transfer && local_sel_has_files {
-                cmd_items.push(
-                    cmd_btn(
-                        Some(icons::upload()),
-                        "To Android",
-                        t.accent,
-                        Some(Message::CopyToAndroid),
-                    )
-                    .into(),
-                );
-                // Queue button: enqueues selected files for background copy
+            // local pane — single "Copy to Device" button (files or folders)
+            if has_device && no_transfer && local_sel_nonempty {
                 cmd_items.push(
                     tooltip(
                         cmd_btn(
                             Some(icons::add_to_queue()),
                             "Copy to Device",
                             t.accent,
-                            Some(Message::OpenCopyConfirm),
+                            Some(Message::ConfirmCopyToDevice),
                         ),
-                        text("Copy selected to device (queued)").size(11),
+                        text("Copy selected files/folders to device queue").size(11),
                         TipPos::Bottom,
                     )
                     .into(),
                 );
-            } else if !local_sel_has_files {
-                // Show disabled "Copy to Device" hint when nothing selected
+            } else if has_device {
+                // Dimmed placeholder when nothing is selected
                 cmd_items.push(
                     cmd_btn(
                         Some(icons::add_to_queue()),
                         "Copy to Device",
                         t.text_secondary.scale_alpha(0.4),
-                        None, // disabled
+                        None,
                     )
                     .into(),
                 );
@@ -558,7 +549,7 @@ mod tests {
 
     fn default_state() -> PaneMenuState {
         PaneMenuState {
-            local_sel_has_files: false,
+            local_sel_nonempty: false,
             android_sel_has_files: false,
             android_sel_single: false,
             android_sel_nonempty: false,
@@ -583,7 +574,7 @@ mod tests {
     fn view_pane_menu_bar_android_with_device_and_selection_renders() {
         let app = crate::App::default();
         let state = PaneMenuState {
-            local_sel_has_files: false,
+            local_sel_nonempty: false,
             android_sel_has_files: true,
             android_sel_single: true,
             android_sel_nonempty: true,
@@ -597,7 +588,7 @@ mod tests {
     fn view_pane_menu_bar_local_with_device_and_files_selected_renders() {
         let app = crate::App::default();
         let state = PaneMenuState {
-            local_sel_has_files: true,
+            local_sel_nonempty: true,
             android_sel_has_files: false,
             android_sel_single: false,
             android_sel_nonempty: false,

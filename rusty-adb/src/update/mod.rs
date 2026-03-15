@@ -228,7 +228,6 @@ impl App {
             Message::AndroidDeleteFailed(msg) => self.android_delete_failed(msg),
 
             // ── Copy Queue ────────────────────────────────────────────────────
-            Message::OpenCopyConfirm => self.open_copy_confirm(),
             Message::CloseCopyConfirm => self.close_copy_confirm(),
             Message::ConfirmCopyToDevice => self.confirm_copy_to_device(),
             Message::OpenQueueDialog => self.open_queue_dialog(),
@@ -240,7 +239,6 @@ impl App {
             Message::QueueEditDestConfirm => self.queue_edit_dest_confirm(),
             Message::QueueItemComplete(id) => self.queue_item_complete(id),
             Message::QueueItemFailed { id, reason } => self.queue_item_failed(id, reason),
-            Message::QueueItemProgress { id, percent } => self.queue_item_progress(id, percent),
 
             // ── Device Details dialog ─────────────────────────────────────────
             Message::OpenDeviceDetails => self.open_device_details(),

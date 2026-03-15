@@ -11,21 +11,6 @@ use std::sync::Arc;
 impl App {
     // ── Copy Confirm Dialog ───────────────────────────────────────────────────
 
-    pub(super) fn open_copy_confirm(&mut self) -> Task<Message> {
-        let sel_count = self.local_pane.selected.len();
-        if sel_count == 0 {
-            tracing::warn!("open_copy_confirm: no files selected — ignoring");
-            return Task::none();
-        }
-        tracing::info!(
-            files = sel_count,
-            dest  = %self.android_pane.current_path.display(),
-            "copy confirm dialog opened"
-        );
-        self.copy_confirm_open = true;
-        Task::none()
-    }
-
     pub(super) fn close_copy_confirm(&mut self) -> Task<Message> {
         self.copy_confirm_open = false;
         Task::none()
@@ -212,9 +197,4 @@ impl App {
         self.try_start_next_queue_copy()
     }
 
-    pub(super) fn queue_item_progress(&mut self, id: u64, percent: u8) -> Task<Message> {
-        self.copy_queue
-            .update_status(id, QueueStatus::Copying { percent });
-        Task::none()
-    }
 }
