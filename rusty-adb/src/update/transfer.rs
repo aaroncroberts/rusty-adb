@@ -172,14 +172,12 @@ impl App {
         // pane's current_path — the user may have navigated elsewhere mid-transfer.
         match direction {
             Some(TransferDirection::ToAndroid) => {
-                let path = completed_dest
-                    .unwrap_or_else(|| self.android_pane.current_path.clone());
+                let path = completed_dest.unwrap_or_else(|| self.android_pane.current_path.clone());
                 tracing::debug!(path = %path.display(), "refreshing android pane after transfer");
                 return self.update(Message::AndroidNavigateTo(path));
             }
             Some(TransferDirection::ToLocal) => {
-                let path = completed_dest
-                    .unwrap_or_else(|| self.local_pane.current_path.clone());
+                let path = completed_dest.unwrap_or_else(|| self.local_pane.current_path.clone());
                 tracing::debug!(path = %path.display(), "refreshing local pane after transfer");
                 return self.update(Message::LocalNavigateTo(path));
             }
@@ -232,7 +230,11 @@ impl App {
     pub(super) fn local_drag_started(&mut self) -> Task<Message> {
         // Only start a drag if there are local files selected (not dirs-only)
         let has_files = self.local_pane.selected.iter().any(|&i| {
-            self.local_pane.entries.get(i).map(|e| !e.is_dir).unwrap_or(false)
+            self.local_pane
+                .entries
+                .get(i)
+                .map(|e| !e.is_dir)
+                .unwrap_or(false)
         });
         if has_files && self.active_serial.is_some() {
             self.drag_in_progress = true;
@@ -309,8 +311,6 @@ impl App {
         tracing::info!(file = %path.display(), id, "OS file drop → enqueued in copy queue");
 
         self.try_start_next_queue_copy()
-            .chain(self.update(Message::ShowToast(
-                "1 item added to copy queue".to_string(),
-            )))
+            .chain(self.update(Message::ShowToast("1 item added to copy queue".to_string())))
     }
 }

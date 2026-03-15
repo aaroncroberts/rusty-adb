@@ -245,13 +245,16 @@ impl App {
             .and_then(|i| i.local_path.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| format!("item {id}"));
-        self.copy_queue
-            .update_status(id, QueueStatus::Failed { reason: reason.clone() });
+        self.copy_queue.update_status(
+            id,
+            QueueStatus::Failed {
+                reason: reason.clone(),
+            },
+        );
         // Show a visible error banner so the user knows the copy failed
         let next = self.try_start_next_queue_copy();
         next.chain(self.update(Message::ShowError(format!(
             "Copy failed for \"{filename}\": {reason}"
         ))))
     }
-
 }

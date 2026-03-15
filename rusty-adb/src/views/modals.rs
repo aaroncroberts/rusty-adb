@@ -20,16 +20,19 @@ impl App {
         let t = self.theme;
 
         let close_btn = button(
-                row![
-                    text(icons::close()).font(icons::font()).size(12).color(t.text),
-                    text("Close").size(12).color(t.text),
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .style(t.secondary_button())
-            .padding([4, 12])
-            .on_press(Message::ClosePreview);
+            row![
+                text(icons::close())
+                    .font(icons::font())
+                    .size(12)
+                    .color(t.text),
+                text("Close").size(12).color(t.text),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .style(t.secondary_button())
+        .padding([4, 12])
+        .on_press(Message::ClosePreview);
 
         let preview_body: Element<Message> = match content {
             PreviewContent::Image(path) => {
@@ -212,10 +215,8 @@ impl App {
             );
         }
 
-        let log_scroll = scrollable(
-            column(rows).spacing(0).padding([8, 12]).width(Fill),
-        )
-        .height(Fill);
+        let log_scroll =
+            scrollable(column(rows).spacing(0).padding([8, 12]).width(Fill)).height(Fill);
 
         // ── Toolbar ────────────────────────────────────────────────────────
         // Total filtered lines — shown in toolbar so users know when a level
@@ -240,7 +241,10 @@ impl App {
         };
 
         let toolbar = row![
-            text(icons::filter()).font(icons::font()).size(13).color(t.accent),
+            text(icons::filter())
+                .font(icons::font())
+                .size(13)
+                .color(t.accent),
             text("File:").size(11).color(t.text_secondary),
             file_picker,
             iced::widget::horizontal_space(),
@@ -249,7 +253,10 @@ impl App {
             level_picker,
             button(
                 row![
-                    text(icons::close()).font(icons::font()).size(11).color(t.text),
+                    text(icons::close())
+                        .font(icons::font())
+                        .size(11)
+                        .color(t.text),
                     text("Close").size(11).color(t.text),
                 ]
                 .spacing(4)
@@ -345,10 +352,7 @@ impl App {
 
         // modal_backdrop wraps the card in a NoOp absorber automatically.
         // Padding keeps 36 px of dark margin visible so users can click outside to close.
-        let padded = container(card)
-            .width(Fill)
-            .height(Fill)
-            .padding(36);
+        let padded = container(card).width(Fill).height(Fill).padding(36);
 
         super::modal_backdrop(padded)
     }
@@ -359,16 +363,19 @@ impl App {
         let version = env!("CARGO_PKG_VERSION");
 
         let close_btn = button(
-                row![
-                    text(icons::close()).font(icons::font()).size(12).color(t.text),
-                    text("Close").size(12).color(t.text),
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .style(t.secondary_button())
-            .padding([4, 12])
-            .on_press(Message::CloseAbout);
+            row![
+                text(icons::close())
+                    .font(icons::font())
+                    .size(12)
+                    .color(t.text),
+                text("Close").size(12).color(t.text),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .style(t.secondary_button())
+        .padding([4, 12])
+        .on_press(Message::CloseAbout);
 
         let github_btn = button(
             text("github.com/aaroncroberts/rusty-adb")
@@ -633,12 +640,7 @@ impl App {
         // File list — scrollable when many items selected
         let file_rows: Vec<Element<Message>> = selected
             .iter()
-            .map(|name| {
-                text(format!("  • {name}"))
-                    .size(11)
-                    .color(t.text)
-                    .into()
-            })
+            .map(|name| text(format!("  • {name}")).size(11).color(t.text).into())
             .collect();
 
         let file_list = scrollable(column(file_rows).spacing(2).padding([4, 0]))
@@ -660,9 +662,12 @@ impl App {
             .on_press(Message::CloseCopyConfirm);
 
         let confirm_btn = button(
-            text(format!("Queue {count} item{}", if count == 1 { "" } else { "s" }))
-                .size(12)
-                .color(iced::Color::WHITE),
+            text(format!(
+                "Queue {count} item{}",
+                if count == 1 { "" } else { "s" }
+            ))
+            .size(12)
+            .color(iced::Color::WHITE),
         )
         .style(t.accent_button())
         .padding([4, 16])
@@ -683,9 +688,12 @@ impl App {
 
         let body = container(
             column![
-                text(format!("{count} item{} selected:", if count == 1 { "" } else { "s" }))
-                    .size(11)
-                    .color(t.text_secondary),
+                text(format!(
+                    "{count} item{} selected:",
+                    if count == 1 { "" } else { "s" }
+                ))
+                .size(11)
+                .color(t.text_secondary),
                 file_list,
                 iced::widget::Space::new(Fill, 8),
                 dest_label,
@@ -806,9 +814,7 @@ impl App {
                 // Progress bar (visible while copying)
                 let progress_el: Element<Message> =
                     if let QueueStatus::Copying { percent } = &item.status {
-                        progress_bar(0.0..=100.0, *percent as f32)
-                            .height(4)
-                            .into()
+                        progress_bar(0.0..=100.0, *percent as f32).height(4).into()
                     } else if let QueueStatus::Done = &item.status {
                         progress_bar(0.0..=100.0, 100.0).height(4).into()
                     } else {
@@ -858,9 +864,14 @@ impl App {
 
                 container(
                     column![
-                        row![name_text, iced::widget::Space::new(Fill, 1), status_badge, action_btns]
-                            .spacing(4)
-                            .align_y(iced::Alignment::Center),
+                        row![
+                            name_text,
+                            iced::widget::Space::new(Fill, 1),
+                            status_badge,
+                            action_btns
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center),
                         dest_el,
                         progress_el,
                     ]
@@ -891,14 +902,9 @@ impl App {
             .center_x(Fill)
             .into()
         } else {
-            scrollable(
-                column(items)
-                    .spacing(2)
-                    .padding([4, 0])
-                    .width(Fill),
-            )
-            .height(iced::Length::Fixed(400.0))
-            .into()
+            scrollable(column(items).spacing(2).padding([4, 0]).width(Fill))
+                .height(iced::Length::Fixed(400.0))
+                .into()
         };
 
         let card = container(
@@ -927,28 +933,34 @@ impl App {
         };
 
         let close_btn = button(
-                row![
-                    text(icons::close()).font(icons::font()).size(12).color(t.text),
-                    text("Close").size(12).color(t.text),
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .style(t.secondary_button())
-            .padding([4, 12])
-            .on_press(Message::CloseDeviceDetails);
+            row![
+                text(icons::close())
+                    .font(icons::font())
+                    .size(12)
+                    .color(t.text),
+                text("Close").size(12).color(t.text),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .style(t.secondary_button())
+        .padding([4, 12])
+        .on_press(Message::CloseDeviceDetails);
 
         let refresh_btn = button(
             row![
-                text(icons::refresh()).font(icons::font()).size(12).color(t.accent),
+                text(icons::refresh())
+                    .font(icons::font())
+                    .size(12)
+                    .color(t.accent),
                 text("Refresh").size(12).color(t.accent),
             ]
             .spacing(4)
             .align_y(iced::Alignment::Center),
         )
-            .style(t.transparent_button())
-            .padding([4, 10])
-            .on_press(Message::RefreshDeviceDetails);
+        .style(t.transparent_button())
+        .padding([4, 10])
+        .on_press(Message::RefreshDeviceDetails);
 
         let header = container(
             row![
@@ -976,12 +988,16 @@ impl App {
             let mut items: Vec<Element<Message>> = Vec::new();
             for tab in TABS {
                 let is_active = tab == active_tab;
-                let color = if is_active { t.accent } else { t.text_secondary };
+                let color = if is_active {
+                    t.accent
+                } else {
+                    t.text_secondary
+                };
                 let bg_secondary = t.background_secondary;
                 let border_color = t.border;
                 let btn = button(text(tab.to_string()).size(12).color(color))
-                    .style(move |_, _: iced::widget::button::Status| {
-                        iced::widget::button::Style {
+                    .style(
+                        move |_, _: iced::widget::button::Status| iced::widget::button::Style {
                             background: if is_active {
                                 Some(bg_secondary.into())
                             } else {
@@ -997,8 +1013,8 @@ impl App {
                                 iced::Border::default()
                             },
                             ..Default::default()
-                        }
-                    })
+                        },
+                    )
                     .padding([4, 14])
                     .on_press(Message::DeviceDetailsSelectTab(tab));
                 items.push(btn.into());
@@ -1034,7 +1050,8 @@ impl App {
         };
 
         // ── Body ──────────────────────────────────────────────────────────────
-        let body: Element<Message> = if self.device_details_loading && self.device_details.is_none() {
+        let body: Element<Message> = if self.device_details_loading && self.device_details.is_none()
+        {
             container(
                 text("Fetching device information…")
                     .size(12)
@@ -1051,20 +1068,26 @@ impl App {
             let tab_content: Element<Message> = match active_tab {
                 // ── Device ────────────────────────────────────────────────────
                 DeviceTab::Device => {
-                    let processor_str: String = match (
-                        d.soc_manufacturer.as_deref(),
-                        d.soc_model.as_deref(),
-                    ) {
-                        (Some(mfr), Some(mdl)) => format!("{mfr} {mdl}"),
-                        (None, Some(mdl)) => mdl.to_string(),
-                        (Some(mfr), None) => mfr.to_string(),
-                        (None, None) => na.to_string(),
-                    };
+                    let processor_str: String =
+                        match (d.soc_manufacturer.as_deref(), d.soc_model.as_deref()) {
+                            (Some(mfr), Some(mdl)) => format!("{mfr} {mdl}"),
+                            (None, Some(mdl)) => mdl.to_string(),
+                            (Some(mfr), None) => mfr.to_string(),
+                            (None, None) => na.to_string(),
+                        };
                     column![
                         kv_row("Model", d.model.as_deref().unwrap_or(na), false),
-                        kv_row("Manufacturer", d.manufacturer.as_deref().unwrap_or(na), false),
+                        kv_row(
+                            "Manufacturer",
+                            d.manufacturer.as_deref().unwrap_or(na),
+                            false
+                        ),
                         kv_row("Brand", d.brand.as_deref().unwrap_or(na), false),
-                        kv_row("Codename", d.device_codename.as_deref().unwrap_or(na), false),
+                        kv_row(
+                            "Codename",
+                            d.device_codename.as_deref().unwrap_or(na),
+                            false
+                        ),
                         kv_row("Serial", &d.serial, false),
                         kv_row("Emulator", is_emu, false),
                         kv_row("Processor", &processor_str, false),
@@ -1077,12 +1100,28 @@ impl App {
 
                 // ── OS / Build ────────────────────────────────────────────────
                 DeviceTab::OsBuild => column![
-                    kv_row("Android Version", d.android_version.as_deref().unwrap_or(na), false),
+                    kv_row(
+                        "Android Version",
+                        d.android_version.as_deref().unwrap_or(na),
+                        false
+                    ),
                     kv_row("API Level", d.api_level.as_deref().unwrap_or(na), false),
-                    kv_row("Security Patch", d.security_patch.as_deref().unwrap_or(na), false),
-                    kv_row("Kernel Version", d.kernel_version.as_deref().unwrap_or(na), true),
+                    kv_row(
+                        "Security Patch",
+                        d.security_patch.as_deref().unwrap_or(na),
+                        false
+                    ),
+                    kv_row(
+                        "Kernel Version",
+                        d.kernel_version.as_deref().unwrap_or(na),
+                        true
+                    ),
                     kv_row("Uptime", d.uptime.as_deref().unwrap_or(na), false),
-                    kv_row("Build Fingerprint", d.build_fingerprint.as_deref().unwrap_or(na), true),
+                    kv_row(
+                        "Build Fingerprint",
+                        d.build_fingerprint.as_deref().unwrap_or(na),
+                        true
+                    ),
                 ]
                 .spacing(6)
                 .into(),
@@ -1092,17 +1131,33 @@ impl App {
                     kv_row("Transport", d.transport.as_deref().unwrap_or(na), false),
                     kv_row("IP Address", d.ip_address.as_deref().unwrap_or(na), false),
                     kv_row("USB State", d.usb_state.as_deref().unwrap_or(na), false),
-                    kv_row("Battery Level", d.battery_level.as_deref().unwrap_or(na), false),
+                    kv_row(
+                        "Battery Level",
+                        d.battery_level.as_deref().unwrap_or(na),
+                        false
+                    ),
                 ]
                 .spacing(6)
                 .into(),
 
                 // ── Display ───────────────────────────────────────────────────
                 DeviceTab::Display => column![
-                    kv_row("Resolution", d.screen_resolution.as_deref().unwrap_or(na), false),
+                    kv_row(
+                        "Resolution",
+                        d.screen_resolution.as_deref().unwrap_or(na),
+                        false
+                    ),
                     kv_row("Density", d.screen_density.as_deref().unwrap_or(na), false),
-                    kv_row("Characteristics", d.build_characteristics.as_deref().unwrap_or(na), false),
-                    kv_row("Storage (/data)", d.storage_data.as_deref().unwrap_or(na), false),
+                    kv_row(
+                        "Characteristics",
+                        d.build_characteristics.as_deref().unwrap_or(na),
+                        false
+                    ),
+                    kv_row(
+                        "Storage (/data)",
+                        d.storage_data.as_deref().unwrap_or(na),
+                        false
+                    ),
                 ]
                 .spacing(6)
                 .into(),
@@ -1142,11 +1197,11 @@ impl App {
                                     };
                                     let pkg = app.package_id.clone();
                                     container(
-                                        button(
-                                            text(&app.package_id)
-                                                .size(11)
-                                                .color(if is_sel { t.accent } else { t.text }),
-                                        )
+                                        button(text(&app.package_id).size(11).color(if is_sel {
+                                            t.accent
+                                        } else {
+                                            t.text
+                                        }))
                                         .style(t.transparent_button())
                                         .padding([3, 0])
                                         .width(Fill)
@@ -1163,24 +1218,17 @@ impl App {
 
                             // Footer: confirm row when pending, otherwise uninstall button
                             let footer: Element<Message> = if self.uninstall_confirm {
-                                let pkg_label = self
-                                    .apps_selected
-                                    .as_deref()
-                                    .unwrap_or("this app");
+                                let pkg_label = self.apps_selected.as_deref().unwrap_or("this app");
                                 let confirm_btn = button(
-                                    text("Yes, Uninstall")
-                                        .size(11)
-                                        .color(iced::Color::WHITE),
+                                    text("Yes, Uninstall").size(11).color(iced::Color::WHITE),
                                 )
                                 .style(t.error_button())
                                 .padding([3, 10])
                                 .on_press(Message::UninstallConfirmed);
-                                let cancel_btn = button(
-                                    text("Cancel").size(11).color(t.text),
-                                )
-                                .style(t.transparent_button())
-                                .padding([3, 8])
-                                .on_press(Message::UninstallCancel);
+                                let cancel_btn = button(text("Cancel").size(11).color(t.text))
+                                    .style(t.transparent_button())
+                                    .padding([3, 8])
+                                    .on_press(Message::UninstallCancel);
                                 container(
                                     row![
                                         text(format!(
@@ -1207,13 +1255,15 @@ impl App {
                                     } else {
                                         t.error.scale_alpha(0.3)
                                     };
-                                let uninstall_label =
-                                    if self.apps_uninstalling { "Uninstalling…" } else { "Uninstall" };
-                                let b = button(
-                                    text(uninstall_label).size(11).color(uninstall_color),
-                                )
-                                .style(t.transparent_button())
-                                .padding([2, 8]);
+                                let uninstall_label = if self.apps_uninstalling {
+                                    "Uninstalling…"
+                                } else {
+                                    "Uninstall"
+                                };
+                                let b =
+                                    button(text(uninstall_label).size(11).color(uninstall_color))
+                                        .style(t.transparent_button())
+                                        .padding([2, 8]);
                                 let uninstall_btn: Element<Message> =
                                     if self.apps_selected.is_some() && !self.apps_uninstalling {
                                         b.on_press(Message::UninstallApp).into()
@@ -1253,16 +1303,14 @@ impl App {
                 }
             };
 
-            scrollable(
-                container(tab_content)
-                    .width(Fill)
-                    .padding([12, 16]),
-            )
-            .height(iced::Length::Fixed(280.0))
-            .into()
+            scrollable(container(tab_content).width(Fill).padding([12, 16]))
+                .height(iced::Length::Fixed(280.0))
+                .into()
         } else {
             container(
-                text("No device data available.").size(12).color(t.text_secondary),
+                text("No device data available.")
+                    .size(12)
+                    .color(t.text_secondary),
             )
             .width(Fill)
             .height(iced::Length::Fixed(80.0))
@@ -1277,5 +1325,4 @@ impl App {
 
         super::modal_backdrop(card)
     }
-
 }

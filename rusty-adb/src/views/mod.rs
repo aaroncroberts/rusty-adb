@@ -46,7 +46,11 @@ impl App {
         let queue_summary = {
             let s = self.copy_queue.summary();
             let text = s.status_text();
-            if text.is_empty() { None } else { Some(text) }
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
         };
 
         let mut items: Vec<Element<Message>> = vec![self.view_header()];
@@ -152,7 +156,11 @@ impl App {
                 .padding([4, 4])
                 .on_press(expand_msg),
                 "Expand this pane",
-                if is_android { "expand_android" } else { "expand_local" },
+                if is_android {
+                    "expand_android"
+                } else {
+                    "expand_local"
+                },
                 TipPos::Right,
             );
             let restore_btn = self.delayed_tip(
@@ -522,11 +530,7 @@ impl App {
         let tip_el: Element<Message> = if visible {
             text(tip_text).size(11).into()
         } else {
-            iced::widget::Space::new(
-                iced::Length::Fixed(0.0),
-                iced::Length::Fixed(0.0),
-            )
-            .into()
+            iced::widget::Space::new(iced::Length::Fixed(0.0), iced::Length::Fixed(0.0)).into()
         };
 
         tooltip(area, tip_el, pos)

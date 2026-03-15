@@ -29,10 +29,7 @@ impl App {
         )
     }
 
-    pub(super) fn apps_loaded(
-        &mut self,
-        apps: Vec<crate::adb::InstalledApp>,
-    ) -> Task<Message> {
+    pub(super) fn apps_loaded(&mut self, apps: Vec<crate::adb::InstalledApp>) -> Task<Message> {
         tracing::info!(count = apps.len(), "installed packages loaded");
         self.apps_loading = false;
         self.installed_apps = Some(apps);

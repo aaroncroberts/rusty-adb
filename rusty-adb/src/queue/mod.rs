@@ -69,7 +69,6 @@ impl QueueItem {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| self.local_path.display().to_string())
     }
-
 }
 
 // ─── Queue Manager ────────────────────────────────────────────────────────────
@@ -261,9 +260,7 @@ impl QueueManager {
         if self.is_paused {
             return None;
         }
-        self.items
-            .iter()
-            .find(|i| i.status == QueueStatus::Pending)
+        self.items.iter().find(|i| i.status == QueueStatus::Pending)
     }
 
     /// Count of items in each category, for the status bar summary.
@@ -411,10 +408,7 @@ mod tests {
         let mut q = mgr();
         let id = q.enqueue(p("/a"), p("/d"));
         q.update_status(id, QueueStatus::Copying { percent: 50 });
-        assert_eq!(
-            q.items[0].status,
-            QueueStatus::Copying { percent: 50 }
-        );
+        assert_eq!(q.items[0].status, QueueStatus::Copying { percent: 50 });
     }
 
     #[test]
@@ -446,7 +440,12 @@ mod tests {
     fn update_dest_re_pends_failed_item() {
         let mut q = mgr();
         let id = q.enqueue(p("/a"), p("/d"));
-        q.update_status(id, QueueStatus::Failed { reason: "error".into() });
+        q.update_status(
+            id,
+            QueueStatus::Failed {
+                reason: "error".into(),
+            },
+        );
         q.update_dest(id, p("/d2"));
         assert_eq!(q.items[0].status, QueueStatus::Pending);
         assert_eq!(q.items[0].android_dest, p("/d2"));

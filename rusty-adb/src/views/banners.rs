@@ -79,7 +79,10 @@ impl App {
         // ── Left: toolbar buttons ─────────────────────────────────────────
         let settings_btn = button(
             row![
-                text(icons::settings()).font(icons::font()).size(14).color(t.text),
+                text(icons::settings())
+                    .font(icons::font())
+                    .size(14)
+                    .color(t.text),
                 text("Settings").size(12).color(t.text),
             ]
             .spacing(10)
@@ -98,7 +101,10 @@ impl App {
         };
         let queue_btn = button(
             row![
-                text(icons::queue_list()).font(icons::font()).size(14).color(queue_color),
+                text(icons::queue_list())
+                    .font(icons::font())
+                    .size(14)
+                    .color(queue_color),
                 text("Queue").size(12).color(queue_color),
             ]
             .spacing(10)
