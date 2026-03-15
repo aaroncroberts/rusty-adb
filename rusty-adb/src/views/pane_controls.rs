@@ -302,6 +302,7 @@ impl App {
         toolbar_items.push(show_btn.into());
 
         let toolbar = iced::widget::Row::from_vec(toolbar_items)
+            .width(Fill)
             .spacing(2)
             .padding([2, 8])
             .align_y(iced::Alignment::Center);
