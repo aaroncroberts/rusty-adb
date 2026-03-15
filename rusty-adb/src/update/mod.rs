@@ -246,6 +246,7 @@ impl App {
             Message::QueueEditDestConfirm => self.queue_edit_dest_confirm(),
             Message::QueueItemComplete(id) => self.queue_item_complete(id),
             Message::QueueItemFailed { id, reason } => self.queue_item_failed(id, reason),
+            Message::QueueClearDone => self.queue_clear_done(),
 
             // ── Device Details dialog ─────────────────────────────────────────
             Message::OpenDeviceDetails => self.open_device_details(),
@@ -279,6 +280,30 @@ impl App {
             // ── Escape routing ────────────────────────────────────────────────
             Message::EscapePressed => self.escape_pressed(),
             Message::NoOp => Task::none(),
+
+            // ── Tooltip delay ─────────────────────────────────────────────────
+            Message::TooltipHover(key) => {
+                self.tooltip_hover = Some(key);
+                self.tooltip_show = None;
+                Task::perform(
+                    async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        key
+                    },
+                    Message::TooltipReveal,
+                )
+            }
+            Message::TooltipLeft => {
+                self.tooltip_hover = None;
+                self.tooltip_show = None;
+                Task::none()
+            }
+            Message::TooltipReveal(key) => {
+                if self.tooltip_hover == Some(key) {
+                    self.tooltip_show = Some(key);
+                }
+                Task::none()
+            }
 
             // ── File preview ──────────────────────────────────────────────────
             Message::PreviewFile(entry) => self.preview_file(entry),

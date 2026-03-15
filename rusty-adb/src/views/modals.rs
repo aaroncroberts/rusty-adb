@@ -751,19 +751,39 @@ impl App {
             .padding([3, 10])
             .on_press(Message::ToggleQueuePause);
 
+        // "Clear completed" is only shown when there are done/failed items
+        let has_completed = self
+            .copy_queue
+            .items
+            .iter()
+            .any(|i| matches!(i.status, QueueStatus::Done | QueueStatus::Failed { .. }));
+
         let status_text = summary.status_text();
-        let controls = row![
+        let mut controls_row = row![
             text("Copy Queue").size(13).color(t.text).width(Fill),
             text(status_text).size(11).color(t.text_secondary),
             pause_btn,
-            button(text("X").size(11).color(t.text_secondary))
-                .style(t.transparent_button())
-                .padding([2, 6])
-                .on_press(Message::CloseQueueDialog),
         ]
         .spacing(8)
-        .padding([6, 10])
         .align_y(iced::Alignment::Center);
+
+        if has_completed {
+            controls_row = controls_row.push(
+                button(text("Clear completed").size(11).color(t.text_secondary))
+                    .style(t.transparent_button())
+                    .padding([2, 8])
+                    .on_press(Message::QueueClearDone),
+            );
+        }
+
+        let controls = controls_row
+            .push(
+                button(text("X").size(11).color(t.text_secondary))
+                    .style(t.transparent_button())
+                    .padding([2, 6])
+                    .on_press(Message::CloseQueueDialog),
+            )
+            .padding([6, 10]);
 
         // ── Item list ─────────────────────────────────────────────────────────
         let items: Vec<Element<Message>> = self

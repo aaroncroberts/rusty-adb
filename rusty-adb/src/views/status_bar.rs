@@ -27,6 +27,7 @@ impl StatusBar {
     /// the connection status text. `on_cancel` enables the Cancel button.
     /// `on_open_logs` wires the far-right "Logs" link.
     /// `queue_summary` shows copy queue activity when non-empty.
+    /// `on_open_queue` makes the queue summary text a clickable button.
     pub fn view<'a, Message: 'a + Clone>(
         &'a self,
         status: &AdbStatus,
@@ -34,6 +35,7 @@ impl StatusBar {
         on_cancel: Option<Message>,
         on_open_logs: Option<Message>,
         queue_summary: Option<String>,
+        on_open_queue: Option<Message>,
         on_device_details: Option<Message>,
     ) -> Element<'a, Message> {
         let theme = self.theme;
@@ -113,9 +115,9 @@ impl StatusBar {
             }
         };
 
-        // ── Far-right "Logs" link ─────────────────────────────────────────────
+        // ── Far-right "Logs" link (muted color — secondary utility action) ─────
         let logs_btn: Element<Message> = {
-            let b = button(text("Logs").size(11).color(theme.accent))
+            let b = button(text("Logs").size(11).color(theme.text_secondary))
                 .padding([2, 8])
                 .style(move |_t, _s| button::Style {
                     background: None,
@@ -130,10 +132,22 @@ impl StatusBar {
         .into();
 
         // Right cluster: optional queue message | Logs
-        // Queue message sits immediately left of "Logs" separated by a dim pipe.
+        // Queue message: accent color, clickable when on_open_queue is provided.
         let right_cluster: Element<Message> = if let Some(q) = queue_summary {
+            let queue_el: Element<Message> = if let Some(msg) = on_open_queue {
+                button(text(q).size(11).color(theme.accent))
+                    .padding([0, 0])
+                    .style(move |_t, _s| button::Style {
+                        background: None,
+                        ..Default::default()
+                    })
+                    .on_press(msg)
+                    .into()
+            } else {
+                text(q).size(11).color(theme.accent).into()
+            };
             row![
-                text(q).size(11).color(theme.accent),
+                queue_el,
                 text("  |  ")
                     .size(11)
                     .color(theme.text_secondary.scale_alpha(0.35)),

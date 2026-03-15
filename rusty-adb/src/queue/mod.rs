@@ -235,6 +235,18 @@ impl QueueManager {
         }
     }
 
+    /// Remove all items with `Done` or `Failed` status, then persist.
+    pub fn clear_done(&mut self) {
+        let before = self.items.len();
+        self.items
+            .retain(|i| !matches!(i.status, QueueStatus::Done | QueueStatus::Failed { .. }));
+        let removed = before - self.items.len();
+        if removed > 0 {
+            tracing::info!(removed, "queue: cleared completed/failed items");
+            self.save();
+        }
+    }
+
     /// Set pause state and persist.
     pub fn set_paused(&mut self, paused: bool) {
         self.is_paused = paused;

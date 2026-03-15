@@ -3,7 +3,7 @@
 use crate::icons;
 use crate::{App, Message};
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, row, text, tooltip};
+use iced::widget::{button, column, container, row, text};
 use iced::{Border, Element, Fill};
 
 impl App {
@@ -59,7 +59,7 @@ impl App {
             .align_x(iced::Alignment::End);
 
         // Clicking the banner opens the About dialog
-        let banner_btn = tooltip(
+        let banner_btn = self.delayed_tip(
             button(banner_col)
                 .style(|_t, _s| button::Style {
                     background: None,
@@ -67,7 +67,8 @@ impl App {
                 })
                 .padding([4, 12])
                 .on_press(Message::OpenAbout),
-            text("About rusty-adb").size(11),
+            "About rusty-adb",
+            "about_banner",
             TipPos::Bottom,
         );
 
@@ -76,28 +77,41 @@ impl App {
             .align_x(iced::Alignment::End);
 
         // ── Left: toolbar buttons ─────────────────────────────────────────
+        // Settings: gear icon + "Settings" label (S highlighted as accelerator key)
         let settings_btn = button(
-            text(icons::settings()).font(icons::font()).size(14).color(t.text),
+            row![
+                text(icons::settings()).font(icons::font()).size(14).color(t.text),
+                row![
+                    text("S").size(12).color(t.accent),
+                    text("ettings").size(12).color(t.text),
+                ]
+                .spacing(0),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
         )
-        .padding([4, 10])
+        .padding([4, 12])
         .style(t.transparent_button())
         .on_press(Message::OpenSettings);
 
-        // Queue icon — accent color when the queue has active/pending items
+        // Queue icon + "Queue" label — accent color when active/pending items exist
         let queue_summary = self.copy_queue.summary();
         let queue_color = if queue_summary.has_activity() {
             t.accent
         } else {
             t.text_secondary
         };
-        let queue_btn = tooltip(
-            button(text(icons::queue_list()).font(icons::font()).size(14).color(queue_color))
-                .padding([4, 10])
-                .style(t.transparent_button())
-                .on_press(Message::OpenQueueDialog),
-            text("Copy queue").size(11),
-            TipPos::Bottom,
-        );
+        let queue_btn = button(
+            row![
+                text(icons::queue_list()).font(icons::font()).size(14).color(queue_color),
+                text("Queue").size(12).color(queue_color),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([4, 12])
+        .style(t.transparent_button())
+        .on_press(Message::OpenQueueDialog);
 
         let left = container(
             row![settings_btn, queue_btn]

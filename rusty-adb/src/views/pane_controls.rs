@@ -3,7 +3,7 @@
 use crate::icons;
 use crate::{App, Message, PaneLayout, ViewMode};
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, container, horizontal_space, pick_list, row, text, tooltip};
+use iced::widget::{button, container, horizontal_space, pick_list, row, text};
 use iced::{Element, Fill, FillPortion};
 use std::path::{Path, PathBuf};
 
@@ -153,7 +153,7 @@ impl App {
 
         // Icon button — accent when panel is open, secondary when closed.
         let panel_btn_color = if panel_open { t.accent } else { t.text_secondary };
-        let show_btn = tooltip(
+        let show_btn = self.delayed_tip(
             button(
                 text(icons::layout())
                     .font(icons::font())
@@ -163,7 +163,8 @@ impl App {
             .style(t.transparent_button())
             .padding([2, 4])
             .on_press(Message::ToggleShowPanel(is_android)),
-            text("Columns & visibility").size(11),
+            "Columns & visibility",
+            if is_android { "cols_android" } else { "cols_local" },
             TipPos::Bottom,
         );
 
@@ -173,14 +174,15 @@ impl App {
             // "Install APK" — enabled when an .apk is selected in the local pane
             if has_device && local_sel_is_apk {
                 cmd_items.push(
-                    tooltip(
+                    self.delayed_tip(
                         cmd_btn(
                             Some(icons::add_to_queue()),
                             "Install APK",
                             t.accent,
                             Some(Message::InstallApk),
                         ),
-                        text("Install selected .apk to device").size(11),
+                        "Install selected .apk to device",
+                        "install_apk",
                         TipPos::Bottom,
                     )
                     .into(),
@@ -217,14 +219,15 @@ impl App {
             // local pane — single "Copy to Device" button (files or folders)
             if has_device && no_transfer && local_sel_nonempty {
                 cmd_items.push(
-                    tooltip(
+                    self.delayed_tip(
                         cmd_btn(
                             Some(icons::copy()),
                             "Copy to Device",
                             t.accent,
                             Some(Message::ShowCopyConfirm),
                         ),
-                        text("Copy selected files/folders to device queue").size(11),
+                        "Copy selected files/folders to device queue",
+                        "copy_to_device",
                         TipPos::Bottom,
                     )
                     .into(),
@@ -444,22 +447,17 @@ impl App {
         )
         .width(FillPortion(2));
 
-        let action: Element<'a, Message> = if other_is_expanded {
+        // When expanded, the sidebar already provides restore/expand controls —
+        // skip them in the title bar to avoid duplication.
+        let action: Element<'a, Message> = if other_is_expanded || this_is_expanded {
             horizontal_space().into()
         } else {
-            let (icon, tip, msg) = if this_is_expanded {
-                (
-                    icons::split(),
-                    "Restore equal split",
-                    Message::CollapsePanes,
-                )
-            } else {
-                (
-                    icons::expand(),
-                    "Expand this pane",
-                    Message::ExpandPane(is_android),
-                )
-            };
+            let (icon, tip, msg, tip_key) = (
+                icons::expand(),
+                "Expand this pane",
+                Message::ExpandPane(is_android),
+                if is_android { "expand_title_android" } else { "expand_title_local" },
+            );
             let btn = button(
                 text(icon)
                     .size(14)
@@ -472,7 +470,7 @@ impl App {
             })
             .padding([0, 4])
             .on_press(msg);
-            container(tooltip(btn, text(tip).size(11), TipPos::Bottom))
+            container(self.delayed_tip(btn, tip, tip_key, TipPos::Bottom))
                 .width(FillPortion(1))
                 .align_x(iced::Alignment::End)
                 .into()

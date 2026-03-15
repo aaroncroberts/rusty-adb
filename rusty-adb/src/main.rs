@@ -325,6 +325,8 @@ enum Message {
     QueueItemComplete(u64),
     /// A queued copy failed (fired by the copy engine)
     QueueItemFailed { id: u64, reason: String },
+    /// Remove all Done/Failed items from the queue
+    QueueClearDone,
 
     // ── Device Details dialog ─────────────────────────────────────────────────
     /// Open the device details modal and start fetching properties
@@ -387,6 +389,14 @@ enum Message {
     PreviewFailed(String),
     /// Close the preview modal (also mapped from Escape when modal is open)
     ClosePreview,
+
+    // ── Tooltip delay ─────────────────────────────────────────────────────────
+    /// Mouse entered a delayed-tooltip target — starts the 500ms reveal timer
+    TooltipHover(&'static str),
+    /// Mouse left a delayed-tooltip target — hides any showing tooltip
+    TooltipLeft,
+    /// Fired 500ms after hover start — reveals the tooltip if still hovering
+    TooltipReveal(&'static str),
 
     // ── Escape key ────────────────────────────────────────────────────────────
     /// Escape pressed — routes to ClosePreview or AndroidRenameCancel
@@ -599,6 +609,12 @@ struct App {
     /// True while `adb install` is in flight
     apps_installing: bool,
 
+    // ── Tooltip delay ─────────────────────────────────────────────────────────
+    /// Key of the tooltip target currently being hovered (None = no hover)
+    tooltip_hover: Option<&'static str>,
+    /// Key of the tooltip that is currently visible (set after 500ms delay)
+    tooltip_show: Option<&'static str>,
+
     // ── Log viewer ────────────────────────────────────────────────────────────
     /// Whether the log viewer modal is open
     log_viewer_open: bool,
@@ -683,6 +699,8 @@ impl Default for App {
             about_open: false,
             show_panel_open: None,
             theme,
+            tooltip_hover: None,
+            tooltip_show: None,
         }
     }
 }

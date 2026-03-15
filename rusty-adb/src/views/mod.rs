@@ -38,6 +38,7 @@ impl App {
                 Some(Message::OpenLogViewer),
                 None,
                 None,
+                None,
             ));
             return column(items).into();
         }
@@ -71,6 +72,7 @@ impl App {
                     .map(|_| Message::CancelTransfer),
                 Some(Message::OpenLogViewer),
                 queue_summary,
+                Some(Message::OpenQueueDialog),
                 Some(Message::OpenDeviceDetails),
             ),
         );
@@ -139,7 +141,7 @@ impl App {
         let sidebar = |label: &'static str, is_android: bool| -> Element<Message> {
             let expand_msg = Message::ExpandPane(is_android);
             // >> = expand this pane, >< = restore equal split
-            let expand_btn = tooltip(
+            let expand_btn = self.delayed_tip(
                 button(
                     text(icons::expand())
                         .size(14)
@@ -149,10 +151,11 @@ impl App {
                 .style(t.transparent_button())
                 .padding([4, 4])
                 .on_press(expand_msg),
-                text("Expand this pane").size(11),
+                "Expand this pane",
+                if is_android { "expand_android" } else { "expand_local" },
                 TipPos::Right,
             );
-            let restore_btn = tooltip(
+            let restore_btn = self.delayed_tip(
                 button(
                     text(icons::split())
                         .size(14)
@@ -162,7 +165,8 @@ impl App {
                 .style(t.transparent_button())
                 .padding([4, 4])
                 .on_press(Message::CollapsePanes),
-                text("Restore equal split").size(11),
+                "Restore equal split",
+                "restore_split",
                 TipPos::Right,
             );
             // Stack label chars vertically, centred in remaining space
@@ -490,6 +494,32 @@ impl App {
             .width(Fill)
             .style(t.warning_banner())
             .into()
+    }
+}
+
+/// Build a tooltip that only becomes visible after 500 ms of continuous hover.
+///
+/// Each call site must provide a unique `key` (`&'static str`).  On mouse
+/// enter a `TooltipHover(key)` message starts a 500 ms timer; on exit
+/// `TooltipLeft` immediately clears it.  The tooltip widget is only inserted
+/// into the element tree once `self.tooltip_show == Some(key)`.
+impl App {
+    pub(super) fn delayed_tip<'a>(
+        &self,
+        content: impl Into<Element<'a, Message>>,
+        tip_text: &'static str,
+        key: &'static str,
+        pos: TipPos,
+    ) -> Element<'a, Message> {
+        let show = self.tooltip_show;
+        let area = mouse_area(content.into())
+            .on_enter(Message::TooltipHover(key))
+            .on_exit(Message::TooltipLeft);
+        if show == Some(key) {
+            tooltip(area, text(tip_text).size(11), pos).into()
+        } else {
+            area.into()
+        }
     }
 }
 

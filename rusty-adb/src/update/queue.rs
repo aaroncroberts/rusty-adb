@@ -229,6 +229,11 @@ impl App {
         }
     }
 
+    pub(super) fn queue_clear_done(&mut self) -> Task<Message> {
+        self.copy_queue.clear_done();
+        Task::none()
+    }
+
     pub(super) fn queue_item_failed(&mut self, id: u64, reason: String) -> Task<Message> {
         tracing::warn!(id, error = %reason, "queue: item copy failed");
         // Get the filename for a useful error message before updating status
