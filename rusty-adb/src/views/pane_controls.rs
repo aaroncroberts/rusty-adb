@@ -222,7 +222,7 @@ impl App {
                             Some(icons::copy()),
                             "Copy to Device",
                             t.accent,
-                            Some(Message::ConfirmCopyToDevice),
+                            Some(Message::ShowCopyConfirm),
                         ),
                         text("Copy selected files/folders to device queue").size(11),
                         TipPos::Bottom,

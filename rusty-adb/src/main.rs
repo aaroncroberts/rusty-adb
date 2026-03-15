@@ -301,6 +301,8 @@ enum Message {
     DragCancelled,
 
     // ── Copy Queue ────────────────────────────────────────────────────────────
+    /// User clicked "Copy to Device" — opens the confirmation dialog
+    ShowCopyConfirm,
     /// User clicked "Cancel" or Escape in the copy confirm dialog
     CloseCopyConfirm,
     /// User clicked "Confirm" in the copy confirm dialog → enqueue items

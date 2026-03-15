@@ -234,6 +234,7 @@ impl App {
             Message::AndroidDeleteFailed(msg) => self.android_delete_failed(msg),
 
             // ── Copy Queue ────────────────────────────────────────────────────
+            Message::ShowCopyConfirm => self.show_copy_confirm(),
             Message::CloseCopyConfirm => self.close_copy_confirm(),
             Message::ConfirmCopyToDevice => self.confirm_copy_to_device(),
             Message::OpenQueueDialog => self.open_queue_dialog(),

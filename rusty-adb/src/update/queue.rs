@@ -11,6 +11,12 @@ use std::sync::Arc;
 impl App {
     // ── Copy Confirm Dialog ───────────────────────────────────────────────────
 
+    pub(super) fn show_copy_confirm(&mut self) -> Task<Message> {
+        tracing::debug!("copy confirm dialog opened");
+        self.copy_confirm_open = true;
+        Task::none()
+    }
+
     pub(super) fn close_copy_confirm(&mut self) -> Task<Message> {
         self.copy_confirm_open = false;
         Task::none()
@@ -185,8 +191,24 @@ impl App {
     pub(super) fn queue_item_complete(&mut self, id: u64) -> Task<Message> {
         tracing::info!(id, "queue: item copy complete");
         self.copy_queue.update_status(id, QueueStatus::Done);
-        // Advance to the next pending item
-        self.try_start_next_queue_copy()
+
+        // Refresh the destination directory so the newly copied file appears.
+        // The item's android_dest is the full file path; parent() gives the dir.
+        let dest_dir = self
+            .copy_queue
+            .items
+            .iter()
+            .find(|i| i.id == id)
+            .and_then(|i| i.android_dest.parent())
+            .map(|dir| dir.to_path_buf());
+
+        let next = self.try_start_next_queue_copy();
+        if let Some(dir) = dest_dir {
+            tracing::debug!(path = %dir.display(), "refreshing android pane after queue copy");
+            next.chain(Task::done(Message::AndroidNavigateTo(dir)))
+        } else {
+            next
+        }
     }
 
     pub(super) fn queue_item_failed(&mut self, id: u64, reason: String) -> Task<Message> {

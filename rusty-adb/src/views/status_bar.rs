@@ -129,14 +129,24 @@ impl StatusBar {
         }
         .into();
 
-        // Optional queue summary shown in the middle
-        let queue_el: Element<Message> = if let Some(q) = queue_summary {
-            text(q).size(11).color(theme.accent).into()
+        // Right cluster: optional queue message | Logs
+        // Queue message sits immediately left of "Logs" separated by a dim pipe.
+        let right_cluster: Element<Message> = if let Some(q) = queue_summary {
+            row![
+                text(q).size(11).color(theme.accent),
+                text("  |  ")
+                    .size(11)
+                    .color(theme.text_secondary.scale_alpha(0.35)),
+                logs_btn,
+            ]
+            .spacing(0)
+            .align_y(iced::Alignment::Center)
+            .into()
         } else {
-            iced::widget::Space::new(0, 0).into()
+            logs_btn
         };
 
-        let content = row![inner, iced::widget::horizontal_space(), queue_el, logs_btn]
+        let content = row![inner, iced::widget::horizontal_space(), right_cluster]
             .padding([6, 15])
             .spacing(20)
             .align_y(iced::Alignment::Center);
