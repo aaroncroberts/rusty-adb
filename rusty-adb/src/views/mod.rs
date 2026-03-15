@@ -557,8 +557,13 @@ impl App {
 /// cannot reach the underlying pane content while a modal is open.
 /// Shared by `modals` submodule — called as `super::modal_backdrop(...)`.
 pub(super) fn modal_backdrop<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    // Wrap the card in a NoOp absorber so clicks on the card itself are
+    // captured and never reach the EscapePressed handler on the outer backdrop.
+    // Clicks on the dark margins outside the card do reach the backdrop.
+    let card_absorb = mouse_area(content.into()).on_press(Message::NoOp);
+
     let backdrop = container(
-        container(content)
+        container(card_absorb)
             .center_x(Fill)
             .center_y(Fill)
             .width(Fill)
@@ -573,7 +578,7 @@ pub(super) fn modal_backdrop<'a>(content: impl Into<Element<'a, Message>>) -> El
         ..Default::default()
     });
 
-    // mouse_area absorbs all pointer events so clicks cannot pass through
-    // the overlay to the file panes beneath.
+    // Outer mouse_area fires EscapePressed only when clicking the dark margins
+    // (the card absorbs its own clicks above).
     mouse_area(backdrop).on_press(Message::EscapePressed).into()
 }

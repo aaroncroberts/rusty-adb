@@ -343,19 +343,13 @@ impl App {
             ..Default::default()
         });
 
-        // Wrap card in mouse_area BEFORE adding padding.
-        // Clicks anywhere on the card (text, empty scroll area) return Captured,
-        // preventing them from bubbling to the backdrop and closing the viewer.
-        let card_with_absorb = iced::widget::mouse_area(card).on_press(Message::NoOp);
-
-        let padded = container(card_with_absorb)
+        // modal_backdrop wraps the card in a NoOp absorber automatically.
+        // Padding keeps 36 px of dark margin visible so users can click outside to close.
+        let padded = container(card)
             .width(Fill)
             .height(Fill)
             .padding(36);
 
-        // modal_backdrop provides the dark overlay; clicks in the 36-px dark margins
-        // trigger EscapePressed (not CloseLogViewer directly), which routes through
-        // escape_pressed() and handles any in-progress confirm dialogs first.
         super::modal_backdrop(padded)
     }
 
