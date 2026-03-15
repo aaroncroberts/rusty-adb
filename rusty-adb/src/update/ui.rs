@@ -58,6 +58,14 @@ impl App {
         Task::none()
     }
 
+    pub(super) fn device_details_select_tab(
+        &mut self,
+        tab: super::super::DeviceTab,
+    ) -> Task<Message> {
+        self.device_details_tab = tab;
+        Task::none()
+    }
+
     pub(super) fn refresh_device_details(&mut self) -> Task<Message> {
         let Some(client) = self.adb_client.clone() else {
             self.device_details_loading = false;

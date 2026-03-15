@@ -152,6 +152,29 @@ impl std::fmt::Display for LogLevel {
     }
 }
 
+// ─── Device Details Tab ───────────────────────────────────────────────────────
+
+/// Which tab is active in the device details modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DeviceTab {
+    #[default]
+    Device,
+    OsBuild,
+    Connection,
+    Display,
+}
+
+impl std::fmt::Display for DeviceTab {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeviceTab::Device => f.write_str("Device"),
+            DeviceTab::OsBuild => f.write_str("OS / Build"),
+            DeviceTab::Connection => f.write_str("Connection"),
+            DeviceTab::Display => f.write_str("Display"),
+        }
+    }
+}
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -310,6 +333,8 @@ enum Message {
     DeviceDetailsFailed(String),
     /// User clicked Refresh — re-fetch all properties
     RefreshDeviceDetails,
+    /// User clicked a tab in the device details modal
+    DeviceDetailsSelectTab(DeviceTab),
 
     // ── About dialog ──────────────────────────────────────────────────────────
     /// Open the About modal
@@ -510,6 +535,8 @@ struct App {
     device_details: Option<crate::adb::DeviceDetails>,
     /// True while the async fetch is in flight
     device_details_loading: bool,
+    /// Which tab is currently active in the device details modal
+    device_details_tab: DeviceTab,
 
     // ── Copy Queue ────────────────────────────────────────────────────────────
     /// Persistent background copy queue (local → Android)
@@ -586,6 +613,7 @@ impl Default for App {
             device_details_open: false,
             device_details: None,
             device_details_loading: false,
+            device_details_tab: DeviceTab::default(),
             queue_open: false,
             copy_confirm_open: false,
             queue_editing: None,

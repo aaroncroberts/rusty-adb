@@ -246,6 +246,7 @@ impl App {
             Message::RefreshDeviceDetails => self.refresh_device_details(),
             Message::DeviceDetailsLoaded(details) => self.device_details_loaded(details),
             Message::DeviceDetailsFailed(e) => self.device_details_failed(e),
+            Message::DeviceDetailsSelectTab(tab) => self.device_details_select_tab(tab),
 
             // ── About dialog ──────────────────────────────────────────────────
             Message::OpenAbout => self.open_about(),
