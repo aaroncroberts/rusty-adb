@@ -271,6 +271,21 @@ rusty-adb/
 
 ---
 
+## Documentation
+
+Full user documentation lives in the [`docs/`](docs/) directory:
+
+| Guide | Description |
+|---|---|
+| [Getting Started](docs/getting-started.md) | Install, ADB setup, connect a device, first file transfer |
+| [File Browser](docs/file-browser.md) | Two-pane layout, view modes, sorting, multi-select |
+| [File Transfers](docs/file-transfers.md) | Push, pull, copy queue, drag-and-drop |
+| [APK & App Management](docs/apk-management.md) | Install APKs, list apps, uninstall |
+| [Device Details](docs/device-details.md) | Device info, storage, network, battery |
+| [Settings & Logs](docs/settings.md) | Configuration, log levels, in-app log viewer |
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, coding conventions, the test strategy (unit tests + mock-adb integration tests), and the PR checklist.
