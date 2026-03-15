@@ -267,6 +267,12 @@ enum Message {
     FilesHoveredLeft,
     /// A file was dropped onto the window — queue a local→android transfer
     FileDropped(PathBuf),
+    /// User pressed mouse button on the local pane while files are selected — starts in-app drag
+    LocalDragStarted,
+    /// User released the mouse over the android pane while an in-app drag was in progress
+    DroppedOnAndroid,
+    /// In-app drag was cancelled (Escape or mouse released elsewhere)
+    DragCancelled,
 
     // ── Copy Queue ────────────────────────────────────────────────────────────
     /// User clicked "Copy to Device" in local pane toolbar → show confirm dialog
@@ -475,6 +481,8 @@ struct App {
 
     /// `true` while an OS file drag is hovering over the window — shows drop highlight
     file_hover_active: bool,
+    /// `true` while an in-app drag from the local pane is in progress
+    drag_in_progress: bool,
     /// Paths pending deletion confirmation — shown in the delete confirmation banner
     delete_confirm_paths: Option<Vec<PathBuf>>,
 
@@ -561,6 +569,7 @@ impl Default for App {
             installing: false,
             daemon_error_count: 0,
             file_hover_active: false,
+            drag_in_progress: false,
             delete_confirm_paths: None,
             preview_modal: None,
             android_last_click: None,

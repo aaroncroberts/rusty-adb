@@ -208,6 +208,9 @@ impl App {
             Message::FileHovered => self.file_hovered(),
             Message::FilesHoveredLeft => self.files_hovered_left(),
             Message::FileDropped(path) => self.file_dropped(path),
+            Message::LocalDragStarted => self.local_drag_started(),
+            Message::DroppedOnAndroid => self.dropped_on_android(),
+            Message::DragCancelled => self.drag_cancelled(),
 
             // ── File operations — rename ──────────────────────────────────────
             Message::AndroidBeginRename => self.android_begin_rename(),

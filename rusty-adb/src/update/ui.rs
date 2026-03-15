@@ -294,6 +294,9 @@ impl App {
     // ── Escape routing ────────────────────────────────────────────────────────
 
     pub(super) fn escape_pressed(&mut self) -> Task<Message> {
+        if self.drag_in_progress {
+            return self.update(Message::DragCancelled);
+        }
         if self.log_viewer_open {
             return self.update(Message::CloseLogViewer);
         }

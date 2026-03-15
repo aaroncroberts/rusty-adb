@@ -324,7 +324,7 @@ impl App {
 
     /// Build the local pane content element for the current view mode.
     fn build_local_content(&self) -> Element<Message> {
-        match self.local_view_mode {
+        let content = match self.local_view_mode {
             ViewMode::List => self.local_pane.view_list(
                 &(),
                 self.theme,
@@ -336,6 +336,17 @@ impl App {
             ViewMode::Details => self.view_columns_impl(false),
             ViewMode::Grid => self.view_local_grid(),
             ViewMode::Icon => self.view_local_icon(),
+        };
+
+        // When items are selected, wrap with mouse_area so pressing and moving
+        // toward the android pane starts an in-app drag.
+        let has_selection = !self.local_pane.selected.is_empty();
+        if has_selection {
+            mouse_area(content)
+                .on_press(Message::LocalDragStarted)
+                .into()
+        } else {
+            content
         }
     }
 
@@ -367,25 +378,35 @@ impl App {
             ViewMode::Icon => self.view_android_icon(),
         };
 
-        // Wrap with drop-zone highlight
+        // Wrap with drop-zone highlight — active for both OS drops and in-app drags
         let hover = self.file_hover_active;
+        let in_app_drag = self.drag_in_progress;
         let t = self.theme;
-        container(content)
+        let drop_active = hover || in_app_drag;
+        let styled = container(content)
             .width(Fill)
             .height(Fill)
             .style(move |_theme| container::Style {
                 border: Border {
-                    color: if hover {
+                    color: if drop_active {
                         t.accent.scale_alpha(0.8)
                     } else {
                         iced::Color::TRANSPARENT
                     },
-                    width: if hover { 2.0 } else { 0.0 },
+                    width: if drop_active { 2.0 } else { 0.0 },
                     ..Default::default()
                 },
                 ..Default::default()
-            })
-            .into()
+            });
+
+        // When an in-app drag is in progress, catch the mouse release to complete the drop
+        if in_app_drag {
+            mouse_area(styled)
+                .on_release(Message::DroppedOnAndroid)
+                .into()
+        } else {
+            styled.into()
+        }
     }
 
     /// Delete confirmation banner — shown above the panes when paths are pending deletion.
