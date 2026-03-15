@@ -870,18 +870,30 @@ impl App {
 
             let tab_content: Element<Message> = match active_tab {
                 // ── Device ────────────────────────────────────────────────────
-                DeviceTab::Device => column![
-                    kv_row("Model", d.model.as_deref().unwrap_or(na), false),
-                    kv_row("Manufacturer", d.manufacturer.as_deref().unwrap_or(na), false),
-                    kv_row("Brand", d.brand.as_deref().unwrap_or(na), false),
-                    kv_row("Codename", d.device_codename.as_deref().unwrap_or(na), false),
-                    kv_row("Serial", &d.serial, false),
-                    kv_row("Emulator", is_emu, false),
-                    kv_row("CPU ABI", d.cpu_abi.as_deref().unwrap_or(na), false),
-                    kv_row("Total RAM", d.total_ram.as_deref().unwrap_or(na), false),
-                ]
-                .spacing(6)
-                .into(),
+                DeviceTab::Device => {
+                    let processor_str: String = match (
+                        d.soc_manufacturer.as_deref(),
+                        d.soc_model.as_deref(),
+                    ) {
+                        (Some(mfr), Some(mdl)) => format!("{mfr} {mdl}"),
+                        (None, Some(mdl)) => mdl.to_string(),
+                        (Some(mfr), None) => mfr.to_string(),
+                        (None, None) => na.to_string(),
+                    };
+                    column![
+                        kv_row("Model", d.model.as_deref().unwrap_or(na), false),
+                        kv_row("Manufacturer", d.manufacturer.as_deref().unwrap_or(na), false),
+                        kv_row("Brand", d.brand.as_deref().unwrap_or(na), false),
+                        kv_row("Codename", d.device_codename.as_deref().unwrap_or(na), false),
+                        kv_row("Serial", &d.serial, false),
+                        kv_row("Emulator", is_emu, false),
+                        kv_row("Processor", &processor_str, false),
+                        kv_row("CPU ABI", d.cpu_abi.as_deref().unwrap_or(na), false),
+                        kv_row("Total RAM", d.total_ram.as_deref().unwrap_or(na), false),
+                    ]
+                    .spacing(6)
+                    .into()
+                }
 
                 // ── OS / Build ────────────────────────────────────────────────
                 DeviceTab::OsBuild => column![
@@ -937,6 +949,154 @@ impl App {
         let card = container(column![header, tab_bar, body].width(Fill))
             .width(600)
             .style(t.primary_panel());
+
+        super::modal_backdrop(card)
+    }
+
+    // ── Apps Modal ────────────────────────────────────────────────────────────
+
+    pub(super) fn view_apps_modal(&self) -> Element<Message> {
+        let t = self.theme;
+
+        // ── Header ───────────────────────────────────────────────────────────
+        let header = container(
+            row![
+                text("Installed Apps").size(14).color(t.text),
+                iced::widget::horizontal_space(),
+                button(text("Refresh").size(11).color(t.accent))
+                    .style(t.transparent_button())
+                    .padding([2, 8])
+                    .on_press(Message::OpenAppsModal),
+                button(text("✕").size(11).color(t.text_secondary))
+                    .style(t.transparent_button())
+                    .padding([2, 8])
+                    .on_press(Message::CloseAppsModal),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(8),
+        )
+        .padding([10, 16])
+        .width(Fill)
+        .style(move |_| container::Style {
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // ── Package list body ─────────────────────────────────────────────
+        let body: Element<Message> = if self.apps_loading {
+            container(
+                text("Loading apps…").size(12).color(t.text_secondary),
+            )
+            .width(Fill)
+            .height(iced::Length::Fixed(300.0))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else if let Some(ref apps) = self.installed_apps {
+            if apps.is_empty() {
+                container(
+                    text("No user-installed apps found.").size(12).color(t.text_secondary),
+                )
+                .width(Fill)
+                .height(iced::Length::Fixed(300.0))
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                let rows: Vec<Element<Message>> = apps
+                    .iter()
+                    .map(|app| {
+                        let is_sel = self.apps_selected.as_deref() == Some(&app.package_id);
+                        let bg = if is_sel { Some(t.background_secondary) } else { None };
+                        let pkg = app.package_id.clone();
+                        container(
+                            button(
+                                text(&app.package_id)
+                                    .size(11)
+                                    .color(if is_sel { t.accent } else { t.text }),
+                            )
+                            .style(t.transparent_button())
+                            .padding([4, 8])
+                            .width(Fill)
+                            .on_press(Message::AppsSelectPackage(pkg)),
+                        )
+                        .style(move |_| container::Style {
+                            background: bg.map(|c| c.into()),
+                            ..Default::default()
+                        })
+                        .width(Fill)
+                        .into()
+                    })
+                    .collect();
+
+                scrollable(
+                    column(rows).width(Fill).spacing(1),
+                )
+                .height(iced::Length::Fixed(300.0))
+                .into()
+            }
+        } else {
+            container(
+                text("Open this dialog to load apps.").size(12).color(t.text_secondary),
+            )
+            .width(Fill)
+            .height(iced::Length::Fixed(300.0))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
+        };
+
+        // ── Footer: Uninstall button ──────────────────────────────────────
+        let uninstall_color = if self.apps_selected.is_some() && !self.apps_uninstalling {
+            t.error
+        } else {
+            t.error.scale_alpha(0.3)
+        };
+        let uninstall_label = if self.apps_uninstalling {
+            "Uninstalling…"
+        } else {
+            "Uninstall"
+        };
+        let uninstall_btn = {
+            let b = button(
+                text(uninstall_label).size(11).color(uninstall_color),
+            )
+            .style(t.transparent_button())
+            .padding([4, 12]);
+            if self.apps_selected.is_some() && !self.apps_uninstalling {
+                b.on_press(Message::UninstallApp)
+            } else {
+                b
+            }
+        };
+
+        let footer = container(
+            row![
+                iced::widget::horizontal_space(),
+                uninstall_btn,
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([8, 16])
+        .width(Fill)
+        .style(move |_| container::Style {
+            border: Border {
+                color: t.border,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let card = container(
+            column![header, body, footer].width(Fill),
+        )
+        .width(480)
+        .style(t.primary_panel());
 
         super::modal_backdrop(card)
     }

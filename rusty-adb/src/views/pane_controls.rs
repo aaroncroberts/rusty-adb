@@ -43,6 +43,8 @@ pub(crate) fn path_breadcrumb_segments(path: &Path) -> Vec<(String, PathBuf)> {
 pub(crate) struct PaneMenuState {
     /// Any local entry is selected (files or directories)
     pub local_sel_nonempty: bool,
+    /// Exactly one local file is selected and it has a `.apk` extension
+    pub local_sel_is_apk: bool,
     pub android_sel_has_files: bool,
     pub android_sel_single: bool,
     pub android_sel_nonempty: bool,
@@ -85,6 +87,7 @@ impl App {
     ) -> Element<'a, Message> {
         let PaneMenuState {
             local_sel_nonempty,
+            local_sel_is_apk,
             android_sel_has_files,
             android_sel_single,
             android_sel_nonempty,
@@ -167,6 +170,33 @@ impl App {
         // ── file commands ───────────────────────────────────────────────────
         let mut cmd_items: Vec<Element<Message>> = Vec::new();
         if is_android {
+            // "Install APK" — enabled when an .apk is selected in the local pane
+            if has_device && local_sel_is_apk {
+                cmd_items.push(
+                    tooltip(
+                        cmd_btn(
+                            Some(icons::add_to_queue()),
+                            "Install APK",
+                            t.accent,
+                            Some(Message::InstallApk),
+                        ),
+                        text("Install selected .apk to device").size(11),
+                        TipPos::Bottom,
+                    )
+                    .into(),
+                );
+            }
+            // "Apps" — open installed-apps manager
+            if has_device {
+                cmd_items.push(
+                    tooltip(
+                        cmd_btn(None, "Apps", t.accent, Some(Message::OpenAppsModal)),
+                        text("View and uninstall installed apps").size(11),
+                        TipPos::Bottom,
+                    )
+                    .into(),
+                );
+            }
             if has_device && no_transfer && android_sel_has_files {
                 cmd_items.push(
                     cmd_btn(
@@ -535,6 +565,7 @@ mod tests {
     fn default_state() -> PaneMenuState {
         PaneMenuState {
             local_sel_nonempty: false,
+            local_sel_is_apk: false,
             android_sel_has_files: false,
             android_sel_single: false,
             android_sel_nonempty: false,
@@ -560,6 +591,7 @@ mod tests {
         let app = crate::App::default();
         let state = PaneMenuState {
             local_sel_nonempty: false,
+            local_sel_is_apk: false,
             android_sel_has_files: true,
             android_sel_single: true,
             android_sel_nonempty: true,
@@ -574,6 +606,7 @@ mod tests {
         let app = crate::App::default();
         let state = PaneMenuState {
             local_sel_nonempty: true,
+            local_sel_is_apk: false,
             android_sel_has_files: false,
             android_sel_single: false,
             android_sel_nonempty: false,

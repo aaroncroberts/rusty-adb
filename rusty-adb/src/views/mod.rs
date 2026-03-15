@@ -89,6 +89,8 @@ impl App {
             stack![base, self.view_queue_dialog()].into()
         } else if self.copy_confirm_open {
             stack![base, self.view_copy_confirm()].into()
+        } else if self.apps_modal_open {
+            stack![base, self.view_apps_modal()].into()
         } else {
             base
         }
@@ -101,6 +103,15 @@ impl App {
 
         // ── Precompute selection flags ────────────────────────────────────────
         let local_sel_nonempty = !self.local_pane.selected.is_empty();
+        let local_sel_is_apk = self.local_pane.selected.len() == 1
+            && self
+                .local_pane
+                .selected
+                .first()
+                .and_then(|&i| self.local_pane.entries.get(i))
+                .and_then(|e| e.path.extension())
+                .map(|ext| ext.eq_ignore_ascii_case("apk"))
+                .unwrap_or(false);
         let android_sel_has_files = self.android_pane.selected.iter().any(|&i| {
             self.android_pane
                 .entries
@@ -193,6 +204,7 @@ impl App {
                     self.local_pane.show_hidden,
                     PaneMenuState {
                         local_sel_nonempty,
+                        local_sel_is_apk,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,
@@ -220,6 +232,7 @@ impl App {
                     self.android_pane.show_hidden,
                     PaneMenuState {
                         local_sel_nonempty,
+                        local_sel_is_apk,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,
@@ -252,6 +265,7 @@ impl App {
                     self.local_pane.show_hidden,
                     PaneMenuState {
                         local_sel_nonempty,
+                        local_sel_is_apk,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,
@@ -287,6 +301,7 @@ impl App {
                     self.android_pane.show_hidden,
                     PaneMenuState {
                         local_sel_nonempty,
+                        local_sel_is_apk,
                         android_sel_has_files,
                         android_sel_single,
                         android_sel_nonempty,

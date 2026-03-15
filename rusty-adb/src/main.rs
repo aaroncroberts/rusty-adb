@@ -411,6 +411,30 @@ enum Message {
     AndroidDeleteComplete,
     /// adb shell rm -rf returned an error
     AndroidDeleteFailed(String),
+
+    // ── App Management ────────────────────────────────────────────────────────
+    /// Open the installed apps modal and begin loading the package list
+    OpenAppsModal,
+    /// Close the installed apps modal
+    CloseAppsModal,
+    /// Package list loaded from the device
+    AppsLoaded(Vec<crate::adb::InstalledApp>),
+    /// Package list fetch failed
+    AppsFailed(String),
+    /// User selected a package in the apps list
+    AppsSelectPackage(String),
+    /// User pressed Uninstall — runs `adb uninstall <package_id>`
+    UninstallApp,
+    /// `adb uninstall` succeeded
+    UninstallComplete,
+    /// `adb uninstall` failed
+    UninstallFailed(String),
+    /// User pressed "Install APK" — runs `adb install -r <path>`
+    InstallApk,
+    /// `adb install` succeeded — carries the package name from stdout
+    InstallApkComplete(String),
+    /// `adb install` failed
+    InstallApkFailed(String),
 }
 
 // ─── Preview Content ──────────────────────────────────────────────────────────
@@ -548,6 +572,20 @@ struct App {
     /// Item being edited in the queue dialog: (item_id, current_dest_input)
     queue_editing: Option<(u64, String)>,
 
+    // ── App Management ────────────────────────────────────────────────────────
+    /// Whether the installed apps modal is open
+    apps_modal_open: bool,
+    /// User-installed packages loaded from the device (None = not yet loaded)
+    installed_apps: Option<Vec<crate::adb::InstalledApp>>,
+    /// True while `pm list packages` is in flight
+    apps_loading: bool,
+    /// Package ID of the currently selected app in the list
+    apps_selected: Option<String>,
+    /// True while `adb uninstall` is in flight
+    apps_uninstalling: bool,
+    /// True while `adb install` is in flight
+    apps_installing: bool,
+
     // ── Log viewer ────────────────────────────────────────────────────────────
     /// Whether the log viewer modal is open
     log_viewer_open: bool,
@@ -597,6 +635,12 @@ impl Default for App {
             delete_confirm_paths: None,
             preview_modal: None,
             android_last_click: None,
+            apps_modal_open: false,
+            installed_apps: None,
+            apps_loading: false,
+            apps_selected: None,
+            apps_uninstalling: false,
+            apps_installing: false,
             log_viewer_open: false,
             log_viewer_files: Vec::new(),
             log_viewer_selected: None,

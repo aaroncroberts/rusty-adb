@@ -7,6 +7,7 @@ use iced::Task;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod apps;
 mod file_ops;
 mod install;
 mod pane;
@@ -277,6 +278,19 @@ impl App {
             Message::PreviewReady(local_path) => self.preview_ready(local_path),
             Message::PreviewFailed(msg) => self.preview_failed(msg),
             Message::ClosePreview => self.close_preview(),
+
+            // ── App Management ────────────────────────────────────────────────
+            Message::OpenAppsModal => self.open_apps_modal(),
+            Message::CloseAppsModal => self.close_apps_modal(),
+            Message::AppsLoaded(apps) => self.apps_loaded(apps),
+            Message::AppsFailed(msg) => self.apps_failed(msg),
+            Message::AppsSelectPackage(pkg) => self.apps_select_package(pkg),
+            Message::UninstallApp => self.uninstall_app(),
+            Message::UninstallComplete => self.uninstall_complete(),
+            Message::UninstallFailed(msg) => self.uninstall_failed(msg),
+            Message::InstallApk => self.install_apk(),
+            Message::InstallApkComplete(msg) => self.install_apk_complete(msg),
+            Message::InstallApkFailed(msg) => self.install_apk_failed(msg),
         }
     }
 }

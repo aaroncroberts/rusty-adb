@@ -320,6 +320,9 @@ impl App {
         if self.preview_modal.is_some() {
             return self.update(Message::ClosePreview);
         }
+        if self.apps_modal_open {
+            return self.update(Message::CloseAppsModal);
+        }
         if self.queue_open {
             return self.update(Message::CloseQueueDialog);
         }

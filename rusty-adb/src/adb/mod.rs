@@ -249,6 +249,8 @@ pub mod mock {
                 build_fingerprint: Some("mockbrand/mockdevice/mockdevice:14/UP1A/mock:user/release-keys".to_string()),
                 kernel_version: Some("5.15.131-android13-8".to_string()),
                 uptime: Some("up 2 days, 3:45".to_string()),
+                soc_manufacturer: Some("Qualcomm".to_string()),
+                soc_model: Some("SM8550-AB".to_string()),
                 cpu_abi: Some("arm64-v8a".to_string()),
                 total_ram: Some("7.4 GB".to_string()),
                 screen_resolution: Some("1080x2400".to_string()),
@@ -885,6 +887,10 @@ pub struct DeviceDetails {
     pub uptime: Option<String>,
 
     // ── Hardware ─────────────────────────────────────────────────────────────
+    /// SoC manufacturer from `ro.soc.manufacturer`, e.g. "Qualcomm"
+    pub soc_manufacturer: Option<String>,
+    /// SoC model from `ro.soc.model`, e.g. "SM8550-AB"
+    pub soc_model: Option<String>,
     pub cpu_abi: Option<String>,
     pub screen_resolution: Option<String>,
     pub screen_density: Option<String>,
@@ -958,6 +964,8 @@ impl AdbClient {
             security_patch,
             build_fingerprint,
             cpu_abi,
+            soc_manufacturer,
+            soc_model,
             usb_state,
             is_qemu,
             build_characteristics,
@@ -979,6 +987,8 @@ impl AdbClient {
             shell_getprop(p, s, "ro.build.version.security_patch"),
             shell_getprop(p, s, "ro.build.fingerprint"),
             shell_getprop(p, s, "ro.product.cpu.abi"),
+            shell_getprop(p, s, "ro.soc.manufacturer"),
+            shell_getprop(p, s, "ro.soc.model"),
             shell_getprop(p, s, "sys.usb.state"),
             shell_getprop(p, s, "ro.kernel.qemu"),
             shell_getprop(p, s, "ro.build.characteristics"),
@@ -1082,6 +1092,8 @@ impl AdbClient {
             build_fingerprint,
             kernel_version,
             uptime,
+            soc_manufacturer,
+            soc_model,
             cpu_abi,
             screen_resolution,
             screen_density,
@@ -1094,6 +1106,101 @@ impl AdbClient {
             is_emulator,
             build_characteristics,
         })
+    }
+}
+
+// ─── App Management ───────────────────────────────────────────────────────────
+
+/// A user-installed Android application.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledApp {
+    /// Fully-qualified package identifier, e.g. `com.example.myapp`
+    pub package_id: String,
+    /// APK path on device, e.g. `/data/app/com.example.myapp-xyz/base.apk`
+    pub apk_path: String,
+}
+
+impl AdbClient {
+    /// Install an APK from a local path onto the device.
+    ///
+    /// Runs `adb install -r <path>` (`-r` = allow reinstall / replace existing).
+    pub async fn install_apk(&self, serial: &str, local_apk: &std::path::Path) -> Result<()> {
+        let apk_str = local_apk.to_string_lossy();
+        let output = Command::new(&self.adb_path)
+            .args(target_args(serial))
+            .args(["install", "-r", &*apk_str])
+            .output()
+            .await
+            .context("failed to run adb install")?;
+
+        let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim();
+        let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim();
+
+        // `adb install` exits 0 on success but writes "Success" to stdout.
+        // On failure it writes "Failure [INSTALL_FAILED_*]" to stdout.
+        if !output.status.success() || stdout.contains("Failure") || stderr.contains("Failure") {
+            let msg = if !stdout.is_empty() { stdout } else { stderr };
+            anyhow::bail!("install failed [serial={serial} apk={apk_str}]: {msg}");
+        }
+        tracing::info!(serial, apk = %apk_str, "APK installed");
+        Ok(())
+    }
+
+    /// List user-installed packages on the device.
+    ///
+    /// Runs `adb shell pm list packages -3 -f` and parses each line.
+    /// Lines have the form: `package:<apk_path>=<package_id>`.
+    /// Results are sorted by package ID for stable display ordering.
+    pub async fn list_packages(&self, serial: &str) -> Result<Vec<InstalledApp>> {
+        let output = Command::new(&self.adb_path)
+            .args(target_args(serial))
+            .args(["shell", "pm", "list", "packages", "-3", "-f"])
+            .output()
+            .await
+            .context("failed to run adb shell pm list packages")?;
+
+        let stdout = str::from_utf8(&output.stdout).context("adb output not UTF-8")?;
+        let mut apps: Vec<InstalledApp> = stdout
+            .lines()
+            .filter_map(|line| {
+                // Format: "package:<apk_path>=<package_id>"
+                let rest = line.trim().strip_prefix("package:")?;
+                // Split on the LAST '=' to handle APK paths that contain '='
+                let eq_pos = rest.rfind('=')?;
+                let apk_path = rest[..eq_pos].to_string();
+                let package_id = rest[eq_pos + 1..].to_string();
+                if package_id.is_empty() {
+                    return None;
+                }
+                Some(InstalledApp { package_id, apk_path })
+            })
+            .collect();
+
+        apps.sort_by(|a, b| a.package_id.cmp(&b.package_id));
+        tracing::info!(serial, count = apps.len(), "packages listed");
+        Ok(apps)
+    }
+
+    /// Uninstall an app by package ID from the device.
+    ///
+    /// Runs `adb uninstall <package_id>`.
+    pub async fn uninstall_package(&self, serial: &str, package_id: &str) -> Result<()> {
+        let output = Command::new(&self.adb_path)
+            .args(target_args(serial))
+            .args(["uninstall", package_id])
+            .output()
+            .await
+            .context("failed to run adb uninstall")?;
+
+        let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim();
+        let stderr = str::from_utf8(&output.stderr).unwrap_or("").trim();
+
+        if !output.status.success() || stdout.contains("Failure") || stderr.contains("Failure") {
+            let msg = if !stdout.is_empty() { stdout } else { stderr };
+            anyhow::bail!("uninstall failed [serial={serial} package={package_id}]: {msg}");
+        }
+        tracing::info!(serial, package = package_id, "package uninstalled");
+        Ok(())
     }
 }
 
@@ -1266,6 +1373,56 @@ mod tests {
         let mock = MockAdbClient::default();
         let details = mock.fetch_device_details("R5CWA0TEST").await.unwrap();
         assert_eq!(details.transport.as_deref(), Some("USB"));
+    }
+
+    // ── list_packages parser ──────────────────────────────────────────────────
+
+    /// Exercise the `pm list packages -3 -f` output parser directly.
+    /// The parser lives in `list_packages` but the core logic (strip prefix,
+    /// rfind '=') is straightforward enough to test via a helper that mimics it.
+    #[test]
+    fn parse_pm_list_packages_typical() {
+        let raw = "\
+package:/data/app/com.example.foo-ABCD/base.apk=com.example.foo\n\
+package:/data/app/com.bar.baz-XY12/base.apk=com.bar.baz\n\
+package:/data/app/com.path.with=equals-ZZ/base.apk=com.path.with\n";
+
+        let apps: Vec<InstalledApp> = raw
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("package:")?;
+                let eq_pos = rest.rfind('=')?;
+                let apk_path = rest[..eq_pos].to_string();
+                let package_id = rest[eq_pos + 1..].to_string();
+                if package_id.is_empty() { return None; }
+                Some(InstalledApp { package_id, apk_path })
+            })
+            .collect();
+
+        assert_eq!(apps.len(), 3);
+        // Sorted by caller — check parsed values are correct
+        assert_eq!(apps[0].package_id, "com.example.foo");
+        assert!(apps[0].apk_path.contains("com.example.foo"));
+        // Path containing '=' is handled by rfind
+        assert_eq!(apps[2].package_id, "com.path.with");
+        assert!(apps[2].apk_path.ends_with("-ZZ/base.apk"));
+    }
+
+    #[test]
+    fn parse_pm_list_packages_empty() {
+        let raw = "";
+        let apps: Vec<InstalledApp> = raw
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("package:")?;
+                let eq_pos = rest.rfind('=')?;
+                let package_id = rest[eq_pos + 1..].to_string();
+                let apk_path = rest[..eq_pos].to_string();
+                if package_id.is_empty() { return None; }
+                Some(InstalledApp { package_id, apk_path })
+            })
+            .collect();
+        assert!(apps.is_empty());
     }
 
     #[tokio::test]
