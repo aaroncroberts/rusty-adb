@@ -178,6 +178,8 @@ where
 
     let mut last_percent: u8 = 0;
     let mut speed_display = String::new();
+    // Collect non-progress lines (errors, warnings) for use in failure messages
+    let mut error_lines: Vec<String> = Vec::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
         // Check cancel flag after each line — zero cost when not cancelled
@@ -188,15 +190,18 @@ where
             return Ok(());
         }
 
-        tracing::trace!(line = %line, "adb stderr");
-
         if let Some(pct) = parse_progress_line(&line) {
             if pct != last_percent {
                 last_percent = pct;
                 emit(TransferEvent::Progress { percent: pct });
             }
         } else if let Some(speed) = parse_speed(&line) {
+            tracing::debug!(line = %line, "adb stderr");
             speed_display = speed;
+        } else if !line.trim().is_empty() {
+            // Non-progress, non-speed output — likely an error or warning from adb
+            tracing::warn!(line = %line, "adb stderr");
+            error_lines.push(line);
         }
     }
 
@@ -212,7 +217,12 @@ where
         tracing::info!(speed = %speed_display, "transfer complete");
         emit(TransferEvent::Complete { speed_display });
     } else {
-        let msg = format!("adb exited with {status}");
+        // Use the actual adb error output if available; fall back to exit code
+        let msg = if error_lines.is_empty() {
+            format!("adb exited with {status}")
+        } else {
+            error_lines.join("; ")
+        };
         tracing::warn!(error = %msg, "transfer failed");
         emit(TransferEvent::Failed(msg));
     }
