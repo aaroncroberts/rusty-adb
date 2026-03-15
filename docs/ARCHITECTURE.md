@@ -69,7 +69,11 @@ All application state is owned by the `App` struct:
 - `local_pane` — local filesystem state
 - `transfer_queue` — `VecDeque<TransferJob>` for batched transfers
 - `cancel_flag` — shared `Arc<AtomicBool>` for cooperative cancellation
-- `preview_modal` / `about_open` / `settings_open` — overlay state
+- `copy_queue` — `QueueManager` for persistent background copy queue
+- `preview_modal` / `about_open` / `settings_open` / `log_viewer_open` / `queue_dialog_open` — overlay state
+- `installed_apps` / `apps_loading` / `apps_selected` — app management state
+- `install_apk_confirm` / `apps_installing` / `apps_uninstalling` / `uninstall_confirm` — install/uninstall flow
+- `tooltip_hover` / `tooltip_show` — delayed tooltip state (500 ms debounce)
 - `adb_status` — connection state shown in the status bar
 - `config` — loaded from `~/.rusty-adb/config.yml`
 
@@ -81,8 +85,11 @@ Every event in the system — user clicks, timer ticks, async results — is a `
 - **Local pane**: `LocalNavigateTo`, `LocalSelectEntry`, `LocalToggleHidden`, `LocalSortBy`
 - **Android pane**: `AndroidNavigateTo`, `AndroidSelectEntry`, `AndroidEntriesLoaded`, `AndroidBeginRename`, `AndroidRenameCommit`, `AndroidBeginDelete`, `AndroidDeleteConfirm`
 - **Transfers**: `CopyToAndroid`, `CopyToLocal`, `TransferProgress`, `TransferComplete`, `TransferFailed`, `TransferCancelled`, `CancelTransfer`
-- **Modals**: `PreviewFile`, `PreviewReady`, `ClosePreview`, `OpenAbout`, `CloseAbout`, `OpenSettings`, `CloseSettings`, `SaveSettings`
-- **System**: `FileDropped`, `FileHovered`, `FilesHoveredLeft`, `EscapePressed`, `RefreshPanes`
+- **Copy queue**: `QueuePause`, `QueueResume`, `QueueRemoveItem`, `QueueClearDone`, `OpenQueueDialog`, `CloseQueueDialog`
+- **App management**: `OpenAppsDialog`, `AppsLoaded`, `AppsFailed`, `AppsSelectPackage`, `UninstallApp`, `UninstallConfirmed`, `UninstallCancel`, `UninstallComplete`, `UninstallFailed`, `InstallApk`, `InstallApkConfirmed`, `InstallApkCancel`, `InstallApkComplete`, `InstallApkFailed`
+- **Modals**: `PreviewFile`, `PreviewReady`, `ClosePreview`, `OpenAbout`, `CloseAbout`, `OpenSettings`, `CloseSettings`, `SaveSettings`, `OpenDeviceDetails`, `CloseDeviceDetails`
+- **Tooltip**: `TooltipHover(key)`, `TooltipLeft`, `TooltipReveal(key)`
+- **System**: `FileDropped`, `FileHovered`, `FilesHoveredLeft`, `EscapePressed`, `RefreshPanes`, `NoOp`
 
 ### update() (`update/mod.rs`)
 
@@ -132,8 +139,10 @@ rusty-adb/
 │       ├── lib.rs        # Library target (re-exports for integration tests)
 │       ├── config.rs     # AppConfig loaded from config.yml
 │       ├── theme.rs      # ThemeColors palette
+│       ├── icons.rs      # Nerd Font icon constants + font helpers
 │       ├── adb/          # ADB client and domain types
 │       ├── fs/           # Filesystem abstraction layer
+│       ├── queue/        # Copy queue domain model and persistence
 │       ├── file_pane/    # Generic pane widget
 │       ├── views/        # All rendering / widget code
 │       └── update/       # All state-mutation handlers
@@ -249,13 +258,14 @@ All Iced widget construction lives here. The `views/` module imports from `adb/`
 #### `views/mod.rs`
 
 - `view()` — top-level Iced view function; builds the full widget tree
-- `view_toolbar()` — top toolbar with device picker, transfer controls, and menus
-- `view_panes()` — the two-pane split layout
+- `view_panes()` — the two-pane split layout (or single-pane when expanded)
+- `delayed_tip()` — wraps any widget with a tooltip that appears after a 500 ms hover delay; keeps the widget tree structurally stable to avoid hover-state flicker
+- `modal_backdrop()` — wraps a card widget in a semi-transparent full-window overlay; absorbs clicks on the card so they don't bleed through to the content behind
 
 #### `views/status_bar.rs`
 
-- `StatusBar` — stateless widget struct
-- `StatusBar::view()` — renders either connection text or transfer progress bar + cancel button
+- `StatusBar` — stateless widget struct (holds only a `ThemeColors` reference)
+- `StatusBar::view()` — renders either connection text (clickable when connected — opens device details) or transfer progress bar + cancel button; right cluster shows queue activity text (clickable — opens queue dialog) and a Logs shortcut
 - Imports `AdbStatus` and `TransferStatus` from `crate::adb` — never defines them
 - `STATUS_BAR_HEIGHT: f32 = 30.0`
 
@@ -265,12 +275,15 @@ All Iced widget construction lives here. The `views/` module imports from `adb/`
 - `view_about_modal()` — app info, version, GitHub link
 - `view_settings_modal()` — log level and file/console logging toggles
 - `view_log_viewer_modal()` — in-app log viewer with file selector and level filter
+- `view_queue_dialog()` — copy queue browser: item list with status, pause/resume, clear completed
+- `view_device_details_modal()` — device model, Android version, serial, storage, battery
+- `view_copy_confirm()` — confirmation banner shown when an APK install is pending
 
 #### `views/banners.rs`
 
-- `view_error_banner()` — red error strip (auto-dismisses after 3 s)
-- `view_toast_banner()` — info toast strip (auto-dismisses after 3 s)
-- `view_hero_banner()` — large placeholder shown when no device is connected
+- `view_error_banner()` — red error strip with dismiss button
+- `view_toast_banner()` — info toast strip
+- `view_header()` — combined header row: Settings and Queue toolbar buttons (left) + app logo/tagline banner (right); clicking the banner opens the About dialog
 
 #### `views/pane_controls.rs`
 
@@ -288,6 +301,25 @@ All Iced widget construction lives here. The `views/` module imports from `adb/`
 
 - `view_adb_not_found()` — full-screen ADB install guide
 - Platform-specific install instructions (Homebrew, winget, manual)
+
+---
+
+### `queue/` — Copy queue
+
+The `queue/` module owns the persistent background copy queue. Nothing in `queue/` imports from `views/` or `update/`.
+
+#### `queue/mod.rs`
+
+- `QueueItem` — a single enqueued local→Android copy job (id, paths, status, timestamp)
+- `QueueStatus` — lifecycle enum: `Pending | Copying { percent } | Paused | Done | Failed { reason }`
+- `QueueManager` — owns all items, pause flag, and JSON persistence to `~/.rusty-adb/queue.json`
+  - `enqueue()` / `remove()` / `update_status()` / `update_dest()` — all auto-persist
+  - `clear_done()` — removes `Done` and `Failed` items and persists
+  - `next_pending()` — returns the first `Pending` item, or `None` when paused
+  - `summary()` — returns a `QueueSummary` (counts + active percent) for the status bar
+  - `save()` — atomic write (write-to-temp + rename) so a mid-write crash can't corrupt the file
+  - `load()` — reads JSON; items interrupted mid-copy (`Copying`) are reset to `Pending`
+- `QueueSummary` — lightweight snapshot of queue counts, used by the status bar without exposing items
 
 ---
 
@@ -322,6 +354,24 @@ All Iced widget construction lives here. The `views/` module imports from `adb/`
 - `transfer_complete()` — pops next job from the queue or clears transfer state
 - `transfer_failed()` / `transfer_cancelled()` — error and cancel paths
 - `cancel_transfer()` — sets the `Arc<AtomicBool>` cancel flag
+
+#### `update/apps.rs`
+
+- `load_packages()` — spawns `pm list packages -3 -f` via `AdbClient::list_packages()`, sets `apps_loading`
+- `apps_loaded()` / `apps_failed()` — result handlers; on failure shows an error toast
+- `apps_select_package()` — stores the selected package name, clears pending uninstall confirmation
+- `uninstall_app()` — first click: sets `uninstall_confirm = true` to show the confirm row in the UI
+- `uninstall_confirmed()` — executes `adb uninstall`, then refreshes the package list and shows a toast
+- `uninstall_cancel()` — dismisses the confirmation row without uninstalling
+- `install_apk()` — reads the selected local entry, stores it in `install_apk_confirm` for the banner
+- `install_apk_confirmed()` — executes `adb install -r`, shows toast or error
+- `install_apk_cancel()` — dismisses the install confirmation banner
+
+#### `update/queue.rs`
+
+- `queue_pause()` / `queue_resume()` — delegates to `QueueManager::set_paused()`
+- `queue_remove_item()` — removes one item by id and triggers the next transfer if one is pending
+- `queue_clear_done()` — delegates to `QueueManager::clear_done()`
 
 #### `update/install.rs`
 
@@ -383,18 +433,21 @@ Dependencies flow strictly downward. No upward or sideways imports are allowed a
 ```
 main.rs
    ├── update/          ← dispatches messages, mutates App
-   │      └── adb/      ← calls AdbClient methods
+   │      ├── adb/      ← calls AdbClient methods
+   │      └── queue/    ← mutates QueueManager
    ├── views/           ← renders state to widgets
-   │      └── adb/      ← reads AdbStatus, TransferStatus (domain types)
+   │      ├── adb/      ← reads AdbStatus, TransferStatus (domain types)
+   │      ├── queue/    ← reads QueueSummary, QueueItem
    │      └── file_pane/ ← embeds pane views
    ├── file_pane/       ← generic pane widget
    │      └── fs/       ← FileSystem trait, DirEntry
    ├── adb/             ← ADB client + domain types (no app imports)
    ├── fs/              ← filesystem abstraction (no app imports)
-   └── config.rs / theme.rs / lib.rs
+   ├── queue/           ← copy queue domain + persistence (no app imports)
+   └── config.rs / theme.rs / icons.rs / lib.rs
 ```
 
-Key invariant: `adb/` and `fs/` do not import from `views/`, `update/`, or `file_pane/`. Domain types (`AdbStatus`, `TransferStatus`, `DirEntry`) live at the bottom of the dependency graph so every layer can use them without circular imports.
+Key invariant: `adb/`, `fs/`, and `queue/` do not import from `views/`, `update/`, or `file_pane/`. Domain types (`AdbStatus`, `TransferStatus`, `DirEntry`, `QueueSummary`) live at the bottom of the dependency graph so every layer can use them without circular imports.
 
 ---
 
@@ -472,6 +525,7 @@ User double-clicks an Android entry (image or text)
 | `adb/parser.rs` | `parse_ls_output`, `DeviceState::from_str`, display formatting |
 | `adb/transfer.rs` | `parse_progress_line`, `parse_speed`, failure path on bad exit code |
 | `adb/mod.rs` | `AdbStatus::text()` output for all variants |
+| `queue/mod.rs` | Enqueue/remove/update, pause, `QueueSummary` counts, JSON persist+reload roundtrip, interrupted-copy reset |
 | `config.rs` | YAML parsing, default fallbacks |
 | `fs/mod.rs` | `SortField` ordering, `DirEntry` formatting |
 

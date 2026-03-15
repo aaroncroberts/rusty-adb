@@ -77,15 +77,10 @@ impl App {
             .align_x(iced::Alignment::End);
 
         // ── Left: toolbar buttons ─────────────────────────────────────────
-        // Settings: gear icon + "Settings" label (S highlighted as accelerator key)
         let settings_btn = button(
             row![
                 text(icons::settings()).font(icons::font()).size(14).color(t.text),
-                row![
-                    text("S").size(12).color(t.accent),
-                    text("ettings").size(12).color(t.text),
-                ]
-                .spacing(0),
+                text("Settings").size(12).color(t.text),
             ]
             .spacing(10)
             .align_y(iced::Alignment::Center),

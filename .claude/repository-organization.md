@@ -15,22 +15,24 @@ rusty-adb/                     # Cargo workspace root
 │   │   ├── config.rs          # AppConfig / LogConfig (YAML via serde)
 │   │   ├── theme.rs           # ThemeColors + style factory methods
 │   │   ├── adb/               # ADB client + domain types (base layer)
-│   │   │   ├── mod.rs         #   AdbClient, AdbStatus, AdbDevice, DeviceState
+│   │   │   ├── mod.rs         #   AdbClient, AdbStatus, AdbDevice, InstalledApp
 │   │   │   ├── parser.rs      #   ls -la parser (pure functions, unit tested)
 │   │   │   └── transfer.rs    #   TransferJob, TransferEvent, TransferStatus, run_transfer
 │   │   ├── fs/                # Filesystem abstraction layer
 │   │   │   ├── mod.rs         #   FileSystem trait, DirEntry, FsError, PaneState, SortField
 │   │   │   ├── local.rs       #   LocalFs implementation
 │   │   │   └── android.rs     #   AndroidFs + AndroidContext implementation
+│   │   ├── queue/             # Background copy queue (base layer — no app imports)
+│   │   │   └── mod.rs         #   QueueItem, QueueStatus, QueueManager, QueueSummary
 │   │   ├── file_pane/         # Generic FilePane<FS> widget
 │   │   │   ├── mod.rs         #   State management, rename flow, multi-select
 │   │   │   ├── list_view.rs   #   List mode + loading spinner
 │   │   │   └── shared_views.rs#   Breadcrumb strip + error state
-│   │   ├── views/             # All Iced rendering (depends on adb/, fs/)
-│   │   │   ├── mod.rs         #   view(), view_toolbar(), view_panes()
-│   │   │   ├── status_bar.rs  #   StatusBar widget
-│   │   │   ├── modals.rs      #   Preview, log viewer, about, settings
-│   │   │   ├── banners.rs     #   Error, toast, hero banners
+│   │   ├── views/             # All Iced rendering (depends on adb/, fs/, queue/)
+│   │   │   ├── mod.rs         #   view(), delayed_tip(), modal_backdrop(), view_panes()
+│   │   │   ├── status_bar.rs  #   StatusBar widget (connection, transfer, queue)
+│   │   │   ├── modals.rs      #   Preview, queue dialog, device details, log viewer, settings
+│   │   │   ├── banners.rs     #   Error, toast banners; view_header() toolbar
 │   │   │   ├── pane_controls.rs # Views/Show dropdowns, pane title bars
 │   │   │   ├── rendering.rs   #   Grid, icon, columns (Details) layouts
 │   │   │   └── setup.rs       #   ADB not-found install guide
@@ -39,6 +41,8 @@ rusty-adb/                     # Cargo workspace root
 │   │       ├── pane.rs        #   Navigation, sorting, selection
 │   │       ├── file_ops.rs    #   Rename, delete, preview
 │   │       ├── transfer.rs    #   Transfer queue, progress, cancel
+│   │       ├── apps.rs        #   APK install, package list, uninstall
+│   │       ├── queue.rs       #   Copy queue pause/resume/clear
 │   │       ├── install.rs     #   ADB install flow + daemon restart
 │   │       └── ui.rs          #   View modes, settings, log viewer, banners
 │   └── tests/
@@ -65,18 +69,21 @@ Dependencies must flow strictly downward. Violating this creates circular import
 
 ```
 main.rs
-  ├── update/      ← mutates App state
-  │     └── adb/  ← calls AdbClient methods
-  ├── views/       ← renders state into widgets
-  │     ├── adb/  ← reads AdbStatus, TransferStatus
+  ├── update/       ← mutates App state
+  │     ├── adb/   ← calls AdbClient methods
+  │     └── queue/ ← mutates QueueManager
+  ├── views/        ← renders state into widgets
+  │     ├── adb/   ← reads AdbStatus, TransferStatus
+  │     ├── queue/ ← reads QueueSummary, QueueItem
   │     └── file_pane/
-  ├── file_pane/   ← generic pane widget
-  │     └── fs/   ← FileSystem trait, DirEntry
-  ├── adb/         ← NO imports from views/, update/, file_pane/
-  └── fs/          ← NO imports from views/, update/, file_pane/
+  ├── file_pane/    ← generic pane widget
+  │     └── fs/    ← FileSystem trait, DirEntry
+  ├── adb/          ← NO imports from views/, update/, file_pane/
+  ├── fs/           ← NO imports from views/, update/, file_pane/
+  └── queue/        ← NO imports from views/, update/, file_pane/
 ```
 
-**Key invariant:** Domain types (`AdbStatus`, `TransferStatus`, `DirEntry`) live at the base of the dependency graph. If a `views/` or `update/` module needs a type, that type belongs in `adb/` or `fs/` — not in the widget module.
+**Key invariant:** Domain types (`AdbStatus`, `TransferStatus`, `DirEntry`, `QueueSummary`) live at the base of the dependency graph. If a `views/` or `update/` module needs a type, that type belongs in `adb/`, `fs/`, or `queue/` — not in the widget module.
 
 ---
 
@@ -86,12 +93,14 @@ main.rs
 | --- | --- |
 | New ADB command | `adb/mod.rs` (add method to `AdbClient`) |
 | New ADB parsing logic | `adb/parser.rs` |
-| New domain state type | `adb/mod.rs` (for ADB state) or `fs/mod.rs` (for fs state) |
+| New domain state type | `adb/mod.rs` (for ADB state), `fs/mod.rs` (for fs state), or `queue/mod.rs` (for queue state) |
 | New filesystem backend | New file in `fs/` + impl `FileSystem` trait |
 | New widget / rendering helper | `views/` — pick the most relevant existing file or add a new one |
 | New status bar widget | `views/status_bar.rs` |
 | New modal dialog | `views/modals.rs` |
 | New `Message` handler | Add the `Message` variant in `main.rs`, add the handler method in the most relevant `update/` file |
+| App management feature | `update/apps.rs` (handler) + `views/modals.rs` (UI) |
+| Queue feature | `update/queue.rs` (handler) + `queue/mod.rs` (domain) |
 | New pane behaviour | `file_pane/mod.rs` (state) + `file_pane/list_view.rs` or `file_pane/shared_views.rs` (view) |
 | New config field | `config.rs` |
 
@@ -195,4 +204,4 @@ Pure functions get `#[cfg(test)]` blocks in their own file. The most important o
 4. **Monolithic files** — if a file grows past ~300 lines with distinct concerns, split it into module directory form (`foo.rs` → `foo/mod.rs` + `foo/concern.rs`)
 5. **Import loops** — `adb/` importing from `views/` or vice versa through some indirect chain
 
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14

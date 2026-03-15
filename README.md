@@ -39,13 +39,18 @@ Browse your Android device's file system, transfer files in both directions, pre
 | **Show dropdown** | Toggle individual columns (Type, Size, Modified) and hidden files per pane |
 | **Device auto-detection** | Polls `adb devices` every 2 s; connects automatically when a device is authorised |
 | **File transfers** | Copy files to/from Android with a live progress bar and transfer speed display |
+| **Copy queue** | Background transfer queue with pause/resume, persistent across restarts, progress in the status bar |
 | **Drag-and-drop** | Drop files from Finder/Explorer onto the app to push them to the current Android directory |
 | **Multi-file selection** | Select multiple files and transfer them all in one queued batch |
+| **APK install** | Select an `.apk` on the local side and install it directly to the connected device |
+| **App management** | View all installed apps, uninstall with confirmation — accessible from the pane toolbar |
+| **Device details** | View device model, Android version, serial, storage, and battery from the status bar |
 | **File preview** | Preview images (PNG, JPG, GIF, WebP, BMP) and text files directly in the app |
 | **Rename & delete** | Rename or delete files on the Android device with confirmation prompts |
+| **In-app log viewer** | Browse rotating log files with per-level filtering without leaving the app |
 | **Settings** | Configure log level, console logging, and file logging via a persistent `config.yml` |
 | **About dialog** | App version, GitHub link, and license info |
-| **Coloured status bar** | Connection state (disconnected / unauthorized / connected) and live transfer progress |
+| **Coloured status bar** | Connection state, live transfer progress, queue activity, and Logs shortcut |
 
 ---
 
@@ -128,12 +133,19 @@ cargo test --all
 cargo clippy --all-targets -- -D warnings
 ```
 
-### Install to ~/bin or /usr/local/bin
+### Build a release binary and install
 
 ```bash
+# Build the release binary
+./scripts/build.sh
+# The binary is at: ./target/release/rusty-adb
+
+# Install to ~/bin (default) or a custom prefix
 ./scripts/install.sh
-# or with a custom prefix:
 ./scripts/install.sh --prefix ~/.local/bin
+
+# Or install with cargo directly
+cargo install --path rusty-adb
 ```
 
 ---
@@ -161,7 +173,8 @@ All scripts accept `--help`.
 | `F5` | Refresh both panes |
 | `F2` | Rename selected Android file |
 | `Backspace` | Navigate up in the local pane |
-| `Escape` | Close modal (preview → about → settings → clear error) |
+| `S` | Open Settings |
+| `Escape` | Close modal (log viewer → settings → about → preview → rename cancel → clear error) |
 
 ---
 
@@ -216,23 +229,26 @@ rusty-adb/
 │   │   ├── lib.rs         # Library target (re-exports for integration tests)
 │   │   ├── config.rs      # AppConfig loaded from config.yml
 │   │   ├── theme.rs       # ThemeColors palette + style factory methods
+│   │   ├── icons.rs       # Nerd Font icon constants + font helpers
 │   │   ├── adb/           # ADB client, domain types, transfer engine
-│   │   │   ├── mod.rs     #   AdbClient, AdbStatus, AdbDevice, DeviceState
+│   │   │   ├── mod.rs     #   AdbClient, AdbStatus, AdbDevice, InstalledApp
 │   │   │   ├── parser.rs  #   ls -la output parser (pure, fully tested)
 │   │   │   └── transfer.rs#   TransferJob, TransferEvent, TransferStatus, run_transfer
 │   │   ├── fs/            # Filesystem abstraction
 │   │   │   ├── mod.rs     #   FileSystem trait, DirEntry, FsError, PaneState, SortField
 │   │   │   ├── local.rs   #   LocalFs (host filesystem backend)
 │   │   │   └── android.rs #   AndroidFs, AndroidContext (ADB backend)
+│   │   ├── queue/         # Copy queue: domain model, persistence, manager
+│   │   │   └── mod.rs     #   QueueItem, QueueStatus, QueueManager, QueueSummary
 │   │   ├── file_pane/     # Generic two-pane widget
 │   │   │   ├── mod.rs     #   FilePane<FS> struct, state management, rename/select
 │   │   │   ├── list_view.rs      # List-mode and loading-spinner views
 │   │   │   └── shared_views.rs   # Breadcrumb strip, error state widget
 │   │   ├── views/         # All Iced widget rendering
-│   │   │   ├── mod.rs     #   view(), view_toolbar(), view_panes()
-│   │   │   ├── status_bar.rs     # StatusBar widget (reads AdbStatus/TransferStatus)
-│   │   │   ├── modals.rs         # Preview, log viewer, about, settings overlays
-│   │   │   ├── banners.rs        # Error, toast, hero banners
+│   │   │   ├── mod.rs     #   view(), delayed_tip(), modal_backdrop(), view_panes()
+│   │   │   ├── status_bar.rs     # StatusBar widget (connection, transfer, queue)
+│   │   │   ├── modals.rs         # Preview, queue dialog, device details, log viewer, settings
+│   │   │   ├── banners.rs        # Error, toast banners; view_header() toolbar
 │   │   │   ├── pane_controls.rs  # Views/Show dropdowns, pane title bars
 │   │   │   ├── rendering.rs      # Grid, icon, columns (Details) layouts
 │   │   │   └── setup.rs          # ADB not-found install guide
@@ -241,6 +257,8 @@ rusty-adb/
 │   │       ├── pane.rs    #   Navigation, sorting, selection for both panes
 │   │       ├── file_ops.rs#   Rename, delete, preview
 │   │       ├── transfer.rs#   Transfer queue, progress, complete, cancel
+│   │       ├── apps.rs    #   APK install, package list, uninstall
+│   │       ├── queue.rs   #   Copy queue pause/resume/clear handlers
 │   │       ├── install.rs #   ADB install flow, daemon restart
 │   │       └── ui.rs      #   View modes, settings, log viewer, banners, escape routing
 │   └── tests/

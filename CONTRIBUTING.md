@@ -91,6 +91,7 @@ Logic that can be tested without a real device or process lives in `#[cfg(test)]
 - `adb/parser.rs` — `parse_ls_output`, `DeviceState::from_str`, display formatting
 - `adb/transfer.rs` — `parse_progress_line`, `parse_speed`, the `run_transfer_emits_failed_on_bad_exit` path
 - `adb/mod.rs` — `AdbStatus::text()` output for every variant
+- `queue/mod.rs` — `QueueManager` enqueue/remove/update, pause, `QueueSummary` counts, JSON persist+reload roundtrip
 - `config.rs` — YAML parsing, default fallbacks
 - `fs/mod.rs` — `SortField` ordering, `DirEntry` formatting
 
@@ -167,12 +168,20 @@ Types: `feat` · `fix` · `refactor` · `test` · `docs` · `chore` · `style`
 
 Source is organised into focused module directories under `src/`. Each directory has a `mod.rs` that owns the public API and delegates to sibling files for large or distinct concerns:
 
-- `src/adb/` — ADB client, domain types (`AdbStatus`, `TransferStatus`), and the transfer engine
+- `src/adb/` — ADB client, domain types (`AdbStatus`, `TransferStatus`, `InstalledApp`), and the transfer engine
 - `src/fs/` — `FileSystem` trait, `DirEntry`, and both filesystem backends (local + Android)
+- `src/queue/` — copy queue domain model (`QueueItem`, `QueueManager`), JSON persistence, `QueueSummary`
 - `src/file_pane/` — generic `FilePane<FS>` pane widget and its view helpers
 - `src/views/` — all Iced widget rendering (status bar, modals, banners, pane controls)
-- `src/update/` — all `App::update()` handlers, one focused `impl App` block per file
-- `src/config.rs` and `src/theme.rs` — single-file modules (small enough to not need a directory)
+- `src/update/` — all `App::update()` handlers, one focused `impl App` block per file:
+  - `pane.rs` — navigation, sorting, selection
+  - `file_ops.rs` — rename, delete, preview
+  - `transfer.rs` — transfer queue, progress, cancel
+  - `apps.rs` — APK install, package listing, uninstall
+  - `queue.rs` — copy queue pause/resume/clear
+  - `install.rs` — ADB install flow, daemon restart
+  - `ui.rs` — view modes, settings, log viewer, banners, escape routing
+- `src/config.rs`, `src/theme.rs`, `src/icons.rs` — single-file modules
 
 Integration tests live in `tests/` at the crate root. Developer scripts live in `scripts/` at the workspace root. Architecture and design docs live in `docs/`.
 
